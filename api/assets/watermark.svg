@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="110">
+  <defs>
+    <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0B2CC6"/>
+      <stop offset="100%" stop-color="#1E4AFF"/>
+    </linearGradient>
+  </defs>
+  <g opacity="0.28">
+    <rect x="0" y="38" width="300" height="2" rx="1" fill="url(#brandGrad)"/>
+    <text x="150" y="30" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="22" fill="url(#brandGrad)" letter-spacing="6">SONG THANH</text>
+    <text x="150" y="96" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="400" font-size="10" fill="url(#brandGrad)" letter-spacing="2" opacity="0.7">THIET BI DIEN &amp; VAT TU CONG NGHIEP</text>
+  </g>
+</svg>

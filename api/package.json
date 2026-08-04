@@ -1,0 +1,64 @@
+{
+  "name": "song-thanh-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Song Thanh backend API foundation.",
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --require ts-node/register --test tests/unit/*.test.ts",
+    "import:product-images": "ts-node --project tsconfig.json scripts/one-time-import-product-images.ts",
+    "backfill:variant-specs": "ts-node --project tsconfig.json scripts/backfill-variant-specs-from-excel.ts",
+    "backfill:mpe-specs": "ts-node --project tsconfig.json scripts/backfill-variant-specs-from-mpe-result.ts",
+    "backfill:product-content": "ts-node --project tsconfig.json scripts/backfill-product-content-from-files.ts",
+    "backfill:product-highlights": "ts-node --project tsconfig.json scripts/backfill-product-highlight-specs.ts",
+    "backfill:mpe-variant-descriptions": "ts-node --project tsconfig.json scripts/backfill-mpe-variant-descriptions-from-intro.ts",
+    "backfill:public-variants": "ts-node --project tsconfig.json scripts/backfill-public-variant-publish-status.ts",
+    "backfill:description-report": "ts-node --project tsconfig.json scripts/backfill-product-descriptions-from-report.ts",
+    "import:kingled-zip": "ts-node --project tsconfig.json scripts/import-kingled-from-zip.ts",
+    "db:check": "node dist/main.js --db-check",
+    "migrate:latest": "knex migrate:latest --knexfile knexfile.js",
+    "migrate:rollback": "knex migrate:rollback --knexfile knexfile.js",
+    "seed:admin": "knex seed:run --specific=202604250001_admin_auth_seed.js --knexfile knexfile.js",
+    "seed:run": "knex seed:run --knexfile knexfile.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1098.0",
+    "@nestjs/common": "^11.1.27",
+    "@nestjs/core": "^11.1.27",
+    "@nestjs/platform-express": "^11.1.27",
+    "@nestjs/throttler": "^6.5.0",
+    "bcryptjs": "^2.4.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "dotenv": "^16.4.7",
+    "helmet": "^8.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "jszip": "^3.10.1",
+    "knex": "^3.1.0",
+    "pg": "^8.13.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "sanitize-html": "^2.17.6",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.23",
+    "@nestjs/schematics": "^11.1.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.2",
+    "@types/sanitize-html": "^2.16.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "@nestjs/platform-express": {
+      "multer": "2.2.0"
+    },
+    "postcss": "8.5.25"
+  }
+}
