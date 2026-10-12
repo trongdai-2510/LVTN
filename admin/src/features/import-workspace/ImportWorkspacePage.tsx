@@ -1,17 +1,16 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Archive,
-  ArrowRightLeft,
-  CheckCircle2,
-  Clock3,
   Database,
   Download,
   FileDown,
   FileSpreadsheet,
   Filter,
+  MoreVertical,
   PackageSearch,
   Plus,
   RotateCcw,
@@ -23,7 +22,7 @@ import {
 
 import { Pagination } from '@/components/data-table/Pagination';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { Button, LinkButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
@@ -40,6 +39,18 @@ import { endpoints } from '@/lib/api-endpoints';
 import { cn } from '@/lib/cn';
 import { formatDate, formatValue } from '@/lib/formatters';
 import { PERMISSIONS } from '@/lib/permissions';
+import {
+  downloadExportFile,
+  type ExportCell,
+  type ExportTable
+} from '@/lib/exportFile';
+import {
+  exportDateRangeLabel,
+  filterRowsByExportDateRange,
+  validateExportDateRange,
+  type ExportDateField
+} from './exportDateRange';
+import { collectExportPages } from './exportPagination';
 
 type ImportRow = Record<string, unknown>;
 
@@ -79,19 +90,15 @@ type ExportFilterState = {
   customerIncludeQuotes: boolean;
   customerIncludeLastInteraction: boolean;
   customerIncludeSystemInfo: boolean;
+  dateField: ExportDateField;
+  dateFrom: string;
+  dateTo: string;
 };
 
 type ExportQueryFilterState = {
   brandId: string;
   categoryId: string;
   status: ExportDataStatus;
-};
-
-type ExcelCell = string | number | boolean | null | undefined;
-
-type ExcelTable = {
-  title: string;
-  rows: Array<Record<string, ExcelCell>>;
 };
 
 const EXPORT_PAGE_SIZE = 100;
@@ -134,49 +141,6 @@ const exportPurposes: Array<{
   }
 ];
 
-const exportTemplates: Array<{
-  key: ExportTemplateKey;
-  title: string;
-  description: string;
-  includes: string[];
-  readiness: 'ready-source' | 'future';
-}> = [
-  {
-    key: 'product_catalog',
-    title: 'Catalog sản phẩm',
-    description: 'Nhóm sản phẩm, biến thể, danh mục và thương hiệu liên quan.',
-    includes: ['Nhóm sản phẩm', 'Biến thể', 'Danh mục', 'Thương hiệu'],
-    readiness: 'ready-source'
-  },
-  {
-    key: 'taxonomy_brand',
-    title: 'Danh mục & thương hiệu',
-    description: 'Bảng phân cấp danh mục và danh sách thương hiệu đang quản lý.',
-    includes: ['Danh mục cha/con', 'Thương hiệu', 'Trạng thái'],
-    readiness: 'ready-source'
-  },
-  {
-    key: 'technical_documents',
-    title: 'Tài liệu kỹ thuật',
-    description: 'Metadata tài liệu, file liên kết và phạm vi sản phẩm đang dùng.',
-    includes: ['Tài liệu', 'File liên kết', 'Nhóm sản phẩm'],
-    readiness: 'ready-source'
-  },
-  {
-    key: 'customers',
-    title: 'Khách hàng & liên hệ',
-    description: 'Danh sách khách hàng tổng hợp: công ty, số điện thoại, email và số lần tương tác.',
-    includes: ['Khách hàng', 'Liên hệ', 'Báo giá', 'Tương tác gần nhất'],
-    readiness: 'ready-source'
-  },
-  {
-    key: 'future_data',
-    title: 'Dữ liệu mở rộng sau này',
-    description: 'Khung mẫu giữ chỗ cho dịch vụ, dự án, bài viết hoặc dữ liệu mới.',
-    includes: ['Mẫu tương lai', 'Bộ lọc riêng', 'Quyền riêng'],
-    readiness: 'future'
-  }
-];
 
 const exportFormats: Array<{
   key: ExportFormat;
@@ -245,34 +209,37 @@ async function fetchAllListItems(
   endpoint: string,
   params: URLSearchParams = new URLSearchParams()
 ) {
-  const items: ImportRow[] = [];
-  let page = 1;
-  let pageCount = 1;
+  const items = await collectExportPages<ImportRow>({
+    maxPages: EXPORT_MAX_PAGES,
+    pageSize: EXPORT_PAGE_SIZE,
+    fetchPage: async (page, pageSize) => {
+      const nextParams = new URLSearchParams(params);
+      nextParams.set('page', String(page));
+      nextParams.set('page_size', String(pageSize));
 
-  do {
-    const nextParams = new URLSearchParams(params);
-    nextParams.set('page', String(page));
-    nextParams.set('page_size', String(EXPORT_PAGE_SIZE));
+      const result = await apiClient.get<unknown>(`${endpoint}?${nextParams.toString()}`);
+      const pageItems = extractItems(result);
 
-    const result = await apiClient.get<unknown>(`${endpoint}?${nextParams.toString()}`);
-    const pageItems = extractItems(result);
-    items.push(...pageItems);
-
-    const pagination = extractPagination(result, items.length);
-    const rawPagination =
-      result && typeof result === 'object'
-        ? (result as { pagination?: { page_count?: number } }).pagination
-        : null;
-    pageCount = Math.max(
-      1,
-      Number(rawPagination?.page_count) ||
-        Math.ceil(
-          Number(pagination.total || items.length) /
-            Math.max(1, Number(pagination.page_size || EXPORT_PAGE_SIZE))
-        )
-    );
-    page += 1;
-  } while (page <= pageCount && page <= EXPORT_MAX_PAGES);
+      const pagination = extractPagination(result, pageItems.length);
+      const rawPagination =
+        result && typeof result === 'object'
+          ? (result as { pagination?: { page_count?: number } }).pagination
+          : null;
+      const pageCount = Math.max(
+        1,
+        Number(rawPagination?.page_count) ||
+          Math.ceil(
+            Number(pagination.total || pageItems.length) /
+              Math.max(1, Number(pagination.page_size || pageSize))
+          )
+      );
+      return {
+        items: pageItems,
+        pageCount,
+        total: Number(pagination.total ?? pageItems.length)
+      };
+    }
+  });
 
   return uniqueRecordsById(items);
 }
@@ -297,7 +264,9 @@ function exportFilterHasCondition(filters: ExportFilterState) {
     filters.brandId ||
       filters.categoryParentId ||
       filters.categoryChildId ||
-      filters.status !== 'all'
+      filters.status !== 'all' ||
+      filters.dateFrom ||
+      filters.dateTo
   );
 }
 
@@ -507,7 +476,7 @@ function productVariantRows(items: ImportRow[]) {
     'Nhóm sản phẩm': recordText(item, 'product_group_name'),
     SKU: recordText(item, 'sku'),
     'Mã ngoài': recordText(item, 'external_code'),
-    'Mã model': recordText(item, 'model_code'),
+    'Mã sản phẩm': recordText(item, 'model_code'),
     'Tên biến thể': recordText(item, 'variant_name'),
     'Mô tả': recordText(item, 'detailed_description'),
     'Giá hiển thị': formatValue(item.public_price_mode),
@@ -548,7 +517,7 @@ function brandRows(items: ImportRow[]) {
 
 function customerRows(items: ImportRow[], options: CustomerExportColumnOptions) {
   return items.map((item) => {
-    const row: Record<string, ExcelCell> = {};
+    const row: Record<string, ExportCell> = {};
 
     if (options.includeSystemInfo) {
       row.ID = recordText(item, 'id');
@@ -624,39 +593,16 @@ function getSelectedRecordLabel(items: ImportRow[], id: string, emptyLabel: stri
   return match ? recordName(match) : 'Đã chọn';
 }
 
-function escapeHtml(value: ExcelCell) {
-  const text = value == null ? '' : String(value);
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function renderExcelTable(table: ExcelTable) {
-  const rows = table.rows;
-  if (rows.length === 0) {
-    return `<h2>${escapeHtml(table.title)}</h2><p>Không có dữ liệu.</p>`;
-  }
-
-  const headers = Object.keys(rows[0]);
-  const headerHtml = headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('');
-  const bodyHtml = rows
-    .map(
-      (row) =>
-        `<tr>${headers
-          .map((header) => `<td>${escapeHtml(row[header])}</td>`)
-          .join('')}</tr>`
-    )
-    .join('');
-
-  return `<h2>${escapeHtml(table.title)}</h2><table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
-}
-
 function localDateStamp(date = new Date()) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
+}
+
+function localIsoDate(daysAgo = 0) {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() - daysAgo);
+  return localDateStamp(date);
 }
 
 function filenameToken(value: string) {
@@ -670,54 +616,22 @@ function filenameToken(value: string) {
   );
 }
 
-function downloadExcelFile({
-  filename,
-  title,
-  tables
-}: {
-  filename: string;
-  title: string;
-  tables: ExcelTable[];
-}) {
-  const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <style>
-    body { font-family: Arial, sans-serif; }
-    h1 { font-size: 18px; }
-    h2 { margin-top: 24px; font-size: 15px; }
-    table { border-collapse: collapse; margin-bottom: 20px; }
-    th, td { border: 1px solid #c8ceda; padding: 6px 8px; mso-number-format:"\\@"; }
-    th { background: #e8eef8; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <h1>${escapeHtml(title)}</h1>
-  ${tables.map(renderExcelTable).join('')}
-</body>
-</html>`;
-  const blob = new Blob(['\ufeff', html], {
-    type: 'application/vnd.ms-excel;charset=utf-8'
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename.endsWith('.xls') ? filename : `${filename}.xls`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+function exportDateFilenameToken(filters: ExportFilterState) {
+  if (!filters.dateFrom && !filters.dateTo) return '';
+  return `tu-${filters.dateFrom || 'dau'}-den-${filters.dateTo || 'nay'}`;
 }
 
 export function ImportWorkspacePage() {
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams.get('q') ?? '';
+  const routeStatus = searchParams.get('status') ?? '';
   const [authState, setAuthState] = useState<AuthState>(() => authStore.getState());
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<unknown>(null);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('import');
-  const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('');
+  const [query, setQuery] = useState(routeQuery);
+  const [status, setStatus] = useState(routeStatus);
   const [deletedScope, setDeletedScope] = useState('active');
   const [page, setPage] = useState(1);
   const [listActionError, setListActionError] = useState<unknown>(null);
@@ -742,7 +656,10 @@ export function ImportWorkspacePage() {
     customerIncludeContacts: true,
     customerIncludeQuotes: true,
     customerIncludeLastInteraction: true,
-    customerIncludeSystemInfo: false
+    customerIncludeSystemInfo: false,
+    dateField: 'updated_at',
+    dateFrom: '',
+    dateTo: ''
   });
   const [exportBrands, setExportBrands] = useState<ImportRow[]>([]);
   const [exportCategories, setExportCategories] = useState<ImportRow[]>([]);
@@ -754,6 +671,13 @@ export function ImportWorkspacePage() {
   const [exporting, setExporting] = useState(false);
   const [exportActionError, setExportActionError] = useState<unknown>(null);
   const [exportActionMessage, setExportActionMessage] = useState('');
+
+  useEffect(() => {
+    setQuery(routeQuery);
+    setStatus(routeStatus);
+    setPage(1);
+    setActiveTab('import');
+  }, [routeQuery, routeStatus]);
 
   useEffect(() => {
     setAuthState(authStore.hydrate());
@@ -880,6 +804,12 @@ export function ImportWorkspacePage() {
 
   const items = useMemo(() => extractItems(data), [data]);
   const pagination = extractPagination(data, items.length);
+  const actionableBatch = items.find((item) => isImportBatchActionable(item));
+  const readyBatchCount = items.filter((item) => isImportBatchReady(item)).length;
+  const issueBatchCount = items.filter((item) => isImportBatchActionable(item)).length;
+  const completedBatchCount = items.filter(
+    (item) => String(item.status || '').toLowerCase() === 'applied'
+  ).length;
   const hasActiveFilters = Boolean(
     query.trim() || status || deletedScope !== 'active'
   );
@@ -921,7 +851,13 @@ export function ImportWorkspacePage() {
             .map(filenameToken)
             .join('-') || 'co-loc';
 
-    return `song-thanh-${prefix}-${scopeToken}-${localDateStamp()}`;
+    return [
+      'song-thanh',
+      prefix,
+      scopeToken,
+      exportDateFilenameToken(exportFilters),
+      localDateStamp()
+    ].filter(Boolean).join('-');
   }
 
   function exportCustomerFilenameBase() {
@@ -934,7 +870,12 @@ export function ImportWorkspacePage() {
       .map(filenameToken)
       .join('-') || 'tat-ca';
 
-    return `song-thanh-khach-hang-${filterToken}-${localDateStamp()}`;
+    return [
+      'song-thanh-khach-hang',
+      filterToken,
+      exportDateFilenameToken(exportFilters),
+      localDateStamp()
+    ].filter(Boolean).join('-');
   }
 
   async function downloadCurrentExport() {
@@ -942,9 +883,21 @@ export function ImportWorkspacePage() {
     const categoryLimitIds =
       exportScope === 'condition' && exportFilters.brandId ? exportBrandCategoryIds : [];
 
+    const dateRange = {
+      field: exportFilters.dateField,
+      from: exportFilters.dateFrom,
+      to: exportFilters.dateTo
+    };
+    const dateRangeError = validateExportDateRange(dateRange);
+
+    if (dateRangeError) {
+      setExportActionError(new Error(dateRangeError));
+      return;
+    }
+
     if (exportTemplate !== 'customers' && exportScope === 'condition' && exportFilterIsEmpty()) {
       setExportActionError(
-        new Error('Chọn ít nhất một điều kiện: thương hiệu, danh mục hoặc trạng thái. Ví dụ muốn MPE thì chọn MPE ở ô Thương hiệu.')
+        new Error('Chọn ít nhất một điều kiện: mốc thời gian, thương hiệu, danh mục hoặc trạng thái.')
       );
       return;
     }
@@ -966,13 +919,17 @@ export function ImportWorkspacePage() {
         if (exportFilters.customerQuery.trim()) {
           params.set('q', exportFilters.customerQuery.trim());
         }
-        const customers = await fetchAllListItems(endpoints.songThanh.customers, params);
+        const customers = filterRowsByExportDateRange(
+          await fetchAllListItems(endpoints.songThanh.customers, params),
+          dateRange
+        );
         if (customers.length === 0) {
           throw new Error('Không có khách hàng nào để xuất.');
         }
-        downloadExcelFile({
+        await downloadExportFile({
           filename: exportCustomerFilenameBase(),
           title: 'Xuất danh sách khách hàng Song Thanh',
+          format: 'xlsx',
           tables: [
             {
               title: 'Khách hàng',
@@ -990,18 +947,21 @@ export function ImportWorkspacePage() {
       }
 
       if (exportTemplate === 'product_catalog') {
-        const groups = await fetchProductGroupsForExport({
-          categories: exportCategories,
-          filters,
-          publicSafeOnly,
-          categoryLimitIds
-        });
+        const groups = filterRowsByExportDateRange(
+          await fetchProductGroupsForExport({
+            categories: exportCategories,
+            filters,
+            publicSafeOnly,
+            categoryLimitIds
+          }),
+          dateRange
+        );
 
         if (groups.length === 0) {
           throw new Error('Không có nhóm sản phẩm phù hợp với điều kiện đã chọn.');
         }
 
-        const tables: ExcelTable[] = [
+        const tables: ExportTable[] = [
           { title: 'Nhóm sản phẩm', rows: productGroupRows(groups) }
         ];
 
@@ -1021,9 +981,10 @@ export function ImportWorkspacePage() {
           tables.push({ title: 'Tài liệu kỹ thuật', rows: technicalDocumentRows(documents) });
         }
 
-        downloadExcelFile({
+        await downloadExportFile({
           filename: exportFilenameBase('san-pham'),
           title: 'Xuất dữ liệu sản phẩm Song Thanh',
+          format: 'xlsx',
           tables
         });
         setExportActionMessage(`Đã tải file Excel với ${groups.length} nhóm sản phẩm.`);
@@ -1036,20 +997,27 @@ export function ImportWorkspacePage() {
           categories: exportCategories,
           filters
         });
-        const statusFilteredBrands = filtered.brands.filter(
-          (item) => filters.status === 'all' || String(item.status || '') === filters.status
+        const statusFilteredBrands = filterRowsByExportDateRange(
+          filtered.brands.filter(
+            (item) => filters.status === 'all' || String(item.status || '') === filters.status
+          ),
+          dateRange
         );
-        const statusFilteredCategories = filtered.categories.filter(
-          (item) => filters.status === 'all' || String(item.status || '') === filters.status
+        const statusFilteredCategories = filterRowsByExportDateRange(
+          filtered.categories.filter(
+            (item) => filters.status === 'all' || String(item.status || '') === filters.status
+          ),
+          dateRange
         );
 
         if (statusFilteredBrands.length === 0 && statusFilteredCategories.length === 0) {
           throw new Error('Không có danh mục hoặc thương hiệu phù hợp với điều kiện đã chọn.');
         }
 
-        downloadExcelFile({
+        await downloadExportFile({
           filename: exportFilenameBase('danh-muc-thuong-hieu'),
           title: 'Xuất danh mục và thương hiệu Song Thanh',
+          format: 'xlsx',
           tables: [
             { title: 'Danh mục', rows: categoryRows(statusFilteredCategories) },
             { title: 'Thương hiệu', rows: brandRows(statusFilteredBrands) }
@@ -1062,23 +1030,29 @@ export function ImportWorkspacePage() {
       }
 
       if (exportTemplate === 'technical_documents') {
-        const documents = await fetchTechnicalDocumentsForExport({
-          categories: exportCategories,
-          filters,
-          publicSafeOnly,
-          categoryLimitIds
-        });
+        const documents = filterRowsByExportDateRange(
+          await fetchTechnicalDocumentsForExport({
+            categories: exportCategories,
+            filters,
+            publicSafeOnly,
+            categoryLimitIds
+          }),
+          dateRange
+        );
 
         if (documents.length === 0) {
           throw new Error('Không có tài liệu kỹ thuật phù hợp với điều kiện đã chọn.');
         }
 
-        downloadExcelFile({
+        await downloadExportFile({
           filename: exportFilenameBase('tai-lieu-ky-thuat'),
           title: 'Xuất tài liệu kỹ thuật Song Thanh',
+          format: exportFormat === 'csv' ? 'csv' : 'xlsx',
           tables: [{ title: 'Tài liệu kỹ thuật', rows: technicalDocumentRows(documents) }]
         });
-        setExportActionMessage(`Đã tải file Excel với ${documents.length} tài liệu kỹ thuật.`);
+        setExportActionMessage(
+          `Đã tải file ${exportFormat === 'csv' ? 'CSV' : 'Excel'} với ${documents.length} tài liệu kỹ thuật.`
+        );
         return;
       }
 
@@ -1114,7 +1088,7 @@ export function ImportWorkspacePage() {
 
     const batchLabel = formatValue(row.batch_name || row.source_file_name || batchId);
     const confirmed = window.confirm(
-      `Xóa hẳn lô nhập “${batchLabel}”? Thao tác sẽ xóa dữ liệu tạm, xung đột, mapping và có thể xóa luôn workbook nguồn nếu file đó không còn lô nào khác sử dụng.`
+      `Xóa hẳn lô nhập “${batchLabel}”? Thao tác sẽ xóa dữ liệu tạm, các vấn đề đang xử lý, cách ghép cột và có thể xóa tệp nguồn nếu không còn lô nào khác sử dụng.`
     );
     if (!confirmed) return;
 
@@ -1190,7 +1164,7 @@ export function ImportWorkspacePage() {
             Nhập dữ liệu
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Quản lý lô nhập hiện có và chuẩn bị luồng xuất dữ liệu từ dữ liệu chính thức.
+            Đưa dữ liệu vào hệ thống, xử lý các dòng cần kiểm tra và xuất file theo nhu cầu.
           </p>
         </div>
 
@@ -1215,32 +1189,50 @@ export function ImportWorkspacePage() {
         </div>
       </div>
 
-      <div className="rounded-sm border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-        <span className="font-semibold">Dễ hiểu nhất:</span> lô nhập là file đưa vào hệ
-        thống, lô xuất là file tạo ra từ dữ liệu đã quản lý. Khu tệp chỉ dùng để xem và
-        tải lại file.
-      </div>
-
       <WorkspaceTabs active={activeTab} onChange={setActiveTab} />
 
       {activeTab === 'import' ? (
-        <Card className="overflow-hidden" data-import-batch-list="true">
+        <div className="space-y-3">
+          <div
+            data-import-attention-strip="true"
+            className="flex flex-col gap-3 rounded-sm border border-border bg-panel px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+              <span>
+                <strong className="text-text">{issueBatchCount}</strong>{' '}
+                <span className="text-muted-foreground">cần xử lý trên trang</span>
+              </span>
+              <span>
+                <strong className="text-emerald-700">{readyBatchCount}</strong>{' '}
+                <span className="text-muted-foreground">sẵn sàng áp dụng</span>
+              </span>
+              <span>
+                <strong className="text-text">{completedBatchCount}</strong>{' '}
+                <span className="text-muted-foreground">đã hoàn tất</span>
+              </span>
+            </div>
+            {actionableBatch ? (
+              <LinkButton href={`/import/${String(actionableBatch.id || '')}`} size="sm">
+                Tiếp tục việc đang chờ
+              </LinkButton>
+            ) : null}
+          </div>
+
+          <Card className="overflow-hidden" data-import-batch-list="true">
           <div
             data-admin-filter-toolbar="true"
             className="flex min-h-[69px] flex-col gap-3 border-b border-border bg-panel px-4 py-4 md:flex-row md:items-center md:justify-between"
           >
             <div>
               <h2 className="text-sm font-semibold text-text">Danh sách lô nhập</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Theo dõi trạng thái, dữ liệu tạm và xung đột của từng lô.
-              </p>
-            </div>
+             </div>
             <div className="flex w-full min-w-0 flex-wrap items-end gap-3 md:max-w-[920px]">
               <div className="relative min-w-[280px] flex-[1_1_320px]">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   className="pl-9"
                   value={query}
+                  maxLength={255}
                   onChange={(event) => {
                     setQuery(event.target.value);
                     setPage(1);
@@ -1260,7 +1252,9 @@ export function ImportWorkspacePage() {
                   }}
                 >
                   <option value="">Tất cả</option>
+                  <option value="created,validated,in_review,ready_to_apply">Đang xử lý</option>
                   <option value="created">{formatValue('created')}</option>
+                  <option value="validated">{formatValue('validated')}</option>
                   <option value="in_review">{formatValue('in_review')}</option>
                   <option value="ready_to_apply">{formatValue('ready_to_apply')}</option>
                   <option value="applied">{formatValue('applied')}</option>
@@ -1322,7 +1316,7 @@ export function ImportWorkspacePage() {
                 description={
                   hasActiveFilters
                     ? 'Không có kết quả phù hợp với bộ lọc hiện tại.'
-                    : 'Bắt đầu bằng nút “Thêm dữ liệu” để tải workbook và tạo lô nhập đầu tiên.'
+                    : 'Bắt đầu bằng nút “Thêm dữ liệu” để chọn tệp và tạo lô nhập đầu tiên.'
                 }
               />
             </div>
@@ -1349,7 +1343,8 @@ export function ImportWorkspacePage() {
               />
             </>
           )}
-        </Card>
+          </Card>
+        </div>
       ) : (
         <SimpleExportWorkspacePanel
           purpose={exportPurpose}
@@ -1439,7 +1434,7 @@ function WorkspaceTabButton({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        'flex min-h-10 flex-1 items-center justify-center gap-2 rounded-sm px-4 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 sm:flex-none',
+        'flex min-h-11 flex-1 items-center justify-center gap-2 rounded-sm px-4 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 sm:flex-none',
         active ? 'bg-primary text-primary-foreground' : 'text-slate-600 hover:bg-muted'
       )}
     >
@@ -1455,7 +1450,6 @@ function SimpleExportWorkspacePanel({
   scope,
   format,
   includeVariants,
-  includeSpecs,
   includeDocuments,
   publicSafeOnly,
   filters,
@@ -1510,22 +1504,20 @@ function SimpleExportWorkspacePanel({
   onFilterChange: (patch: Partial<ExportFilterState>) => void;
   onDownload: () => void;
 }) {
-  const selectedTemplate = exportTemplates.find((item) => item.key === template) ?? exportTemplates[0];
   const selectedFormat = exportFormats.find((item) => item.key === format) ?? exportFormats[0];
   const isCustomerTemplate = template === 'customers';
+  const supportsCsv = template === 'technical_documents';
   const hasCondition = exportFilterHasCondition(filters);
+  const dateRangeError = validateExportDateRange({
+    from: filters.dateFrom,
+    to: filters.dateTo
+  });
   const downloadDisabled =
     exporting ||
+    Boolean(dateRangeError) ||
     (!isCustomerTemplate && referencesLoading) ||
     (!isCustomerTemplate && brandCategoriesLoading) ||
     (!isCustomerTemplate && scope === 'condition' && !hasCondition);
-  const selectedBrandLabel = getSelectedRecordLabel(brands, filters.brandId, 'Tất cả thương hiệu');
-  const selectedParentLabel = getSelectedRecordLabel(categories, filters.categoryParentId, 'Tất cả danh mục cha');
-  const selectedChildLabel = getSelectedRecordLabel(
-    categories,
-    filters.categoryChildId,
-    filters.categoryParentId ? 'Tất cả danh mục con' : 'Chưa chọn'
-  );
   const activeCategories = activeRecords(categories);
   const activeCategoryChildren = activeCategories.filter((category) => categoryParentId(category));
   const brandCategoryIdSet = new Set(brandCategoryIds);
@@ -1603,20 +1595,14 @@ function SimpleExportWorkspacePanel({
   }
 
   return (
-    <div
-      className={cn(
-        'grid gap-4',
-        isCustomerTemplate ? 'lg:grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_320px]'
-      )}
-      data-import-export-panel="true"
-    >
+    <div className="space-y-4" data-import-export-panel="true">
       <Card className="overflow-hidden">
         <div className="border-b border-border bg-panel px-4 py-4">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-sm font-semibold text-text">Xuất dữ liệu</h2>
-                <Badge tone="active">Tải Excel ngay</Badge>
+                <Badge tone="active">Tạo file chuẩn</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {isCustomerTemplate
@@ -1631,7 +1617,7 @@ function SimpleExportWorkspacePanel({
               data-import-export-submit="true"
             >
               <Download className="h-4 w-4" />
-              {exporting ? 'Đang tạo file' : 'Tải Excel'}
+              {exporting ? 'Đang tạo file' : `Tải ${selectedFormat.title}`}
             </Button>
           </div>
         </div>
@@ -1661,7 +1647,6 @@ function SimpleExportWorkspacePanel({
             <SectionTitle
               icon={<PackageSearch className="h-4 w-4" />}
               title="Chọn nhanh"
-              helper="Chọn loại dữ liệu cần xuất."
             />
             <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
               <QuickPresetButton
@@ -1695,12 +1680,89 @@ function SimpleExportWorkspacePanel({
             </div>
           </section>
 
+          <section data-export-date-range="true" className="rounded-sm border border-border bg-muted/20 p-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-text">Mốc thời gian</span>
+                  <Select
+                    aria-label="Mốc thời gian"
+                    value={filters.dateField}
+                    onChange={(event) =>
+                      onFilterChange({ dateField: event.target.value as ExportDateField })
+                    }
+                  >
+                    <option value="updated_at">Ngày cập nhật</option>
+                    <option value="created_at">Ngày tạo</option>
+                  </Select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-text">Từ ngày</span>
+                  <Input
+                    type="date"
+                    value={filters.dateFrom}
+                    max={filters.dateTo || undefined}
+                    data-export-date-start="true"
+                    onChange={(event) => onFilterChange({ dateFrom: event.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-text">Đến ngày</span>
+                  <Input
+                    type="date"
+                    value={filters.dateTo}
+                    min={filters.dateFrom || undefined}
+                    data-export-date-end="true"
+                    onChange={(event) => onFilterChange({ dateTo: event.target.value })}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2" aria-label="Chọn nhanh khoảng thời gian">
+                {[7, 30, 90].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    className="min-h-10 rounded-md border border-border bg-panel px-3 text-sm font-medium text-slate-700 hover:bg-muted"
+                    onClick={() => {
+                      const today = localIsoDate();
+                      onFilterChange({ dateFrom: localIsoDate(days - 1), dateTo: today });
+                    }}
+                  >
+                    {days} ngày
+                  </button>
+                ))}
+                {(filters.dateFrom || filters.dateTo) ? (
+                  <button
+                    type="button"
+                    className="min-h-10 rounded-md px-3 text-sm font-medium text-primary hover:bg-blue-50"
+                    onClick={() => onFilterChange({ dateFrom: '', dateTo: '' })}
+                  >
+                    Xóa ngày
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="font-medium text-muted-foreground">
+                {exportDateRangeLabel({
+                  field: filters.dateField,
+                  from: filters.dateFrom,
+                  to: filters.dateTo
+                })}
+              </span>
+              {dateRangeError ? (
+                <span role="alert" className="font-medium text-red-700">
+                  {dateRangeError}
+                </span>
+              ) : null}
+            </div>
+          </section>
+
           {isCustomerTemplate ? (
             <section>
               <SectionTitle
                 icon={<Filter className="h-4 w-4" />}
                 title="Lọc khách hàng"
-                helper="Chỉ giữ các lựa chọn có tác dụng với hồ sơ khách hàng."
               />
               <div className="mt-3 grid gap-3 rounded-sm border border-border bg-panel p-3 md:grid-cols-2">
                 <label className="block md:col-span-2">
@@ -1755,9 +1817,6 @@ function SimpleExportWorkspacePanel({
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <p className="text-xs font-semibold text-text">Nội dung Excel</p>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        Hồ sơ khách hàng luôn có; bỏ tick phần không cần.
-                      </p>
                     </div>
                     <Badge tone="info">Hồ sơ luôn có</Badge>
                   </div>
@@ -1789,9 +1848,6 @@ function SimpleExportWorkspacePanel({
                   </div>
                 </div>
 
-                <div className="md:col-span-2 rounded-sm border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-700">
-                  File tải nhanh không ghi vào khu tệp. Nếu cần lưu file để tải lại trong Tệp, phần lô xuất chính thức sẽ xử lý sau.
-                </div>
               </div>
             </section>
           ) : (
@@ -1799,7 +1855,6 @@ function SimpleExportWorkspacePanel({
               <SectionTitle
                 icon={<Filter className="h-4 w-4" />}
                 title="Phạm vi"
-                helper="Muốn nhanh thì xuất tất cả. Muốn lọc danh mục hoặc thương hiệu thì chọn điều kiện."
               />
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <ChoiceButton
@@ -1826,6 +1881,7 @@ function SimpleExportWorkspacePanel({
                       Thương hiệu
                     </span>
                     <Select
+                      aria-label="Thương hiệu"
                       value={filters.brandId}
                       disabled={referencesLoading}
                       onChange={(event) =>
@@ -1843,9 +1899,6 @@ function SimpleExportWorkspacePanel({
                         </option>
                       ))}
                     </Select>
-                    <p className="mt-1 text-[11px] leading-4 text-blue-700">
-                      Ví dụ: chọn MPE rồi bấm Tải Excel.
-                    </p>
                   </label>
 
                   <label className="block">
@@ -1853,6 +1906,7 @@ function SimpleExportWorkspacePanel({
                       Danh mục cha
                     </span>
                     <Select
+                      aria-label="Danh mục cha"
                       value={filters.categoryParentId}
                       disabled={categoryControlsDisabled}
                       onChange={(event) =>
@@ -1869,11 +1923,6 @@ function SimpleExportWorkspacePanel({
                         </option>
                       ))}
                     </Select>
-                    <p className="mt-1 text-[11px] leading-4 text-blue-700">
-                      {filters.brandId
-                        ? 'Chỉ hiện nhánh có dữ liệu của thương hiệu đã chọn.'
-                        : 'Chọn cha để thu hẹp danh mục con.'}
-                    </p>
                   </label>
 
                   <label className="block">
@@ -1881,6 +1930,7 @@ function SimpleExportWorkspacePanel({
                       Danh mục con
                     </span>
                     <Select
+                      aria-label="Danh mục con"
                       value={filters.categoryChildId}
                       disabled={categoryControlsDisabled || !filters.categoryParentId}
                       onChange={(event) => onFilterChange({ categoryChildId: event.target.value })}
@@ -1894,9 +1944,6 @@ function SimpleExportWorkspacePanel({
                         </option>
                       ))}
                     </Select>
-                    <p className="mt-1 text-[11px] leading-4 text-blue-700">
-                      Chọn riêng danh mục con nếu cần file hẹp hơn.
-                    </p>
                   </label>
 
                   <label className="block">
@@ -1904,6 +1951,7 @@ function SimpleExportWorkspacePanel({
                       Trạng thái
                     </span>
                     <Select
+                      aria-label="Trạng thái"
                       value={filters.status}
                       disabled={referencesLoading}
                       onChange={(event) =>
@@ -1914,9 +1962,6 @@ function SimpleExportWorkspacePanel({
                       <option value="active">Đang hoạt động</option>
                       <option value="inactive">Tạm ngưng</option>
                     </Select>
-                    <p className="mt-1 text-[11px] leading-4 text-blue-700">
-                      Có thể chỉ chọn trạng thái nếu muốn rà soát nhanh.
-                    </p>
                   </label>
                 </div>
 
@@ -1988,24 +2033,22 @@ function SimpleExportWorkspacePanel({
                     </span>
                     <Select
                       value={format}
-                      disabled
+                      disabled={!supportsCsv}
                       onChange={(event) => onFormatChange(event.target.value as ExportFormat)}
                     >
-                      {exportFormats.filter((item) => item.key === 'xlsx').map((item) => (
+                      {exportFormats
+                        .filter(
+                          (item) =>
+                            item.key === 'xlsx' || (supportsCsv && item.key === 'csv')
+                        )
+                        .map((item) => (
                         <option key={item.key} value={item.key}>
                           {item.title} - tải ngay
                         </option>
-                      ))}
+                        ))}
                     </Select>
-                    <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                      CSV/PDF cần lô xuất chính thức, chưa bật trong bản tải nhanh.
-                    </p>
                   </label>
                 </div>
-
-                <p className="rounded-sm border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-700">
-                  Bản tải nhanh chỉ bật dữ liệu đã có list endpoint ổn định. Những sheet cần contract export riêng được giữ ở trạng thái chờ để tránh xuất thiếu hoặc sai cấu trúc.
-                </p>
 
                 <div className="grid gap-2 sm:grid-cols-2">
                   <CheckOption
@@ -2018,14 +2061,6 @@ function SimpleExportWorkspacePanel({
                     }
                     disabled={variantOptionDisabled}
                     onChange={onIncludeVariantsChange}
-                  />
-                  <CheckOption
-                    checked={includeSpecs}
-                    label="Kèm thông số chi tiết"
-                    description="Chưa bật trong tải nhanh vì spec group và variant spec vẫn là slice riêng. Khi lô xuất chính thức có contract, mục này sẽ xuất sheet thông số đầy đủ."
-                    badge="Chờ API"
-                    disabled
-                    onChange={onIncludeSpecsChange}
                   />
                   <CheckOption
                     checked={includeDocuments}
@@ -2047,54 +2082,6 @@ function SimpleExportWorkspacePanel({
         </div>
       </Card>
 
-      {!isCustomerTemplate ? (
-        <aside className="space-y-3">
-          <Card className="p-4">
-            <div className="flex items-center gap-2">
-              <Clock3 className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-semibold text-text">Đang chọn</h3>
-            </div>
-            <div className="mt-4 space-y-3 text-sm">
-              <SummaryLine label="Kiểu xuất" value={selectedTemplate.title} />
-              <SummaryLine label="Phạm vi" value={scope === 'all' ? 'Tất cả' : 'Chọn điều kiện'} />
-              {scope === 'condition' ? (
-                <>
-                  <SummaryLine label="Thương hiệu" value={selectedBrandLabel} />
-                  <SummaryLine label="Danh mục cha" value={selectedParentLabel} />
-                  <SummaryLine label="Danh mục con" value={selectedChildLabel} />
-                  <SummaryLine
-                    label="Trạng thái"
-                    value={filters.status === 'all' ? 'Tất cả' : formatValue(filters.status)}
-                  />
-                </>
-              ) : null}
-              <SummaryLine label="File" value={selectedFormat.title} />
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {selectedTemplate.includes.map((item) => (
-                <Badge key={item} tone="info">
-                  {item}
-                </Badge>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-amber-200 bg-amber-50 text-amber-700">
-                <CheckCircle2 className="h-4 w-4" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-text">Không trộn với khu tệp</h3>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Bản tải nhanh tạo file ngay trên trình duyệt và không ghi vào khu tệp.
-                  Sau này lô xuất chính thức mới tạo file lưu lại để tải lại trong `Tệp`.
-                </p>
-              </div>
-            </div>
-          </Card>
-        </aside>
-      ) : null}
     </div>
   );
 }
@@ -2116,8 +2103,9 @@ function QuickPresetButton({
     <button
       type="button"
       onClick={onClick}
+      aria-description={description}
       className={cn(
-        'min-h-[78px] rounded-sm border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1',
+        'min-h-12 rounded-sm border px-3 py-2.5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1',
         active ? 'border-primary bg-blue-50' : 'border-border bg-panel hover:bg-muted'
       )}
     >
@@ -2125,7 +2113,6 @@ function QuickPresetButton({
         <span className="text-primary">{icon}</span>
         {title}
       </div>
-      <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{description}</p>
     </button>
   );
 }
@@ -2137,7 +2124,7 @@ function SectionTitle({
 }: {
   icon: ReactNode;
   title: string;
-  helper: string;
+  helper?: string;
 }) {
   return (
     <div>
@@ -2145,7 +2132,7 @@ function SectionTitle({
         <span className="text-primary">{icon}</span>
         {title}
       </div>
-      <p className="mt-1 text-xs leading-5 text-muted-foreground">{helper}</p>
+      {helper ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{helper}</p> : null}
     </div>
   );
 }
@@ -2170,8 +2157,9 @@ function ChoiceButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      aria-description={description}
       className={cn(
-        'min-h-[104px] rounded-sm border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60',
+        'min-h-12 rounded-sm border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60',
         active ? 'border-primary bg-blue-50' : 'border-border bg-panel hover:bg-muted'
       )}
     >
@@ -2179,7 +2167,6 @@ function ChoiceButton({
         <span className="text-sm font-semibold text-text">{title}</span>
         <Badge tone={active ? 'active' : 'default'}>{badge}</Badge>
       </div>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
     </button>
   );
 }
@@ -2201,8 +2188,9 @@ function CheckOption({
 }) {
   return (
     <label
+      aria-description={description}
       className={cn(
-        'flex min-h-[92px] gap-3 rounded-sm border p-3 transition-colors',
+        'flex min-h-11 gap-3 rounded-sm border px-3 py-2.5 transition-colors',
         disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
         disabled
           ? 'border-border bg-panel'
@@ -2223,7 +2211,6 @@ function CheckOption({
           {label}
           {badge ? <Badge tone="default">{badge}</Badge> : null}
         </span>
-        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
       </span>
     </label>
   );
@@ -2253,17 +2240,6 @@ function CompactCheckOption({
       />
       <span className="font-medium">{label}</span>
     </label>
-  );
-}
-
-function SummaryLine({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-3 border-b border-border pb-2 last:border-b-0 last:pb-0">
-      <span className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-        {label}
-      </span>
-      <span className="max-w-[180px] text-right text-sm font-medium text-text">{value}</span>
-    </div>
   );
 }
 
@@ -2297,114 +2273,56 @@ function ImportBatchRow({
   const nextActionKey = String(row.next_step || '').toLowerCase();
   const nextStep = nextActionLabel;
   const primaryActionLabel = getPrimaryImportActionLabel(row);
-  const showDisabledAppliedAction = isAppliedBatch && !isArchivedBatch;
 
   return (
-    <article className="p-4 transition-colors hover:bg-muted">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <article data-import-batch-row="true" className="p-4 transition-colors hover:bg-muted">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link
               href={`/import/${id}`}
-              className="min-w-0 truncate text-[15px] font-semibold text-text hover:text-primary"
+              className="inline-flex min-h-11 min-w-0 items-center truncate text-[15px] font-semibold text-text hover:text-primary md:min-h-0"
             >
               {batchName}
             </Link>
             <Badge tone={statusTone(row.status)}>{formatValue(row.status)}</Badge>
             {isArchivedBatch ? <Badge tone="archived">Đã lưu trữ</Badge> : null}
-            <Badge tone={nextStepTone(nextActionKey, mappingRequired || workflowStage === 'mapping', isArchivedBatch)}>
-              {nextStep}
-            </Badge>
+            {!isAppliedBatch && !isArchivedBatch ? (
+              <Badge tone={nextStepTone(nextActionKey, mappingRequired || workflowStage === 'mapping', isArchivedBatch)}>
+                {nextStep}
+              </Badge>
+            ) : null}
           </div>
-          <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-            {id}
-          </div>
-          <div className="mt-2 line-clamp-1 text-sm text-slate-700">Nguồn: {source}</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            Ngày tạo: {formatDate(row.created_at)}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <span className="line-clamp-1">Tệp: {source}</span>
+            <span aria-hidden="true">•</span>
+            <span>{formatDate(row.created_at)}</span>
           </div>
         </div>
 
-        <div className="shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            {showDisabledAppliedAction ? (
-              <>
-                <Button type="button" size="sm" disabled>
-                  Đã áp dụng
-                </Button>
-                <Link href={`/import/${id}`}>
-                  <Button type="button" size="sm" variant="secondary">
-                    Xem chi tiết
-                  </Button>
-                </Link>
-              </>
-            ) : (
-              <Link href={`/import/${id}`}>
-                <Button type="button" size="sm">
-                  {isArchivedBatch ? 'Xem chi tiết' : primaryActionLabel}
-                </Button>
-              </Link>
-            )}
-
-            {isArchivedBatch ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                data-import-inline-restore="true"
-                disabled={!canManage || processing}
-                onClick={onRestore}
-              >
-                <RotateCcw className="h-4 w-4" />
-                {processing ? 'Đang khôi phục' : 'Khôi phục'}
-              </Button>
-            ) : isAppliedBatch ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                data-import-inline-archive="true"
-                disabled={!canManage || processing}
-                onClick={onArchive}
-              >
-                <Archive className="h-4 w-4" />
-                {processing ? 'Đang lưu trữ' : 'Lưu trữ'}
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="danger"
-                data-import-inline-delete="true"
-                disabled={!canManage || processing}
-                onClick={onDelete}
-              >
-                <Trash2 className="h-4 w-4" />
-                {processing ? 'Đang xóa' : 'Xóa'}
-              </Button>
-            )}
-          </div>
-
-          {isAppliedBatch && !isArchivedBatch ? (
-            <p className="mt-2 text-right text-[11px] text-muted-foreground">
-              Lô đã áp dụng không thể xóa cứng, chỉ có thể lưu trữ.
-            </p>
-          ) : null}
-          {isArchivedBatch ? (
-            <p className="mt-2 text-right text-[11px] text-muted-foreground">
-              Lô đang ở lịch sử lưu trữ. Khôi phục để đưa lại vào danh sách đang dùng.
-            </p>
+        <div className="flex shrink-0 items-center gap-2 self-end lg:self-auto">
+          <LinkButton href={`/import/${id}`} size="sm">
+            {isAppliedBatch || isArchivedBatch ? 'Xem chi tiết' : primaryActionLabel}
+          </LinkButton>
+          {canManage ? (
+            <ImportBatchActions
+              batchName={batchName}
+              isArchived={isArchivedBatch}
+              isApplied={isAppliedBatch}
+              processing={processing}
+              onDelete={onDelete}
+              onArchive={onArchive}
+              onRestore={onRestore}
+            />
           ) : null}
         </div>
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        <BatchMetric label="Dòng workbook" value={rawCount} />
-        <BatchTextMetric
-          icon={<ArrowRightLeft className="h-4 w-4" />}
-          label="Bước tiếp theo"
-          value={nextStep}
-        />
+      <div
+        data-import-batch-metrics="true"
+        className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-3"
+      >
+        <BatchMetric label="Dòng" value={rawCount} />
         <BatchMetric label="Nhóm tạm" value={groupCount} />
         <BatchMetric label="Biến thể tạm" value={variantCount} />
         <BatchMetric
@@ -2414,6 +2332,63 @@ function ImportBatchRow({
         />
       </div>
     </article>
+  );
+}
+
+function ImportBatchActions({
+  batchName,
+  isArchived,
+  isApplied,
+  processing,
+  onDelete,
+  onArchive,
+  onRestore
+}: {
+  batchName: string;
+  isArchived: boolean;
+  isApplied: boolean;
+  processing: boolean;
+  onDelete: () => void;
+  onArchive: () => void;
+  onRestore: () => void;
+}) {
+  const action = isArchived ? onRestore : isApplied ? onArchive : onDelete;
+  const label = isArchived ? 'Khôi phục' : isApplied ? 'Lưu trữ' : 'Xóa lô nhập';
+  const pendingLabel = isArchived ? 'Đang khôi phục' : isApplied ? 'Đang lưu trữ' : 'Đang xóa';
+  const Icon = isArchived ? RotateCcw : isApplied ? Archive : Trash2;
+
+  return (
+    <details className="group relative">
+      <summary
+        role="button"
+        aria-label={`Thao tác khác cho ${batchName}`}
+        className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-sm border border-border bg-panel text-muted-foreground transition hover:bg-muted hover:text-text md:h-9 md:w-9"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </summary>
+      <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-sm border border-border bg-panel p-1 shadow-lg">
+        <button
+          type="button"
+          data-import-inline-restore={isArchived ? 'true' : undefined}
+          data-import-inline-archive={!isArchived && isApplied ? 'true' : undefined}
+          data-import-inline-delete={!isArchived && !isApplied ? 'true' : undefined}
+          disabled={processing}
+          className={cn(
+            'flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-left text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60',
+            isArchived
+              ? 'text-primary hover:bg-primarySoft'
+              : 'text-red-700 hover:bg-red-50'
+          )}
+          onClick={(event) => {
+            event.currentTarget.closest('details')?.removeAttribute('open');
+            action();
+          }}
+        >
+          <Icon className="h-4 w-4" />
+          {processing ? pendingLabel : label}
+        </button>
+      </div>
+    </details>
   );
 }
 
@@ -2431,9 +2406,9 @@ function ImportListSkeleton() {
               </div>
               <Skeleton className="h-8 w-24" />
             </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-              {Array.from({ length: 5 }).map((__, metricIndex) => (
-                <Skeleton key={metricIndex} className="h-16 w-full" />
+            <div className="mt-3 flex gap-5 border-t border-border pt-3">
+              {Array.from({ length: 4 }).map((__, metricIndex) => (
+                <Skeleton key={metricIndex} className="h-5 w-24" />
               ))}
             </div>
           </div>
@@ -2453,38 +2428,11 @@ function BatchMetric({
   tone?: 'active' | 'warning' | 'info';
 }) {
   return (
-    <div className="rounded-sm border border-border bg-muted px-3 py-2">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="text-lg font-semibold text-text">
-          {Number.isFinite(value) ? value : 0}
-        </span>
-        <Badge tone={tone}>{Number.isFinite(value) ? value : 0}</Badge>
-      </div>
-    </div>
-  );
-}
-
-function BatchTextMetric({
-  label,
-  value,
-  icon
-}: {
-  label: string;
-  value: string;
-  icon: ReactNode;
-}) {
-  return (
-    <div className="rounded-sm border border-border bg-muted px-3 py-2">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1 flex items-center gap-2 text-sm font-medium text-text">
-        <span className="text-primary">{icon}</span>
-        <span>{value}</span>
-      </div>
+    <div className="inline-flex items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn('font-semibold', tone === 'warning' ? 'text-amber-700' : 'text-text')}>
+        {Number.isFinite(value) ? value : 0}
+      </span>
     </div>
   );
 }
@@ -2541,6 +2489,25 @@ function getPrimaryImportActionLabel(row: ImportRow) {
   }
   if (nextStep === 'review') return 'Duyệt dữ liệu tạm';
   return 'Tiếp tục xử lý';
+}
+
+function isImportBatchReady(row: ImportRow) {
+  const status = String(row.status || '').toLowerCase();
+  const openConflicts = Number(row.open_conflict_count ?? row.conflict_count ?? 0);
+  return status === 'ready_to_apply' && openConflicts === 0 && !row.deleted_at;
+}
+
+function isImportBatchActionable(row: ImportRow) {
+  if (row.deleted_at || String(row.status || '').toLowerCase() === 'applied') return false;
+  const nextStep = String(row.next_step || '').toLowerCase();
+  const status = String(row.status || '').toLowerCase();
+  const openConflicts = Number(row.open_conflict_count ?? row.conflict_count ?? 0);
+  return Boolean(
+    row.mapping_required ||
+      openConflicts > 0 ||
+      ['created', 'in_review', 'ready_to_apply', 'failed'].includes(status) ||
+      ['confirm_mapping', 'review', 'apply', 'apply_failed'].includes(nextStep)
+  );
 }
 
 function normalizeImportActionLabel(value: string) {

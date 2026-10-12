@@ -25,6 +25,9 @@ export function normalizeSearch(value: unknown): string | null {
   if (typeof value === 'undefined' || value === null) return null;
   if (typeof value !== 'string') throw validationError('q must be a string.', { field: 'q' });
   const normalized = value.trim();
+  if (normalized.length > 255) {
+    throw validationError('q must not exceed 255 characters.', { field: 'q' });
+  }
   return normalized === '' ? null : normalized;
 }
 
@@ -118,10 +121,6 @@ export function validationError(message: string, details?: Record<string, unknow
 
 export function conflictError(code: string, message: string, details?: Record<string, unknown>): AppError {
   return new AppError({ code, message, statusCode: HttpStatus.CONFLICT, details: details ?? null });
-}
-
-export function notFoundError(message: string): AppError {
-  return new AppError({ code: ErrorCodes.NOT_FOUND, message, statusCode: HttpStatus.NOT_FOUND });
 }
 
 export function normalizeRequiredText(fieldName: string, value: unknown, maxLength?: number): string {

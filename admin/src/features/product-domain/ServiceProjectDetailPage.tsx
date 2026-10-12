@@ -1,9 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ChevronDown, ImageIcon, Plus, Save, Trash2 } from '@/components/icons';
+import { ArrowLeft, ChevronDown, Image as ImageIcon, Plus, Save, Trash2 } from '@/components/icons';
 import {
   AlertTriangle,
   Briefcase,
@@ -256,15 +255,17 @@ function metaFromRecord(record: Record<string, unknown>): RecordMeta {
   };
 }
 
-function buildPayload(kind: DomainKind, form: Form) {
+function buildPayload(kind: DomainKind, form: Form, canPrivilegedWorkflow = true) {
   const payload: Record<string, unknown> = {
     title: form.title.trim(),
     slug: form.slug.trim(),
     description: form.description.trim() || null,
     content_html: form.content_html || null,
     image_file_id: form.image_file_id || null,
-    review_status: form.review_status,
-    publish_status: form.publish_status,
+    ...(canPrivilegedWorkflow ? {
+      review_status: form.review_status,
+      publish_status: form.publish_status
+    } : {}),
     seo_title: form.seo_title.trim() || null,
     seo_description: form.seo_description.trim() || null,
     seo_og_image_file_id: form.seo_og_image_file_id || null
@@ -342,6 +343,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [saveMessage, setSaveMessage] = useState('');
   const [slugAutoGen, setSlugAutoGen] = useState(isNew(id));
   const [seoOpen, setSeoOpen] = useState(false);
   const [yearError, setYearError] = useState('');
@@ -357,7 +359,10 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
   const canArchiveProjectGallery = authState.permissions.includes(PERMISSIONS.projectGalleryArchive);
   const canRestoreProjectGallery = authState.permissions.includes(PERMISSIONS.projectGalleryRestore);
   const canSave = isNew(id) ? canCreate : canUpdate;
-  const dirty = JSON.stringify(form) !== JSON.stringify(initialForm);
+  const canPrivilegedWorkflow = authState.roles.includes('super_admin');
+  const dirty = (Object.keys(form) as (keyof Form)[]).some(
+    (key) => JSON.stringify(form[key]) !== JSON.stringify(initialForm[key])
+  );
   const visibility = visibilityFromForm(form);
   const pageTitle = isNew(id)
     ? `Tạo ${cfg.singular} mới`
@@ -366,11 +371,6 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
   const serviceActiveRelatedCount = kind === 'service' ? activeRelatedCount(serviceRelatedGroups) : 0;
   const serviceQualityChecks =
     kind === 'service' ? servicePublicQualityChecks(form, serviceActiveRelatedCount) : [];
-  const servicePreviewDeliverables = form.deliverables
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 2);
-
   const previewFile = useMemo(
     () =>
       form.image_file_id
@@ -427,6 +427,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
   }, [cfg.endpoint, cfg.singular, id, kind]);
 
   function updateField<K extends keyof Form>(key: K, value: Form[K]) {
+    setSaveMessage('');
     setForm((current) => {
       const next = { ...current, [key]: value };
       if (key === 'title' && slugAutoGen) {
@@ -451,9 +452,10 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
 
     setSaving(true);
     setSaveError('');
+    setSaveMessage('');
 
     try {
-      const payload = buildPayload(kind, form);
+      const payload = buildPayload(kind, form, canPrivilegedWorkflow);
       const result = isNew(id)
         ? await apiClient.post<unknown>(cfg.endpoint, payload)
         : await apiClient.put<unknown>(byId(cfg.endpoint, id), payload);
@@ -470,6 +472,9 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
       setForm(next);
       setInitialForm(next);
       setRecordMeta(metaFromRecord(record));
+      setSaveMessage(!canPrivilegedWorkflow && next.review_status === 'pending_review'
+        ? 'Đã lưu. Nội dung đang chờ Super Admin duyệt và tạm ẩn khỏi website.'
+        : 'Đã lưu thay đổi.');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Không lưu được.');
     } finally {
@@ -479,8 +484,17 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
 
   async function reloadRelatedProducts() {
     if (isNew(id)) return;
-    const result = await apiClient.get<unknown>(byId(cfg.endpoint, id));
-    setDetailRecord(asRecord(result));
+    try {
+      const result = await apiClient.get<unknown>(byId(cfg.endpoint, id));
+      const record = extractDomainRecord(kind, result);
+      const next = formFromRecord(record);
+      setDetailRecord(asRecord(result));
+      setRecordMeta(metaFromRecord(record));
+      setForm((current) => ({ ...current, review_status: next.review_status, publish_status: next.publish_status }));
+      setInitialForm((current) => ({ ...current, review_status: next.review_status, publish_status: next.publish_status }));
+    } catch {
+      setSaveError('Thay đổi đã lưu nhưng chưa tải lại được trạng thái hiển thị. Hãy tải lại trang trước khi chỉnh sửa tiếp.');
+    }
   }
 
   if (loading) return <DetailSkeleton />;
@@ -489,9 +503,14 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
   if (kind === 'service') {
     return (
       <section className="admin-page">
-        <style>{'[data-admin-breadcrumbs="true"]{display:none}'}</style>
         <UnsavedChangesGuard when={dirty} />
-        <form onSubmit={handleSave} className="space-y-5">
+        <form
+          onSubmit={handleSave}
+          className="space-y-5"
+          data-domain-editor="true"
+          data-domain-kind="service"
+          data-domain-editor-layout="single-column"
+        >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <p className="mb-1 text-xs text-muted-foreground">
@@ -500,17 +519,6 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
               <h1 className="text-xl font-semibold text-text">{pageTitle}</h1>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {!isNew(id) && form.slug ? (
-                <a
-                  href={`${PUBLIC_SITE_BASE_URL}${cfg.publicPrefix}${form.slug}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-xs font-medium text-slate-700 transition-colors hover:bg-muted"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Xem trên website
-                </a>
-              ) : null}
               <LinkButton href={cfg.listPath} variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4" />
                 Quay lại
@@ -518,8 +526,28 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
             </div>
           </div>
 
-          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
-            <main className="space-y-4">
+          <DomainEditorCommandBar
+            visibility={visibility}
+            canPrivilegedWorkflow={canPrivilegedWorkflow}
+            onVisibilityChange={(nextVisibility) =>
+              setForm((current) => applyVisibility(current, nextVisibility))
+            }
+            canSave={canSave}
+            saving={saving}
+            dirty={dirty}
+            recordMeta={recordMeta}
+            publicHref={
+              !isNew(id) && form.slug
+                ? `${PUBLIC_SITE_BASE_URL}${cfg.publicPrefix}${form.slug}`
+                : ''
+            }
+            saveLabel="Lưu dịch vụ"
+          />
+
+          <ServiceReadinessStrip checks={serviceQualityChecks} />
+
+          <div className="space-y-4">
+            <div className="space-y-4">
               <Card>
                 <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
                   <Briefcase className="h-4 w-4 text-muted-foreground" />
@@ -537,8 +565,8 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                     />
                   </Field>
 
-                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_8rem_14rem]">
-                    <Field label="Đường dẫn" htmlFor="slug" hint="Chỉ chữ thường, số và gạch ngang.">
+                  <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_10rem_14rem]">
+                    <Field label="Đường dẫn website" htmlFor="slug">
                       <div className="flex h-10 overflow-hidden rounded-md border border-border bg-panel focus-within:border-primary">
                         <span className="flex shrink-0 items-center border-r border-border bg-slate-50 px-3 font-mono text-[13px] text-muted-foreground">
                           {cfg.publicPrefix}
@@ -557,7 +585,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                       </div>
                     </Field>
 
-                    <Field label="Thứ tự" htmlFor="service-sort-order" hint="Số nhỏ hiển thị trước.">
+                    <Field label="Thứ tự hiển thị" htmlFor="service-sort-order">
                       <Input
                         id="service-sort-order"
                         type="number"
@@ -571,7 +599,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                       />
                     </Field>
 
-                    <Field label="Biểu tượng" htmlFor="service-icon-key" hint="Hiển thị trên hero panel và card.">
+                    <Field label="Biểu tượng thẻ" htmlFor="service-icon-key">
                       <select
                         id="service-icon-key"
                         value={form.icon_key}
@@ -598,11 +626,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                   </span>
                 </div>
                 <div className="space-y-4 p-4">
-                  <Field
-                    label="Tagline (subtitle)"
-                    htmlFor="service-subtitle"
-                    hint="Một dòng ngắn đặt dưới tên dịch vụ trên /dich-vu."
-                  >
+                  <Field label="Dòng giới thiệu" htmlFor="service-subtitle">
                     <Input
                       id="service-subtitle"
                       value={form.subtitle}
@@ -612,11 +636,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                       readOnly={!canSave}
                     />
                   </Field>
-                  <Field
-                    label="Mô tả ngắn"
-                    htmlFor="service-description"
-                    hint="Hiển thị trên card dịch vụ. 2–3 câu nêu phạm vi và đối tượng khách."
-                  >
+                  <Field label="Tóm tắt trên danh sách" htmlFor="service-description">
                     <Textarea
                       id="service-description"
                       value={form.description}
@@ -626,11 +646,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                       readOnly={!canSave}
                     />
                   </Field>
-                  <Field
-                    label="Khi nên chọn dịch vụ này"
-                    htmlFor="service-when"
-                    hint="Nêu tình huống cụ thể khách nên liên hệ."
-                  >
+                  <Field label="Khi nào nên liên hệ" htmlFor="service-when">
                     <Textarea
                       id="service-when"
                       value={form.when_to_contact}
@@ -651,10 +667,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                   </span>
                 </div>
                 <div className="space-y-4 p-4">
-                  <Field
-                    label="Khách hàng nhận được"
-                    hint="3–6 mục, mỗi mục dưới 120 ký tự. Hiển thị dạng checklist trên card."
-                  >
+                  <Field label="Kết quả khách hàng nhận được">
                     <div className="space-y-2">
                       {form.deliverables.length === 0 ? (
                         <p className="text-xs text-muted-foreground">Chưa có mục nào.</p>
@@ -700,11 +713,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                     </div>
                   </Field>
 
-                  <Field
-                    label="Thời gian phản hồi điển hình"
-                    htmlFor="service-duration"
-                    hint="Ví dụ: 1–3 ngày làm việc."
-                  >
+                  <Field label="Thời gian phản hồi" htmlFor="service-duration">
                     <Input
                       id="service-duration"
                       value={form.typical_duration}
@@ -717,7 +726,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                 </div>
               </Card>
 
-              <Card>
+              <Card data-domain-editor-media="true">
                 <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
                   <FileText className="h-4 w-4 text-muted-foreground" />
                   <span className="text-xs font-medium text-muted-foreground">Nội dung chi tiết</span>
@@ -737,6 +746,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                   entityId={id}
                   kind={kind}
                   onReload={reloadRelatedProducts}
+                  reviewAfterEdit={!canPrivilegedWorkflow && form.review_status === 'approved' && form.publish_status === 'published'}
                 />
               ) : null}
 
@@ -780,9 +790,6 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                     discouragedGroups={['product_image']}
                     discouragedGroupMessage="Ảnh này đang được phân loại là ảnh sản phẩm. Chỉ dùng nếu ảnh thật sự đại diện cho dịch vụ."
                   />
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    Ảnh này hiển thị trên card dịch vụ và phần đầu trang chi tiết public.
-                  </p>
                 </div>
               </Card>
 
@@ -840,105 +847,8 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
               </Card>
 
               {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
-            </main>
-
-            <aside className="space-y-3 lg:sticky lg:top-4">
-              <Card>
-                <div className="border-b border-border px-4 py-2.5">
-                  <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <Eye className="h-4 w-4" />
-                    Hiển thị
-                  </span>
-                </div>
-                <div className="space-y-4 p-4">
-                  <div className="grid grid-cols-3 gap-1">
-                    {[
-                      ['draft', 'Nháp'],
-                      ['published', 'Đăng'],
-                      ['hidden', 'Ẩn']
-                    ].map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        disabled={!canSave}
-                        onClick={() => setForm((current) => applyVisibility(current, value as Visibility))}
-                        className={cn(
-                          'rounded-md border py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-                          visibility === value
-                            ? 'border-blue-300 bg-blue-50 font-medium text-blue-700'
-                            : 'border-border text-muted-foreground hover:bg-muted'
-                        )}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {canSave ? (
-                    <Button type="submit" size="sm" className="w-full justify-center" disabled={saving}>
-                      <Save className="h-4 w-4" />
-                      {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
-                    </Button>
-                  ) : null}
-
-                  {!isNew(id) && recordMeta ? (
-                    <div className="border-t border-border pt-3 text-[11px] leading-5 text-muted-foreground">
-                      <p>Tạo: {recordMeta.created_at ? formatDate(recordMeta.created_at) : '—'}</p>
-                      <p>Cập nhật: {recordMeta.updated_at ? formatDate(recordMeta.updated_at) : '—'}</p>
-                    </div>
-                  ) : null}
-                </div>
-              </Card>
-
-              <Card>
-                <div className="border-b border-border px-4 py-2.5">
-                  <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Kiểm tra trang public
-                  </span>
-                </div>
-                <div className="space-y-3 p-4">
-                  <div className="rounded-md border border-blue-100 bg-blue-50/60 p-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">
-                      Preview cảm giác khách thấy
-                    </p>
-                    <p className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-900">
-                      {form.title.trim() || 'Tên dịch vụ'}
-                    </p>
-                    <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-slate-600">
-                      {form.description.trim() || form.subtitle.trim() || 'Mô tả ngắn giúp khách hiểu dịch vụ này giải quyết vấn đề gì.'}
-                    </p>
-                    {servicePreviewDeliverables.length > 0 ? (
-                      <div className="mt-2 space-y-1">
-                        {servicePreviewDeliverables.map((item) => (
-                          <span key={item} className="flex items-start gap-1.5 text-[11px] leading-4 text-slate-700">
-                            <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-blue-600" />
-                            <span className="line-clamp-1">{item}</span>
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    {serviceQualityChecks.map((check) => (
-                      <div key={check.label} className="flex items-start gap-2 text-[11px] leading-4">
-                        {check.ok ? (
-                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                        ) : (
-                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                        )}
-                        <span className={check.ok ? 'text-slate-700' : 'text-amber-800'}>{check.label}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <p className="border-t border-border pt-3 text-[11px] leading-5 text-muted-foreground">
-                    Checklist này không chặn lưu. Nó giúp admin nhìn nhanh trang public có đủ thông tin để khách ra quyết định liên hệ chưa.
-                  </p>
-                </div>
-              </Card>
-            </aside>
+              {saveMessage ? <p className="text-sm text-green-700" role="status">{saveMessage}</p> : null}
+            </div>
           </div>
         </form>
       </section>
@@ -947,9 +857,14 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
 
   return (
     <section className="admin-page">
-      <style>{'[data-admin-breadcrumbs="true"]{display:none}'}</style>
       <UnsavedChangesGuard when={dirty} />
-      <form onSubmit={handleSave} className="space-y-5">
+      <form
+        onSubmit={handleSave}
+        className="space-y-5"
+        data-domain-editor="true"
+        data-domain-kind="project"
+        data-domain-editor-layout="single-column"
+      >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="mb-1 text-xs text-muted-foreground">
@@ -965,17 +880,29 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
               <ArrowLeft className="h-4 w-4" />
               Quay lại
             </LinkButton>
-            {canSave ? (
-              <Button type="submit" size="sm" disabled={saving}>
-                <Save className="h-4 w-4" />
-                {saving ? 'Đang lưu...' : visibility === 'published' ? 'Cập nhật' : 'Lưu thay đổi'}
-              </Button>
-            ) : null}
           </div>
         </div>
 
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
-          <main className="space-y-4">
+        <DomainEditorCommandBar
+          visibility={visibility}
+          canPrivilegedWorkflow={canPrivilegedWorkflow}
+          onVisibilityChange={(nextVisibility) =>
+            setForm((current) => applyVisibility(current, nextVisibility))
+          }
+          canSave={canSave}
+          saving={saving}
+          dirty={dirty}
+          recordMeta={recordMeta}
+          publicHref={
+            !isNew(id) && form.slug
+              ? `${PUBLIC_SITE_BASE_URL}${cfg.publicPrefix}${form.slug}`
+              : ''
+          }
+          saveLabel="Lưu dự án"
+        />
+
+        <div className="space-y-4">
+          <div className="space-y-4">
             <Card>
               <div className="space-y-4 p-4">
                   <Field label="Tên dự án" required htmlFor="project-title">
@@ -1033,6 +960,50 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
               </div>
             </Card>
 
+            <Card data-domain-editor-media="true">
+              <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-semibold text-text">Ảnh đại diện</span>
+              </div>
+              <div className="grid gap-4 p-4 md:grid-cols-[minmax(15rem,22rem)_minmax(0,1fr)] md:items-start">
+                {previewFile ? (
+                  <AdminFileThumbnail
+                    file={previewFile}
+                    alt={form.title || 'Ảnh đại diện'}
+                    className="aspect-video h-auto w-full rounded-md"
+                    emptyLabel="Không tải được ảnh"
+                  />
+                ) : (
+                  <div className="flex aspect-video items-center justify-center rounded-md border border-dashed border-border bg-muted/40">
+                    <div className="text-center">
+                      <ImageIcon className="mx-auto h-7 w-7 text-muted-foreground" />
+                      <p className="mt-2 text-sm font-medium text-slate-600">Chưa có ảnh đại diện</p>
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-3">
+                  <FileReferencePicker
+                    value={form.image_file_id}
+                    onChange={(value) => updateField('image_file_id', value)}
+                    readOnly={!canSave}
+                    fieldLabel="ảnh đại diện"
+                    preferredGroup="other"
+                  />
+                  {previewFile ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => updateField('image_file_id', '')}
+                      disabled={!canSave}
+                    >
+                      Gỡ ảnh hiện tại
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </Card>
+
             <Card>
               <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
                 <FileText className="h-4 w-4 text-muted-foreground" />
@@ -1053,6 +1024,7 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                 entityId={id}
                 kind={kind}
                 onReload={reloadRelatedProducts}
+                reviewAfterEdit={!canPrivilegedWorkflow && form.review_status === 'approved' && form.publish_status === 'published'}
               />
             ) : null}
 
@@ -1064,6 +1036,8 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
                 canUpdate={canUpdateProjectGallery}
                 canArchive={canArchiveProjectGallery}
                 canRestore={canRestoreProjectGallery}
+                onChanged={reloadRelatedProducts}
+                reviewAfterEdit={!canPrivilegedWorkflow && form.review_status === 'approved' && form.publish_status === 'published'}
               />
             ) : null}
 
@@ -1130,99 +1104,151 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
             </Card>
 
             {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
-          </main>
-
-          <aside className="space-y-4 lg:sticky lg:top-4">
-            <Card>
-              <div className="border-b border-border px-4 py-2.5">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <Eye className="h-4 w-4" />
-                  Hiển thị
-                </span>
-              </div>
-              <div className="p-4">
-                <p className="mb-2 text-xs text-muted-foreground">Trạng thái</p>
-                <div className="flex gap-1">
-                  {[
-                    ['draft', 'Nháp'],
-                    ['published', 'Đăng'],
-                    ['hidden', 'Ẩn']
-                  ].map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      disabled={!canSave}
-                      onClick={() => setForm((current) => applyVisibility(current, value as Visibility))}
-                      className={cn(
-                        'flex-1 rounded-md border py-1.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-                        visibility === value
-                          ? 'border-blue-300 bg-blue-50 font-medium text-blue-700'
-                          : 'border-border text-muted-foreground hover:bg-muted'
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </Card>
-
-            <Card>
-              <div className="border-b border-border px-4 py-2.5">
-                <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                  <ImageIcon className="h-4 w-4" />
-                  Ảnh đại diện
-                </span>
-              </div>
-              <div className="space-y-3 p-4">
-                {previewFile ? (
-                  <div className="space-y-2">
-                    <AdminFileThumbnail
-                      file={previewFile}
-                      alt={form.title || 'Ảnh đại diện'}
-                      className="aspect-video h-auto w-full"
-                      emptyLabel="Không tải được ảnh"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => updateField('image_file_id', '')}
-                      disabled={!canSave}
-                      className="w-full rounded-md border border-border py-1.5 text-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Đổi ảnh
-                    </button>
-                  </div>
-                ) : (
-                  <div className="rounded-lg border-2 border-dashed border-border p-6 text-center">
-                    <ImageIcon className="mx-auto mb-2 h-7 w-7 text-muted-foreground" />
-                    <p className="text-xs text-muted-foreground">Kéo thả hoặc chọn ảnh</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">JPG, PNG, WebP</p>
-                  </div>
-                )}
-
-                <FileReferencePicker
-                  value={form.image_file_id}
-                  onChange={(value) => updateField('image_file_id', value)}
-                  readOnly={!canSave}
-                  fieldLabel="ảnh đại diện"
-                  preferredGroup="other"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  {`Hiển thị ở thẻ ${cfg.singular} và trang chi tiết.`}
-                </p>
-              </div>
-            </Card>
-
-            {!isNew(id) && recordMeta ? (
-              <p className="space-y-0.5 px-1 text-[10px] text-muted-foreground">
-                <span className="block">Tạo: {recordMeta.created_at ? formatDate(recordMeta.created_at) : 'Không rõ'}</span>
-                <span className="block">Cập nhật: {recordMeta.updated_at ? formatDate(recordMeta.updated_at) : 'Không rõ'}</span>
-              </p>
-            ) : null}
-          </aside>
+            {saveMessage ? <p className="text-sm text-green-700" role="status">{saveMessage}</p> : null}
+          </div>
         </div>
       </form>
     </section>
+  );
+}
+
+function DomainEditorCommandBar({
+  visibility,
+  canPrivilegedWorkflow,
+  onVisibilityChange,
+  canSave,
+  saving,
+  dirty,
+  recordMeta,
+  publicHref,
+  saveLabel
+}: {
+  visibility: Visibility;
+  canPrivilegedWorkflow: boolean;
+  onVisibilityChange: (visibility: Visibility) => void;
+  canSave: boolean;
+  saving: boolean;
+  dirty: boolean;
+  recordMeta: RecordMeta | null;
+  publicHref: string;
+  saveLabel: string;
+}) {
+  return (
+    <Card
+      data-domain-editor-commandbar="true"
+      className="overflow-hidden lg:sticky lg:top-[calc(var(--topbar-height)+8px)] lg:z-20"
+    >
+      <div className="flex flex-col gap-3 p-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <span className="flex items-center gap-2 text-sm font-semibold text-text">
+            <Eye className="h-4 w-4 text-primary" />
+            Hiển thị
+          </span>
+          <div className="inline-grid grid-cols-3 rounded-md border border-border bg-muted/50 p-1">
+            {[
+              ['draft', 'Nháp'],
+              ['published', 'Đang đăng'],
+              ['hidden', 'Tạm ẩn']
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={visibility === value}
+                disabled={!canSave || !canPrivilegedWorkflow}
+                onClick={() => onVisibilityChange(value as Visibility)}
+                className={cn(
+                  'min-h-9 rounded px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                  visibility === value
+                    ? 'bg-panel text-primary shadow-sm ring-1 ring-border'
+                    : 'text-muted-foreground hover:text-text'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {!canPrivilegedWorkflow ? (
+            <span className="text-xs text-muted-foreground">
+              Nội dung sửa sẽ gửi Super Admin duyệt và tạm ẩn nếu đang công khai.
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+          <div className="min-w-0 text-xs text-muted-foreground">
+            <span className={cn('font-semibold', dirty ? 'text-amber-700' : 'text-emerald-700')}>
+              {dirty ? 'Có thay đổi chưa lưu' : 'Đã lưu đồng bộ'}
+            </span>
+            {recordMeta?.updated_at ? (
+              <span className="ml-2 hidden sm:inline">Cập nhật {formatDate(recordMeta.updated_at)}</span>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {publicHref ? (
+              <a
+                href={publicHref}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-border bg-panel px-3 text-sm font-medium text-slate-700 transition-colors hover:bg-muted"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Xem trên website
+              </a>
+            ) : null}
+            {canSave ? (
+              <Button type="submit" disabled={saving || !dirty}>
+                <Save className="h-4 w-4" />
+                {saving ? 'Đang lưu...' : saveLabel}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ServiceReadinessStrip({ checks }: { checks: ServiceQualityCheck[] }) {
+  const completed = checks.filter((check) => check.ok).length;
+  const missing = checks.filter((check) => !check.ok);
+
+  return (
+    <details
+      data-domain-public-readiness="true"
+      className={cn(
+        'group rounded-md border bg-panel',
+        missing.length > 0 ? 'border-amber-200' : 'border-emerald-200'
+      )}
+    >
+      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 px-4 py-3">
+        {missing.length > 0 ? (
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+        ) : (
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+        )}
+        <span className="min-w-0 flex-1 text-sm font-semibold text-text">
+          {missing.length > 0
+            ? `Trang dịch vụ còn ${missing.length} mục cần bổ sung`
+            : 'Trang dịch vụ đã đủ nội dung chính'}
+        </span>
+        <span className="text-xs font-medium text-muted-foreground">
+          {completed}/{checks.length}
+        </span>
+        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="grid gap-2 border-t border-border px-4 py-3 sm:grid-cols-2 xl:grid-cols-3">
+        {(missing.length > 0 ? missing : checks).map((check) => (
+          <div key={check.label} className="flex items-start gap-2 text-sm text-slate-700">
+            {check.ok ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            ) : (
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            )}
+            <span>{check.label}</span>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -1231,15 +1257,18 @@ function RelatedProductGroupsCard({
   entityId,
   detailRecord,
   canUpdate,
-  onReload
+  onReload,
+  reviewAfterEdit
 }: {
   kind: DomainKind;
   entityId: string;
   detailRecord: Record<string, unknown> | null;
   canUpdate: boolean;
   onReload: () => Promise<void>;
+  reviewAfterEdit: boolean;
 }) {
   const [actionError, setActionError] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const groups = relatedProductGroupsFromDetail(detailRecord);
   const counts = asRecord(detailRecord?.related_product_group_counts);
@@ -1249,18 +1278,31 @@ function RelatedProductGroupsCard({
   const cardSubtitle =
     kind === 'service'
       ? 'Các nhóm sản phẩm này sẽ hiển thị trên trang chi tiết dịch vụ public nếu chúng đang public hợp lệ.'
-      : 'Các nhóm sản phẩm này sẽ hiển thị trên trang chi tiết dự án public nếu chúng đang public hợp lệ.';
-  const pickerHint =
-    kind === 'service'
-      ? 'Chỉ gắn những nhóm sản phẩm thật sự liên quan đến dịch vụ.'
-      : 'Chỉ gắn những nhóm sản phẩm đã thực sự được sử dụng trong dự án.';
+      : 'Chỉ gắn nhóm phù hợp với phạm vi dự án. Website hiển thị nhóm đã liên kết, không xác nhận SKU cụ thể.';
+  const unavailableProductGroups = Object.fromEntries(
+    groups.flatMap((group) => {
+      const productGroup = relationProductGroup(group);
+      const productGroupId = textValue(productGroup.id);
+      if (!productGroupId) return [];
+      return [
+        [
+          productGroupId,
+          asRecord(group.association).deleted_at ? 'Đã gỡ' : 'Đã gắn'
+        ]
+      ];
+    })
+  );
 
   async function runAction(action: () => Promise<unknown>) {
     setBusy(true);
     setActionError('');
+    setActionMessage('');
     try {
       await action();
       await onReload();
+      setActionMessage(reviewAfterEdit
+        ? `Đã lưu. Trang ${entityLabel} chuyển sang chờ duyệt và tạm ẩn khỏi website.`
+        : 'Đã cập nhật sản phẩm liên quan.');
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Không cập nhật được sản phẩm liên quan.');
     } finally {
@@ -1294,19 +1336,14 @@ function RelatedProductGroupsCard({
         </div>
 
         {canUpdate ? (
-          <div>
-            <p className="mb-1.5 text-[13px] font-medium leading-5 text-slate-700">
-              Gắn nhóm sản phẩm
-            </p>
-            <RelationActionPicker
-              kind="productGroup"
-              readOnly={busy}
-              buttonLabel="Chọn và gắn"
-              loadingLabel="Đang gắn"
-              onSelect={(productGroupId) => attachProductGroup(productGroupId)}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">{pickerHint}</p>
-          </div>
+          <RelationActionPicker
+            kind="productGroup"
+            readOnly={busy}
+            buttonLabel="Gắn sản phẩm"
+            loadingLabel="Đang gắn"
+            unavailableItems={unavailableProductGroups}
+            onSelect={(productGroupId) => attachProductGroup(productGroupId)}
+          />
         ) : (
           <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
             Bạn có quyền xem {entityLabel} nhưng chưa có quyền cập nhật liên kết sản phẩm.
@@ -1314,6 +1351,7 @@ function RelatedProductGroupsCard({
         )}
 
         {actionError ? <p className="text-xs text-red-600">{actionError}</p> : null}
+        {actionMessage ? <p className="text-xs text-green-700" role="status">{actionMessage}</p> : null}
 
         {groups.length === 0 ? (
           <div className="rounded-sm border border-dashed border-border bg-muted px-3 py-6 text-center text-sm text-muted-foreground">
@@ -1422,23 +1460,15 @@ function DetailSkeleton() {
         </div>
         <Skeleton className="h-9 w-28" />
       </div>
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
-        <div className="space-y-4">
-          <Card>
-            <div className="space-y-4 p-4">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          </Card>
-          <Card>
-            <Skeleton className="h-80 w-full" />
-          </Card>
-        </div>
+      <div className="space-y-4">
         <Card>
-          <div className="space-y-3 p-4">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="aspect-video w-full" />
+          <div className="space-y-4 p-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-20 w-full" />
           </div>
+        </Card>
+        <Card>
+          <Skeleton className="h-80 w-full" />
         </Card>
       </div>
     </section>

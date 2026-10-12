@@ -1,12 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Knex } from 'knex';
 
+import { AppError } from '../../common/errors/app-error';
+import { ErrorCodes } from '../../common/errors/error-codes';
 import {
   syncManagedFileUsage,
   type FileUsageDatabase
 } from '../../common/files/file-usage-sync';
 import { applyUpdatedOnFilter } from '../../common/validation/date-filter';
 import { KnexService } from '../../db/knex.service';
+import { lockUsableProductGroupForChildMutation } from '../product-group/productGroupTransactionGuard';
 import {
   FILE_METADATA_TABLE,
   FILE_USAGE_TABLE,
@@ -35,6 +38,13 @@ interface ListFilters {
   is_public: TechnicalDocumentPublicFilter;
   deleted_scope: TechnicalDocumentDeletedScope;
 }
+
+export type TechnicalDocumentWriteOutcome =
+  | { status: 'updated' }
+  | { status: 'not_found' }
+  | { status: 'archived' }
+  | { status: 'not_archived' }
+  | { status: 'stale'; current_updated_at: Date | string };
 
 @Injectable()
 export class TechnicalDocumentRepository {
@@ -198,6 +208,11 @@ export class TechnicalDocumentRepository {
 
   async create(input: Required<Pick<TechnicalDocumentMutationInput, 'product_group_id' | 'document_name' | 'document_type' | 'file_id'>> & TechnicalDocumentMutationInput): Promise<TechnicalDocumentRecord> {
     return this.knexService.db.transaction(async (trx) => {
+      await this.lockDocumentProductReferences(
+        trx,
+        input.product_group_id,
+        input.product_variant_id ?? null
+      );
       const [row] = await trx<TechnicalDocumentRecord>(TECHNICAL_DOCUMENT_TABLE)
         .insert({
           product_group_id: input.product_group_id,
@@ -216,13 +231,31 @@ export class TechnicalDocumentRepository {
     });
   }
 
-  async update(id: string, input: TechnicalDocumentMutationInput): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async update(
+    id: string,
+    input: TechnicalDocumentMutationInput,
+    expectedUpdatedAt?: string
+  ): Promise<TechnicalDocumentWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<TechnicalDocumentRecord>(TECHNICAL_DOCUMENT_TABLE)
         .where({ id })
         .forUpdate()
         .first();
-      if (!existing) return;
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      const productGroupId = input.product_group_id ?? existing.product_group_id;
+      const productVariantId =
+        typeof input.product_variant_id === 'undefined'
+          ? existing.product_variant_id
+          : input.product_variant_id;
+      await this.lockDocumentProductReferences(
+        trx,
+        productGroupId,
+        productVariantId ?? null
+      );
       const nextFileId = typeof input.file_id === 'undefined' ? existing.file_id : input.file_id;
       const patch: Record<string, unknown> = {};
       for (const field of [
@@ -244,34 +277,52 @@ export class TechnicalDocumentRepository {
         await trx(TECHNICAL_DOCUMENT_TABLE).where({ id }).whereNull('deleted_at').update(patch);
       }
       await this.syncFileUsage(trx, id, existing.file_id, nextFileId ?? null);
+      return { status: 'updated' };
     });
   }
 
-  async archive(id: string): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async archive(id: string, expectedUpdatedAt?: string): Promise<TechnicalDocumentWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<TechnicalDocumentRecord>(TECHNICAL_DOCUMENT_TABLE)
         .where({ id })
         .forUpdate()
         .first();
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
       await trx(TECHNICAL_DOCUMENT_TABLE)
         .where({ id })
         .whereNull('deleted_at')
         .update({ deleted_at: trx.fn.now() });
-      await this.syncFileUsage(trx, id, existing?.file_id ?? null, null);
+      await this.syncFileUsage(trx, id, existing.file_id ?? null, null);
+      return { status: 'updated' };
     });
   }
 
-  async restore(id: string): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async restore(id: string, expectedUpdatedAt?: string): Promise<TechnicalDocumentWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<TechnicalDocumentRecord>(TECHNICAL_DOCUMENT_TABLE)
         .where({ id })
         .forUpdate()
         .first();
+      if (!existing) return { status: 'not_found' };
+      if (!existing.deleted_at) return { status: 'not_archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      await this.lockDocumentProductReferences(
+        trx,
+        existing.product_group_id,
+        existing.product_variant_id
+      );
       await trx(TECHNICAL_DOCUMENT_TABLE)
         .where({ id })
         .whereNotNull('deleted_at')
         .update({ deleted_at: null });
-      await this.syncFileUsage(trx, id, null, existing?.file_id ?? null);
+      await this.syncFileUsage(trx, id, null, existing.file_id ?? null);
+      return { status: 'updated' };
     });
   }
 
@@ -290,6 +341,50 @@ export class TechnicalDocumentRepository {
       previousFileId,
       nextFileId
     });
+  }
+
+  /**
+   * Locks a referenced variant before its group, matching the public quote and
+   * variant-write lock order. The relationship is then re-checked after any
+   * concurrent variant move has completed.
+   */
+  private async lockDocumentProductReferences(
+    trx: Knex.Transaction,
+    productGroupId: string,
+    productVariantId: string | null
+  ): Promise<void> {
+    if (productVariantId) {
+      const variant = await trx(PRODUCT_VARIANT_TABLE)
+        .where({ id: productVariantId })
+        .forUpdate()
+        .first<{
+          id: string;
+          product_group_id: string;
+          status: string;
+          deleted_at: Date | string | null;
+        }>(['id', 'product_group_id', 'status', 'deleted_at']);
+
+      if (!variant || variant.deleted_at || variant.status !== 'active') {
+        throw new AppError({
+          code: ErrorCodes.NOT_FOUND,
+          message: 'Referenced product variant was not found.',
+          statusCode: HttpStatus.NOT_FOUND
+        });
+      }
+      if (variant.product_group_id !== productGroupId) {
+        throw new AppError({
+          code: 'TECHNICAL_DOCUMENT_VARIANT_GROUP_MISMATCH',
+          message: 'Product variant does not belong to the selected product group.',
+          statusCode: HttpStatus.CONFLICT,
+          details: {
+            expected_product_group_id: productGroupId,
+            actual_product_group_id: variant.product_group_id
+          }
+        });
+      }
+    }
+
+    await lockUsableProductGroupForChildMutation(trx, productGroupId);
   }
 
   private async fileUsageCount(technicalDocumentId: string): Promise<number> {
@@ -361,4 +456,9 @@ export class TechnicalDocumentRepository {
       | undefined;
     return Number(row?.total ?? 0);
   }
+}
+
+function isStaleWrite(actualUpdatedAt: Date | string, expectedUpdatedAt?: string): boolean {
+  if (!expectedUpdatedAt) return false;
+  return new Date(actualUpdatedAt).getTime() !== new Date(expectedUpdatedAt).getTime();
 }

@@ -1,6 +1,5 @@
-import { moduleConfigs } from '@/features/module-config';
-import { ModuleListPage } from '@/features/shared/ModuleListPage';
+import { AuditLogList } from '@/features/system/AuditLogList';
 
 export default function Page() {
-  return <><ModuleListPage config={moduleConfigs.auditLogs} /></>;
+  return <AuditLogList />;
 }

@@ -389,6 +389,7 @@ export function CustomerDetailPage({
           <Field label="Họ và tên" readOnly={readOnly} required>
             <Input
               value={form.full_name}
+              maxLength={128}
               readOnly={readOnly}
               onChange={(event) => setForm((current) => ({ ...current, full_name: event.target.value }))}
             />
@@ -396,6 +397,7 @@ export function CustomerDetailPage({
           <Field label="Công ty" readOnly={readOnly}>
             <Input
               value={form.company_name}
+              maxLength={255}
               readOnly={readOnly}
               onChange={(event) => setForm((current) => ({ ...current, company_name: event.target.value }))}
             />
@@ -403,6 +405,7 @@ export function CustomerDetailPage({
           <Field label="Số điện thoại" readOnly={readOnly}>
             <Input
               value={form.phone}
+              maxLength={32}
               readOnly={readOnly}
               onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
             />
@@ -410,6 +413,7 @@ export function CustomerDetailPage({
           <Field label="Email" readOnly={readOnly}>
             <Input
               value={form.email}
+              maxLength={128}
               readOnly={readOnly}
               onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
             />

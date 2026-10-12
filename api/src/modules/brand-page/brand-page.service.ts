@@ -1,8 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 
+import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
 import { getPaginationParams } from '../../common/pagination/pagination';
+import { isVisibilityOnlyUnpublish, reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
 import { UUID_PATTERN } from '../brand/brand.guardrails';
 import { BrandPageListQueryDto, CreateBrandPageDto, UpdateBrandPageDto } from './brand-page.dto';
 import { BrandPageRepository } from './brand-page.repository';
@@ -62,7 +64,7 @@ export class BrandPageService {
     return this.getBrandPageDetail(created.id);
   }
 
-  async updateBrandPage(pageId: string, input: UpdateBrandPageDto) {
+  async updateBrandPage(pageId: string, input: UpdateBrandPageDto, currentUser: CurrentUserContext | null) {
     const id = this.assertUuid('brand_page_id', pageId);
     const existing = await this.brandPageRepository.findPageById(id);
     if (!existing) {
@@ -72,8 +74,54 @@ export class BrandPageService {
       throw this.conflict('Brand page is archived.');
     }
     const normalized = await this.normalizeUpdateInput(existing, input);
+    const actorIsSuperAdmin = currentUser?.roles.includes('super_admin') ?? false;
+    reopenPublishedContentAfterMajorEdit(existing, normalized.mutation, [
+      'title', 'excerpt', 'overview_title', 'overview_body', 'support_title',
+      'support_intro', 'support_items', 'support_image_file_id',
+      'hero_banner_id', 'hero_title_size', 'hero_excerpt_size',
+      'hero_eyebrow_color', 'hero_title_color', 'hero_excerpt_color',
+      'accent_color', 'layout_archetype', 'cta_title', 'cta_description',
+      'cta_button_label', 'cta_button_url', 'seo_title', 'seo_description',
+      'seo_og_image_file_id'
+    ], actorIsSuperAdmin);
+    if (!actorIsSuperAdmin && await this.nestedInputChanged(id, normalized.nested)) {
+      const reviewMutation = { ...normalized.mutation, nested_changed: true };
+      reopenPublishedContentAfterMajorEdit(
+        { ...existing, nested_changed: false },
+        reviewMutation,
+        ['nested_changed']
+      );
+      normalized.mutation.review_status = reviewMutation.review_status;
+      normalized.mutation.publish_status = reviewMutation.publish_status;
+    }
     await this.brandPageRepository.update(id, normalized.mutation, normalized.nested);
     return this.getBrandPageDetail(id);
+  }
+
+  private async nestedInputChanged(
+    id: string,
+    nested: {
+      stats?: BrandPageStatMutationInput[];
+      sources?: BrandPageSourceMutationInput[];
+      featured_product_group_ids?: string[];
+    }
+  ): Promise<boolean> {
+    if (Object.values(nested).every((value) => value === undefined)) return false;
+    const detail = await this.brandPageRepository.findDetailById(id);
+    if (!detail) throw this.notFound('Brand page was not found.');
+    if (nested.stats && JSON.stringify(nested.stats) !== JSON.stringify(detail.stats.map((row) => ({
+      value: row.value, label: row.label, note: row.note,
+      source_url: row.source_url, source_file_id: row.source_file_id,
+      is_verified: row.is_verified, sort_order: row.sort_order, status: row.status
+    })))) return true;
+    if (nested.sources && JSON.stringify(nested.sources) !== JSON.stringify(detail.sources.map((row) => ({
+      title: row.title, source_type: row.source_type, url: row.url,
+      file_id: row.file_id, description: row.description,
+      sort_order: row.sort_order, status: row.status
+    })))) return true;
+    if (nested.featured_product_group_ids && JSON.stringify(nested.featured_product_group_ids) !==
+      JSON.stringify(detail.featured_product_groups.map((row) => row.product_group_id))) return true;
+    return false;
   }
 
   async archiveBrandPage(pageId: string) {
@@ -206,7 +254,7 @@ export class BrandPageService {
     if (nextPublish === 'published' && nextReview !== 'approved') {
       throw this.conflict('Publishing requires review_status approved.');
     }
-    await this.assertBrandUsable(brandId);
+    if (!isVisibilityOnlyUnpublish(input)) await this.assertBrandUsable(brandId);
     return mutation;
   }
 
@@ -277,7 +325,11 @@ export class BrandPageService {
     const uniqueIds = Array.from(new Set(ids.filter(Boolean))).slice(0, 12);
     for (const id of uniqueIds) {
       this.assertUuid('product_group_id', id);
-      const context = await this.brandPageRepository.productGroupContext(id);
+    }
+
+    const contexts = await this.brandPageRepository.productGroupContexts(uniqueIds);
+    for (const id of uniqueIds) {
+      const context = contexts.get(id);
       if (!context || context.deleted_at) {
         throw this.notFound(`Product group ${id} was not found.`);
       }

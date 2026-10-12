@@ -8,6 +8,13 @@ import {
   type NewsCategoryRecord
 } from './news-category.types';
 
+export type NewsCategoryWriteOutcome =
+  | { status: 'updated' }
+  | { status: 'not_found' }
+  | { status: 'archived' }
+  | { status: 'not_archived' }
+  | { status: 'linked'; page_content_id: string };
+
 @Injectable()
 export class NewsCategoryRepository {
   constructor(private readonly knexService: KnexService) {}
@@ -53,28 +60,49 @@ export class NewsCategoryRepository {
     return row;
   }
 
-  async update(id: string, input: NewsCategoryMutationInput): Promise<void> {
-    const patch: Record<string, unknown> = { updated_at: this.knexService.db.fn.now() };
-    if (typeof input.name !== 'undefined') patch.name = input.name;
-    if (typeof input.slug !== 'undefined') patch.slug = input.slug;
-    if (typeof input.sort_order !== 'undefined') patch.sort_order = input.sort_order;
-    await this.knexService.db(NEWS_CATEGORY_TABLE).where({ id }).whereNull('deleted_at').update(patch);
+  async update(id: string, input: NewsCategoryMutationInput): Promise<NewsCategoryWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
+      const existing = await trx(NEWS_CATEGORY_TABLE).where({ id }).forUpdate().first(['id', 'deleted_at']);
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      const patch: Record<string, unknown> = { updated_at: trx.fn.now() };
+      if (typeof input.name !== 'undefined') patch.name = input.name;
+      if (typeof input.slug !== 'undefined') patch.slug = input.slug;
+      if (typeof input.sort_order !== 'undefined') patch.sort_order = input.sort_order;
+      await trx(NEWS_CATEGORY_TABLE).where({ id }).whereNull('deleted_at').update(patch);
+      return { status: 'updated' };
+    });
   }
 
-  async archive(id: string): Promise<void> {
-    await this.knexService
-      .db(NEWS_CATEGORY_TABLE)
-      .where({ id })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now(), updated_at: this.knexService.db.fn.now() });
+  async archive(id: string): Promise<NewsCategoryWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
+      const existing = await trx(NEWS_CATEGORY_TABLE).where({ id }).forUpdate().first(['id', 'deleted_at']);
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      const linked = await trx('page_content')
+        .where({ news_category_id: id })
+        .whereNull('deleted_at')
+        .first<{ id: string }>('id');
+      if (linked) return { status: 'linked', page_content_id: linked.id };
+      await trx(NEWS_CATEGORY_TABLE)
+        .where({ id })
+        .whereNull('deleted_at')
+        .update({ deleted_at: trx.fn.now(), updated_at: trx.fn.now() });
+      return { status: 'updated' };
+    });
   }
 
-  async restore(id: string): Promise<void> {
-    await this.knexService
-      .db(NEWS_CATEGORY_TABLE)
-      .where({ id })
-      .whereNotNull('deleted_at')
-      .update({ deleted_at: null, updated_at: this.knexService.db.fn.now() });
+  async restore(id: string): Promise<NewsCategoryWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
+      const existing = await trx(NEWS_CATEGORY_TABLE).where({ id }).forUpdate().first(['id', 'deleted_at']);
+      if (!existing) return { status: 'not_found' };
+      if (!existing.deleted_at) return { status: 'not_archived' };
+      await trx(NEWS_CATEGORY_TABLE)
+        .where({ id })
+        .whereNotNull('deleted_at')
+        .update({ deleted_at: null, updated_at: trx.fn.now() });
+      return { status: 'updated' };
+    });
   }
 
   async hasLinkedArticles(id: string): Promise<boolean> {

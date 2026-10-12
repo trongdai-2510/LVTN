@@ -67,7 +67,8 @@ async function buildRoutes() {
     routes.splice(3, 0, {
       route: `/san-pham/${product.slug}`,
       label: 'Chi tiết sản phẩm',
-      expected: ['thong so noi bat', 'yeu cau bao gia'],
+      expected: ['thong so noi bat'],
+      quoteProductName: product.name,
       mobile: true,
       risk: 'P0'
     });
@@ -146,6 +147,14 @@ async function inspectRoute(page, routeSpec, viewport) {
   await page.setViewport(viewport.width, viewport.height, viewport.mobile);
   await page.navigate(`${FRONTEND_BASE_URL}${routeSpec.route}`);
   await page.waitForReady('document.body && document.body.innerText && document.body.innerText.length > 20', 8000);
+  // Server-rendered detail routes can stream after the shared header appears.
+  // Inspecting at that first text node produces false passes and false failures.
+  if (routeSpec.expected?.length) {
+    await page.waitForReady(
+      `(${JSON.stringify(routeSpec.expected)}).every((item) => window.normalizeForQa(document.body?.innerText || '').includes(window.normalizeForQa(item)))`,
+      10000
+    );
+  }
   const state = await page.evaluate(`(${inspectPublicRoute.toString()})(${JSON.stringify(routeSpec)})`);
   assert(state.no_runtime_overlay, 'runtime overlay is visible');
   assert(
@@ -162,6 +171,35 @@ async function inspectRoute(page, routeSpec, viewport) {
       .filter(([, present]) => !present)
       .map(([name]) => name);
     assert(missing.length === 0, `missing form fields: ${missing.join(', ')}`);
+  }
+  if (routeSpec.quoteProductName) {
+    await page.waitForReady(`Boolean(document.querySelector('[data-product-primary-actions] [data-quote-action="open"]'))`, 6000);
+    let dialogOpened = false;
+    for (let attempt = 0; attempt < 4 && !dialogOpened; attempt += 1) {
+      const actionFound = await page.evaluate(`(() => {
+        const action = document.querySelector('[data-product-primary-actions] [data-quote-action="open"]');
+        if (!(action instanceof HTMLButtonElement)) return false;
+        action.click();
+        return true;
+      })()`);
+      assert(actionFound, 'product quote action is missing');
+      await delay(1000);
+      dialogOpened = Boolean(await page.evaluate(`document.querySelector('[role="dialog"][aria-modal="true"]')?.getClientRects().length > 0`));
+    }
+    assert(dialogOpened, 'product quote action did not open its dialog');
+    const quoteState = await page.evaluate(`(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+      const text = window.normalizeForQa(dialog?.innerText || '');
+      return {
+        url: location.href,
+        hasProduct: text.includes(window.normalizeForQa(${JSON.stringify(routeSpec.quoteProductName)})),
+        hasQuantity: Boolean(dialog?.querySelector('[data-quote-quantity-index="0"]'))
+      };
+    })()`);
+    assert(quoteState.url === `${FRONTEND_BASE_URL}${routeSpec.route}`, 'quote action navigated away from the product');
+    assert(quoteState.hasProduct, 'quote form lost the selected product');
+    assert(quoteState.hasQuantity, 'quote form is missing the quantity field');
+    state.quote_flow = quoteState;
   }
   return state;
 }
@@ -511,7 +549,7 @@ class CdpPage {
 }
 
 function writeReport() {
-  const reportPath = path.join(ROOT, 'docs', 'working-notes', 'public-ui-qa-last-run.md');
+  const reportPath = path.join(ROOT, 'tmp', 'qa-artifacts', 'public-ui-qa-last-run.md');
   mkdirSync(path.dirname(reportPath), { recursive: true });
   const lines = [
     '# Public UI QA last run',
@@ -540,7 +578,7 @@ function printSummary() {
     const suffix = result.status === 'PASS' ? '' : ` - ${result.error}`;
     console.log(`${result.status} ${result.route} [${result.viewport}]${suffix}`);
   }
-  console.log(`Report: ${path.join(ROOT, 'docs', 'working-notes', 'public-ui-qa-last-run.md')}`);
+  console.log(`Report: ${path.join(ROOT, 'tmp', 'qa-artifacts', 'public-ui-qa-last-run.md')}`);
   console.log(`Summary: ${results.length - failed.length}/${results.length} passed`);
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { Search } from '@/components/icons';
 
@@ -62,11 +63,17 @@ export function ContactQuoteListPage({
   endpoint: string;
   detailPath: string;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams.get('q') ?? '';
+  const routeStatus = searchParams.get('status') ?? 'all';
+  const selectedRouteTab = STATUS_TABS.some((tab) => tab.key === routeStatus) ? routeStatus : 'all';
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('all');
+  const [query, setQuery] = useState(routeQuery);
+  const [activeTab, setActiveTab] = useState(selectedRouteTab);
   const [createdFrom, setCreatedFrom] = useState('');
   const [createdTo, setCreatedTo] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
@@ -76,6 +83,26 @@ export function ContactQuoteListPage({
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<PermanentDeleteTarget | null>(null);
   const auth = useAuthState();
   const text = copy[type];
+
+  useEffect(() => {
+    setQuery(routeQuery);
+    setPage(1);
+  }, [routeQuery]);
+
+  useEffect(() => {
+    setActiveTab(selectedRouteTab);
+    setPage(1);
+  }, [selectedRouteTab]);
+
+  function changeStatusTab(key: StatusTab['key']) {
+    setActiveTab(key);
+    setPage(1);
+    const params = new URLSearchParams(searchParams.toString());
+    if (key === 'all') params.delete('status');
+    else params.set('status', key);
+    const queryString = params.toString();
+    router.replace(`${pathname}${queryString ? `?${queryString}` : ''}`, { scroll: false });
+  }
 
   const currentStatus = STATUS_TABS.find((tab) => tab.key === activeTab)?.status;
 
@@ -232,7 +259,8 @@ export function ContactQuoteListPage({
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => { setActiveTab(tab.key); setPage(1); }}
+                onClick={() => changeStatusTab(tab.key)}
+                aria-pressed={isActive}
                 className={
                   'shrink-0 border-b-2 px-3 py-2.5 text-[13px] font-medium transition-colors ' +
                   (isActive
@@ -260,6 +288,7 @@ export function ContactQuoteListPage({
                 <Input
                   className="pl-9"
                   value={query}
+                  maxLength={255}
                   onChange={(event) => { setQuery(event.target.value); setPage(1); }}
                   placeholder={text.search}
                 />

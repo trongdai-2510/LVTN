@@ -95,6 +95,7 @@ export class ImportWorkspaceRepository {
         `${alias}.batch_name`,
         `${alias}.source_file_name`,
         `${alias}.source_file_id`,
+        `${alias}.source_sheet_name`,
         `${alias}.uploaded_by`,
         `${alias}.status`,
         `${alias}.total_rows`,
@@ -130,6 +131,7 @@ export class ImportWorkspaceRepository {
         'batch_name',
         'source_file_name',
         'source_file_id',
+        'source_sheet_name',
         'uploaded_by',
         'status',
         'total_rows',
@@ -181,6 +183,7 @@ export class ImportWorkspaceRepository {
         'batch_name',
         'source_file_name',
         'source_file_id',
+        'source_sheet_name',
         'uploaded_by',
         'status',
         'total_rows',
@@ -267,10 +270,13 @@ export class ImportWorkspaceRepository {
       | undefined) ?? null;
   }
 
-  async listPendingProductGroups(params: { importBatchId: string; filters: PendingListFilters; limit: number; offset: number }) {
+  async listPendingProductGroups(
+    params: { importBatchId: string; filters: PendingListFilters; limit: number; offset: number },
+    db: Knex | Knex.Transaction = this.knexService.db
+  ) {
     const alias = 'pending_product_group_record';
     const baseQuery = this.applyPendingListFilters(
-      this.knexService.db({ [alias]: PENDING_PRODUCT_GROUP_TABLE }).where(`${alias}.import_batch_id`, params.importBatchId),
+      db({ [alias]: PENDING_PRODUCT_GROUP_TABLE }).where(`${alias}.import_batch_id`, params.importBatchId),
       alias,
       params.filters,
       [`${alias}.external_code`, `${alias}.product_name`, `${alias}.main_category_name`, `${alias}.category_name`, `${alias}.brand_name`]
@@ -610,6 +616,7 @@ export class ImportWorkspaceRepository {
     batch_name: string | null;
     source_file_name: string;
     source_file_id: string;
+    source_sheet_name?: string | null;
     total_rows: number;
     notes: string | null;
     selected_row_ranges?: Array<{ start_row: number; end_row: number }> | null;
@@ -620,6 +627,7 @@ export class ImportWorkspaceRepository {
       batch_name: input.batch_name,
       source_file_name: input.source_file_name,
       source_file_id: input.source_file_id,
+      source_sheet_name: input.source_sheet_name ?? null,
       uploaded_by: input.uploaded_by,
       status: 'created',
       total_rows: input.total_rows,
@@ -711,15 +719,28 @@ export class ImportWorkspaceRepository {
       });
   }
 
-  async insertRawData(input: { import_batch_id: string; row_number: number; external_code: string | null; raw_content: unknown }, db: Knex.Transaction): Promise<string> {
-    const [row] = await db(RAW_DATA_TABLE).insert({
-      import_batch_id: input.import_batch_id,
-      row_number: input.row_number,
-      external_code: input.external_code,
-      raw_content: JSON.stringify(input.raw_content),
-      status: 'parsed'
-    }).returning(['id']);
-    return row.id as string;
+  async insertRawDataRows(
+    inputs: Array<{
+      import_batch_id: string;
+      row_number: number;
+      external_code: string | null;
+      raw_content: unknown;
+    }>,
+    db: Knex.Transaction
+  ): Promise<void> {
+    const chunkSize = 500;
+    for (let offset = 0; offset < inputs.length; offset += chunkSize) {
+      const chunk = inputs.slice(offset, offset + chunkSize);
+      await db(RAW_DATA_TABLE).insert(
+        chunk.map((input) => ({
+          import_batch_id: input.import_batch_id,
+          row_number: input.row_number,
+          external_code: input.external_code,
+          raw_content: JSON.stringify(input.raw_content),
+          status: 'parsed'
+        }))
+      );
+    }
   }
 
   async listRawDataPreview(
@@ -909,16 +930,28 @@ export class ImportWorkspaceRepository {
     return row ?? null;
   }
 
-  async findOfficialVariantByIdentity(input: { external_code?: string | null; sku?: string | null; model_code?: string | null }, db: Knex | Knex.Transaction = this.knexService.db): Promise<{ id: string; public_price_mode: string; public_price_amount: number | null } | null> {
-    if (!input.external_code && !input.sku && !input.model_code) return null;
+  async findOfficialVariantsByIdentity(input: { external_code?: string | null; sku?: string | null; model_code?: string | null }, db: Knex | Knex.Transaction = this.knexService.db): Promise<Array<{ id: string; public_price_mode: string; public_price_amount: number | null }>> {
+    if (!input.external_code && !input.sku && !input.model_code) return [];
     const query = db(PRODUCT_VARIANT_TABLE).whereNull('deleted_at');
     query.andWhere((builder) => {
       if (input.external_code) builder.orWhere('external_code', input.external_code);
       if (input.sku) builder.orWhere('sku', input.sku);
       if (input.model_code) builder.orWhere('model_code', input.model_code);
     });
-    const row = await query.first('id', 'public_price_mode', 'public_price_amount');
-    return row ?? null;
+    return query.limit(2).select('id', 'public_price_mode', 'public_price_amount');
+  }
+
+  async findOfficialVariantsByGroupAndName(
+    productGroupId: string,
+    variantName: string,
+    db: Knex | Knex.Transaction = this.knexService.db
+  ): Promise<Array<{ id: string; public_price_mode: string; public_price_amount: number | null }>> {
+    return db(PRODUCT_VARIANT_TABLE)
+      .where({ product_group_id: productGroupId })
+      .whereNull('deleted_at')
+      .whereRaw('lower(btrim(variant_name)) = lower(?)', [variantName.trim()])
+      .limit(2)
+      .select('id', 'public_price_mode', 'public_price_amount');
   }
 
   async findActiveCategoryByName(name: string, db: Knex | Knex.Transaction = this.knexService.db): Promise<{ id: string; name: string } | null> {

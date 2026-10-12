@@ -15,8 +15,8 @@ export type ImportSingleColumnRole =
   | 'model_code'
   | 'public_price';
 
-export type ImportMultiColumnRole = 'spec' | 'attribute' | 'ignore';
-export type ImportColumnRole = ImportSingleColumnRole | ImportMultiColumnRole;
+type ImportMultiColumnRole = 'spec' | 'attribute' | 'ignore';
+type ImportColumnRole = ImportSingleColumnRole | ImportMultiColumnRole;
 
 export interface ImportColumnMappingConfig {
   category_main_column: string;
@@ -55,12 +55,12 @@ const ROLE_LABELS: Record<ImportColumnRole, string> = {
   product_variant: 'Biến thể sản phẩm',
   brand: 'Thương hiệu',
   short_description: 'Mô tả ngắn',
-  group_external_code: 'Mã nhóm ngoài',
-  variant_external_code: 'Mã biến thể ngoài',
+  group_external_code: 'Mã nhóm chung',
+  variant_external_code: 'Mã liên kết riêng',
   sku: 'SKU',
-  model_code: 'Mã model',
+  model_code: 'Mã sản phẩm',
   public_price: 'Giá công khai',
-  spec: 'Thông số sản phẩm',
+  spec: 'Thông số biến thể',
   attribute: 'Thuộc tính biến thể',
   ignore: 'Bỏ qua'
 };
@@ -355,6 +355,11 @@ export function validateImportColumnMappingConfig(
     if (!column) continue;
     const existing = assignedColumns.get(column);
     if (existing) {
+      const isFlatProductNameReuse =
+        existing === 'product_group_column' &&
+        fieldName === 'product_variant_column';
+      if (isFlatProductNameReuse) continue;
+
       throw validationError('Một cột không thể gán cho hai đích dữ liệu khác nhau.', {
         field: fieldName,
         column,
@@ -478,10 +483,10 @@ export function buildPreviewColumnMappingSummary(
         source_column: header,
         target_key: 'spec',
         target_label: ROLE_LABELS.spec,
-        status: 'staged_only',
+        status: 'mapped',
         sample_values: sampleValues,
         decision:
-          'Sẽ giữ trong dữ liệu tạm như thông số sản phẩm để kiểm tra trước khi mở luồng ghi thông số chính thức.'
+          'Giữ ở dữ liệu tạm để kiểm tra; khi áp dụng lô sẽ ghi vào thuộc tính biến thể.'
       };
     }
 
@@ -490,10 +495,10 @@ export function buildPreviewColumnMappingSummary(
         source_column: header,
         target_key: 'attribute',
         target_label: ROLE_LABELS.attribute,
-        status: 'staged_only',
+        status: 'mapped',
         sample_values: sampleValues,
         decision:
-          'Sẽ giữ trong dữ liệu tạm như thuộc tính biến thể để rà soát trước khi ghi vào dữ liệu chính thức.'
+          'Giữ ở dữ liệu tạm để kiểm tra; khi áp dụng lô sẽ ghi vào thuộc tính biến thể.'
       };
     }
 

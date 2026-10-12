@@ -70,7 +70,7 @@ export interface ProjectProductGroupAssociation {
   deleted_at: Date | null;
 }
 
-export interface ProjectGalleryFileSummary {
+interface ProjectGalleryFileSummary {
   id: string;
   original_filename: string;
   mime_type: string;

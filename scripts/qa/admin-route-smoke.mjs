@@ -140,13 +140,14 @@ async function buildRoutes() {
     });
   }
 
-  const productGroupDetail = await findFirstDetailRoute('/song-thanh/product-groups', '/product-groups');
+  const productGroupDetail = await findProductGroupDetailRoute();
   if (productGroupDetail) {
     insertAfter(routes, '/product-groups/new', {
-      route: productGroupDetail,
+      route: productGroupDetail.route,
       label: 'Chi tiết sản phẩm',
       kind: 'product-group-detail',
-      risk: 'P0'
+      risk: 'P0',
+      expectsVariantWorkspace: productGroupDetail.expectsVariantWorkspace
     });
   }
 
@@ -192,7 +193,11 @@ async function runRouteCase(page, routeSpec) {
 
 async function inspectRoute(page, routeSpec) {
   await page.setViewport(1440, 1100, false);
-  await page.navigate(adminUrl(routeSpec.route));
+  const inspectionRoute =
+    routeSpec.kind === 'product-group-detail'
+      ? `${routeSpec.route}${routeSpec.route.includes('?') ? '&' : '?'}view=variants`
+      : routeSpec.route;
+  await page.navigate(adminUrl(inspectionRoute));
   // next dev compiles each dynamic route lazily. Keep this cold-start allowance
   // separate from the content readiness assertion so compiler variance does not
   // masquerade as a functional failure.
@@ -214,34 +219,56 @@ async function inspectRoute(page, routeSpec) {
 
   if (routeSpec.kind === 'product-group-detail') {
     await page.waitForReady(
-      `Boolean(document.querySelector('[data-variant-workspace-trigger="true"]'))`,
+      `(() => {
+        const root = document.querySelector('[data-product-group-workspace="true"]');
+        if (!root) return false;
+        const text = window.normalizeForQa(root.innerText || '');
+        return Boolean(root.querySelector('[data-variant-workspace-trigger="true"]')) || text.includes('chua co bien the');
+      })()`,
       CONTENT_READY_TIMEOUT_MS
     );
-    const opened = await page.evaluate(`(() => {
+    const variantWorkspaceState = await page.evaluate(`(() => {
       const root = document.querySelector('[data-product-group-workspace="true"]') || document.querySelector('main');
       const button = root?.querySelector('[data-variant-workspace-trigger="true"]');
-      if (!button) return false;
+      const text = window.normalizeForQa(root?.innerText || '');
+      if (!button) return { opened: false, empty: text.includes('chua co bien the') };
       button.click();
-      return true;
+      return { opened: true, empty: false };
     })()`);
-    assert(opened, 'could not open variant highlight workspace');
-    await page.waitForReady(`document.body && window.normalizeForQa(document.body.innerText || '').includes('thong so noi bat')`, 5000);
-    const highlightState = await page.evaluate(`(() => {
-      const text = window.normalizeForQa(document.body.innerText || '');
-      return {
-        has_highlight_workspace: text.includes('thong so noi bat') && text.includes('preview ngoai web'),
-        text_sample: text.slice(0, 240)
-      };
-    })()`);
-    assert(highlightState.has_highlight_workspace, 'highlight workspace did not open');
-    state.highlight_workspace = true;
+    if (routeSpec.expectsVariantWorkspace) {
+      assert(
+        variantWorkspaceState.opened,
+        'selected product group has a variant but its workspace trigger is missing'
+      );
+    }
+    if (variantWorkspaceState.opened) {
+      await page.waitForReady(`document.body && window.normalizeForQa(document.body.innerText || '').includes('thong so noi bat')`, 5000);
+      const highlightState = await page.evaluate(`(() => {
+        const text = window.normalizeForQa(document.body.innerText || '');
+        return {
+          has_highlight_workspace: text.includes('thong so noi bat') && text.includes('preview ngoai web'),
+          text_sample: text.slice(0, 240)
+        };
+      })()`);
+      assert(highlightState.has_highlight_workspace, 'highlight workspace did not open');
+      state.variant_workspace = 'opened';
+    } else {
+      assert(
+        variantWorkspaceState.empty,
+        'product group has neither a variant workspace nor an explicit empty state'
+      );
+      state.variant_workspace = 'empty';
+    }
   }
 
   return state;
 }
 
 function routeReady(kind) {
-  if (!document.querySelector('[data-admin-breadcrumbs]')) return false;
+  const hasBreadcrumbs = Boolean(document.querySelector('[data-admin-breadcrumbs]')) ||
+    Boolean(document.querySelector('[data-banner-detail-page] nav a[href$="/dashboard"]')) ||
+    Boolean(document.querySelector('main [data-domain-editor]'));
+  if (!hasBreadcrumbs) return false;
   if (!document.querySelector('[data-admin-sidebar]') || !document.querySelector('[data-admin-topbar]')) return false;
   if (kind === 'create-form') {
     const main = document.querySelector('main');
@@ -400,7 +427,10 @@ function inspectAdminRoute(routeSpec) {
     label: routeSpec.label,
     no_runtime_overlay: !runtimeOverlay && !productionError,
     has_shell: Boolean(document.querySelector('[data-admin-sidebar]') && document.querySelector('[data-admin-topbar]')),
-    has_breadcrumbs: Boolean(document.querySelector('[data-admin-breadcrumbs]')),
+    has_breadcrumbs: Boolean(document.querySelector('[data-admin-breadcrumbs]')) ||
+      Boolean(document.querySelector('[data-banner-detail-page] nav a[href$="/dashboard"]')) ||
+      Boolean(document.querySelector('main [data-domain-editor]') &&
+        main?.innerText.includes('Tổng quan /')),
     no_horizontal_overflow: overflowPx <= 2,
     overflow_px: overflowPx,
     kind_ok: kindOk,
@@ -454,6 +484,32 @@ async function findFirstDetailRoute(listPath, adminBaseRoute) {
   } catch {
     return null;
   }
+}
+
+async function findProductGroupDetailRoute() {
+  try {
+    const variantResponse = await requestJson(
+      '/song-thanh/product-variants?page=1&page_size=1&deleted_scope=active',
+      { headers: authHeaders() }
+    );
+    const firstVariant = extractItems(unwrap(variantResponse))[0];
+    if (firstVariant?.product_group_id) {
+      return {
+        route: `/product-groups/${firstVariant.product_group_id}`,
+        expectsVariantWorkspace: true
+      };
+    }
+  } catch {
+    // Fall through so databases without variants still exercise the valid empty state.
+  }
+
+  const fallbackRoute = await findFirstDetailRoute(
+    '/song-thanh/product-groups',
+    '/product-groups'
+  );
+  return fallbackRoute
+    ? { route: fallbackRoute, expectsVariantWorkspace: false }
+    : null;
 }
 
 async function seedImportRoute() {
@@ -785,7 +841,7 @@ class CdpPage {
 }
 
 function writeReport() {
-  const reportPath = path.join(ROOT, 'docs', 'working-notes', 'admin-route-qa-last-run.md');
+  const reportPath = path.join(ROOT, 'tmp', 'qa-artifacts', 'admin-route-qa-last-run.md');
   mkdirSync(path.dirname(reportPath), { recursive: true });
   const lines = [
     '# Admin route QA last run',
@@ -816,7 +872,7 @@ function printSummary() {
     const suffix = result.status === 'PASS' ? '' : ` - ${result.error}`;
     console.log(`${result.status} ${result.route}${suffix}`);
   }
-  console.log(`Report: ${path.join(ROOT, 'docs', 'working-notes', 'admin-route-qa-last-run.md')}`);
+  console.log(`Report: ${path.join(ROOT, 'tmp', 'qa-artifacts', 'admin-route-qa-last-run.md')}`);
   console.log(`Summary: ${results.length - failed.length}/${results.length} passed`);
 }
 

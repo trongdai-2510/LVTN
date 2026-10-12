@@ -6,9 +6,9 @@ import {
   type ButtonHTMLAttributes,
   type FormEvent
 } from 'react';
-import { MoreVertical } from '@/components/icons';
 
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
+import { ActionResultDialog, type ActionResultDialogState } from '@/components/feedback/ActionResultDialog';
 import { Field } from '@/components/form/Field';
 import { FormFeedback } from '@/components/form/FormFeedback';
 import { Button } from '@/components/ui/Button';
@@ -34,7 +34,10 @@ interface RoleOption {
   status: 'active' | 'inactive';
   description: string | null;
   user_count: number;
+  permission_count: number;
   is_protected: boolean;
+  is_super_admin: boolean;
+  can_assign: boolean;
 }
 
 interface UserRoleSummary {
@@ -68,13 +71,6 @@ interface UserDetailResponse {
   user: UserRecord;
   available_roles: RoleOption[];
   temporary_password?: string;
-}
-
-interface UserSummary {
-  total: number;
-  active: number;
-  locked: number;
-  roleCount: number;
 }
 
 interface UserFormState {
@@ -111,36 +107,25 @@ const editStatusOptions = [
 ] as const;
 
 const filterControlClass =
-  'h-[34px] rounded-[8px] border-[0.5px] border-[#E5E5EA] bg-white px-3 text-[13px] text-[#1A1A2E] placeholder:text-[#64647A] focus:border-[#C8C8D4] focus:ring-2 focus:ring-[#EEF2FF]';
+  'h-11 rounded-md border border-border bg-white px-3 text-sm text-text placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15';
 
 const rowActionButtonClass =
-  'h-7 rounded-[6px] border-[0.5px] border-[#E5E5EA] bg-white px-2 text-[11px] font-medium text-[#1A1A2E] hover:border-[#C8C8D4] hover:bg-[#F9F9FB] focus:ring-[#C5D0FA] disabled:cursor-not-allowed disabled:opacity-50';
-
-const metricCardStyles = {
-  total: 'bg-[#F4F4F7] text-[#1A1A2E]',
-  active: 'bg-[#EAF3DE] text-[#27500A]',
-  locked: 'bg-[#FAEEDA] text-[#633806]',
-  roles: 'bg-[#EEEDFE] text-[#3C3489]'
-} as const;
+  'min-h-9 rounded-md border border-border bg-white px-3 text-sm font-semibold text-text hover:border-primary/35 hover:bg-muted focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50';
 
 export function AdminUsersPage() {
   const auth = useAuthState();
   const permissions = auth.permissions;
-  const canCreate = hasPermission(permissions, PERMISSIONS.adminUserCreate);
-  const canUpdate = hasPermission(permissions, PERMISSIONS.adminUserUpdate);
-  const canManageStatus = hasPermission(permissions, PERMISSIONS.adminUserManageStatus);
-  const canResetPassword = hasPermission(permissions, PERMISSIONS.adminUserResetPassword);
+  const isSuperAdmin = auth.roles.includes('super_admin');
+  const canCreate = isSuperAdmin && hasPermission(permissions, PERMISSIONS.adminUserCreate);
+  const canUpdate = isSuperAdmin && hasPermission(permissions, PERMISSIONS.adminUserUpdate);
+  const canManageStatus = isSuperAdmin && hasPermission(permissions, PERMISSIONS.adminUserManageStatus);
+  const canResetPassword = isSuperAdmin && hasPermission(permissions, PERMISSIONS.adminUserResetPassword);
 
   const [data, setData] = useState<UserListResponse | null>(null);
-  const [summary, setSummary] = useState<UserSummary>({
-    total: 0,
-    active: 0,
-    locked: 0,
-    roleCount: 0
-  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
+  const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [roleId, setRoleId] = useState('');
@@ -150,11 +135,11 @@ export function AdminUsersPage() {
   const [modalLoading, setModalLoading] = useState(false);
   const [savePending, setSavePending] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
-  const [saveSuccess, setSaveSuccess] = useState('');
-  const [temporaryPassword, setTemporaryPassword] = useState('');
+  const [resultDialog, setResultDialog] = useState<ActionResultDialogState | null>(null);
   const [form, setForm] = useState<UserFormState>(EMPTY_USER_FORM);
   const [initialForm, setInitialForm] = useState<UserFormState>(EMPTY_USER_FORM);
   const [discardModalOpen, setDiscardModalOpen] = useState(false);
+  const [privilegedSubmitOpen, setPrivilegedSubmitOpen] = useState(false);
 
   const [statusTarget, setStatusTarget] = useState<{
     user: UserRecord;
@@ -162,9 +147,12 @@ export function AdminUsersPage() {
   } | null>(null);
   const [resetTarget, setResetTarget] = useState<UserRecord | null>(null);
   const [actionPending, setActionPending] = useState(false);
-  const [pageMessage, setPageMessage] = useState('');
-  const [pageError, setPageError] = useState<unknown>(null);
-  const [openMenuUserId, setOpenMenuUserId] = useState<string | null>(null);
+  const [actionTarget, setActionTarget] = useState<UserRecord | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(queryInput), 250);
+    return () => window.clearTimeout(timer);
+  }, [queryInput]);
 
   useEffect(() => {
     let active = true;
@@ -174,7 +162,7 @@ export function AdminUsersPage() {
       setError(null);
 
       try {
-        const snapshot = await fetchUsersSnapshot({
+        const list = await fetchUsers({
           page,
           pageSize: 10,
           query,
@@ -186,8 +174,7 @@ export function AdminUsersPage() {
           return;
         }
 
-        setData(snapshot.list);
-        setSummary(snapshot.summary);
+        setData(list);
       } catch (nextError) {
         if (active) {
           setError(nextError);
@@ -206,69 +193,62 @@ export function AdminUsersPage() {
     };
   }, [page, query, roleId, status]);
 
-  useEffect(() => {
-    if (!openMenuUserId) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest('[data-user-row-actions="true"]')) {
-        return;
-      }
-      setOpenMenuUserId(null);
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setOpenMenuUserId(null);
-      }
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleEscape);
-
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [openMenuUserId]);
-
   const items = data?.items ?? [];
   const roleOptions = data?.available_roles ?? [];
+  const editTarget = modal.open && modal.mode === 'edit'
+    ? items.find((item) => item.id === modal.userId)
+    : undefined;
+  const editActions = editTarget
+    ? getUserActionState(editTarget, roleOptions, isSuperAdmin, canManageStatus, canResetPassword)
+    : null;
+  const limitedActions = actionTarget
+    ? getUserActionState(actionTarget, roleOptions, isSuperAdmin, canManageStatus, canResetPassword)
+    : null;
   const pagination = data?.pagination ?? { page: 1, page_size: 10, total: 0 };
+  const filtersActive = Boolean(queryInput.trim() || status || roleId);
+  const selectedRole = roleOptions.find((role) => role.id === form.role_ids[0]);
   const userFormChanged = modal.open && !sameUserForm(form, initialForm);
+  const selectedSuperAdmin = roleOptions.some(
+    (role) => role.is_super_admin && form.role_ids.includes(role.id)
+  );
+  const initialSuperAdmin = roleOptions.some(
+    (role) => role.is_super_admin && initialForm.role_ids.includes(role.id)
+  );
+  const privilegedTargetBlocked = !isSuperAdmin && initialSuperAdmin;
+  const outOfScopeTarget = !isSuperAdmin && initialForm.role_ids.some((roleId) =>
+    !roleOptions.find((role) => role.id === roleId)?.can_assign
+  );
   const userFormValid =
     form.display_name.trim().length > 0 &&
     form.email.trim().length > 0 &&
-    form.role_ids.length > 0 &&
-    (!form.temporary_password || form.temporary_password.trim().length >= 8);
+    form.role_ids.length === 1 &&
+    (!form.temporary_password || form.temporary_password.trim().length >= 8) &&
+    (!selectedSuperAdmin || isSuperAdmin) &&
+    !privilegedTargetBlocked &&
+    !outOfScopeTarget;
 
   async function reloadList() {
-    const snapshot = await fetchUsersSnapshot({
+    const list = await fetchUsers({
       page,
       pageSize: 10,
       query,
       status,
       roleId
     });
-    setData(snapshot.list);
-    setSummary(snapshot.summary);
-    return snapshot.list;
+    setData(list);
+    return list;
   }
 
   function clearFeedback() {
     setSaveError(null);
-    setSaveSuccess('');
-    setTemporaryPassword('');
-    setPageError(null);
-    setPageMessage('');
+    setResultDialog(null);
   }
 
   function closeModal() {
     setModal({ open: false });
     setModalLoading(false);
     setDiscardModalOpen(false);
+    setPrivilegedSubmitOpen(false);
     clearFeedback();
   }
 
@@ -281,12 +261,16 @@ export function AdminUsersPage() {
     closeModal();
   }
 
-  function toggleRole(nextRoleId: string) {
+  function selectRole(nextRoleId: string) {
+    const role = roleOptions.find((option) => option.id === nextRoleId);
+    if (role && !role.can_assign) {
+      setSaveError(new Error('Bạn không thể gán vai trò nằm ngoài phạm vi quyền của mình.'));
+      return;
+    }
+    setSaveError(null);
     setForm((current) => ({
       ...current,
-      role_ids: current.role_ids.includes(nextRoleId)
-        ? current.role_ids.filter((item) => item !== nextRoleId)
-        : [...current.role_ids, nextRoleId]
+      role_ids: nextRoleId ? [nextRoleId] : []
     }));
   }
 
@@ -299,7 +283,8 @@ export function AdminUsersPage() {
 
   async function openEditModal(userId: string) {
     clearFeedback();
-    setOpenMenuUserId(null);
+    setForm({ ...EMPTY_USER_FORM, role_ids: [] });
+    setInitialForm({ ...EMPTY_USER_FORM, role_ids: [] });
     setModal({ open: true, mode: 'edit', userId });
     setModalLoading(true);
 
@@ -318,7 +303,8 @@ export function AdminUsersPage() {
       setForm(nextForm);
       setInitialForm(nextForm);
     } catch (nextError) {
-      setSaveError(nextError);
+      setModal({ open: false });
+      setResultDialog({ tone: 'error', title: 'Không mở được người dùng', error: nextError });
     } finally {
       setModalLoading(false);
     }
@@ -331,16 +317,25 @@ export function AdminUsersPage() {
     if (!userFormValid) {
       setSaveError(
         new Error(
-          'Vui lòng nhập họ tên, email, chọn ít nhất một vai trò và kiểm tra mật khẩu tạm.'
+          'Vui lòng nhập họ tên, email, chọn đúng một vai trò và kiểm tra mật khẩu tạm.'
         )
       );
       return;
     }
 
+    if (selectedSuperAdmin && !initialSuperAdmin) {
+      setPrivilegedSubmitOpen(true);
+      return;
+    }
+
+    await saveUser();
+  }
+
+  async function saveUser() {
+    if (!modal.open) return;
+
     setSavePending(true);
     setSaveError(null);
-    setSaveSuccess('');
-    setTemporaryPassword('');
 
     try {
       const payload = {
@@ -361,51 +356,62 @@ export function AdminUsersPage() {
               payload
             );
 
-      await reloadList();
-      setSaveSuccess(
-        modal.mode === 'create'
-          ? 'Đã tạo tài khoản quản trị.'
-          : 'Đã cập nhật tài khoản quản trị.'
-      );
-      setTemporaryPassword(result.temporary_password ?? '');
-
-      const nextForm: UserFormState = {
-        display_name: result.user.display_name,
-        email: result.user.email,
-        role_ids: result.user.roles.map((role) => role.id),
-        status: result.user.status,
-        temporary_password: ''
-      };
-      setForm(nextForm);
-      setInitialForm(nextForm);
-
-      if (modal.mode === 'create') {
-        setModal({ open: true, mode: 'edit', userId: result.user.id });
+      const created = modal.mode === 'create';
+      setModal({ open: false });
+      let listUpdated = true;
+      try {
+        await reloadList();
+      } catch {
+        listUpdated = false;
       }
+      setResultDialog({
+        tone: listUpdated ? 'success' : 'warning',
+        title: listUpdated
+          ? created ? 'Đã tạo người dùng' : 'Đã cập nhật người dùng'
+          : 'Đã lưu, danh sách chưa cập nhật',
+        description: result.temporary_password
+          ? 'Mật khẩu tạm chỉ hiển thị lần này. Hãy sao chép trước khi đóng thông báo.'
+          : listUpdated
+            ? 'Thông tin tài khoản quản trị đã được lưu.'
+            : 'Tài khoản đã lưu nhưng danh sách chưa tải lại được. Hãy tải lại trang để kiểm tra.',
+        details: result.temporary_password
+          ? [`Mật khẩu tạm: ${result.temporary_password}`]
+          : undefined
+      });
     } catch (nextError) {
       setSaveError(nextError);
     } finally {
       setSavePending(false);
+      setPrivilegedSubmitOpen(false);
     }
   }
 
   async function handleStatusChange() {
     if (!statusTarget) return;
     setActionPending(true);
-    setPageError(null);
-    setPageMessage('');
 
     try {
       await apiClient.post<UserDetailResponse>(
         `${endpoints.songThanh.adminUsers}/${encodeURIComponent(statusTarget.user.id)}/status`,
         { status: statusTarget.nextStatus }
       );
-      await reloadList();
-      setPageMessage('Đã cập nhật trạng thái tài khoản.');
       setStatusTarget(null);
-      setOpenMenuUserId(null);
+      let listUpdated = true;
+      try {
+        await reloadList();
+      } catch {
+        listUpdated = false;
+      }
+      setResultDialog({
+        tone: listUpdated ? 'success' : 'warning',
+        title: listUpdated ? 'Đã cập nhật trạng thái' : 'Đã cập nhật, danh sách chưa tải lại',
+        description: listUpdated
+          ? 'Trạng thái tài khoản đã được cập nhật.'
+          : 'Thay đổi đã lưu nhưng danh sách chưa tải lại được. Hãy tải lại trang để kiểm tra.'
+      });
     } catch (nextError) {
-      setPageError(nextError);
+      setStatusTarget(null);
+      setResultDialog({ tone: 'error', title: 'Không cập nhật được trạng thái', error: nextError });
     } finally {
       setActionPending(false);
     }
@@ -414,111 +420,120 @@ export function AdminUsersPage() {
   async function handleResetPassword() {
     if (!resetTarget) return;
     setActionPending(true);
-    setPageError(null);
-    setPageMessage('');
 
     try {
       const result = await apiClient.post<UserDetailResponse>(
         `${endpoints.songThanh.adminUsers}/${encodeURIComponent(resetTarget.id)}/reset-password`
       );
-      setPageMessage(
-        `Đã tạo mật khẩu tạm cho ${resetTarget.display_name}: ${result.temporary_password ?? 'đã cập nhật'}.`
-      );
+      const targetName = resetTarget.display_name;
       setResetTarget(null);
-      setOpenMenuUserId(null);
+      setResultDialog({
+        tone: 'success',
+        title: 'Đã đặt lại mật khẩu',
+        description: `Mật khẩu tạm của ${targetName} chỉ hiển thị lần này. Hãy sao chép trước khi đóng thông báo.`,
+        details: result.temporary_password
+          ? [`Mật khẩu tạm: ${result.temporary_password}`]
+          : undefined
+      });
     } catch (nextError) {
-      setPageError(nextError);
+      setResetTarget(null);
+      setResultDialog({ tone: 'error', title: 'Không đặt lại được mật khẩu', error: nextError });
     } finally {
       setActionPending(false);
     }
   }
 
   return (
-    <section className="space-y-4 text-[#1A1A2E]">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div className="min-h-14">
-          <h1 className="text-[18px] font-medium leading-7 text-[#1A1A2E]">Người dùng</h1>
-          <p className="mt-1 max-w-3xl text-[13px] text-[#5B5B70]">
-            Quản lý tài khoản quản trị.
-          </p>
+    <section className="space-y-5 text-text">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="mb-1 text-xs font-bold uppercase tracking-[0.12em] text-primary">Hệ thống</p>
+          <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-text">Tài khoản quản trị</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">Tạo tài khoản, gán một vai trò và quản lý quyền truy cập của người dùng.</p>
         </div>
-
-        {canCreate ? (
-          <Button
-            type="button"
-            onClick={openCreateModal}
-            className="h-[34px] rounded-[8px] bg-[#185FA5] px-4 text-[12px] font-medium text-white hover:bg-[#154f8a] focus:ring-[#C5D0FA]"
-          >
-            Tạo người dùng
-          </Button>
-        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {canCreate ? (
+            <Button type="button" onClick={openCreateModal}>Tạo người dùng</Button>
+          ) : null}
+        </div>
       </div>
 
-      {pageMessage ? <FormFeedback successMessage={pageMessage} /> : null}
-      {pageError ? <FormFeedback error={pageError} /> : null}
-
-      {loading ? (
-        <UserSummarySkeleton />
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="Tổng" value={summary.total} tone="total" />
-          <SummaryCard label="Hoạt động" value={summary.active} tone="active" />
-          <SummaryCard label="Tạm khóa" value={summary.locked} tone="locked" />
-          <SummaryCard label="Vai trò" value={summary.roleCount} tone="roles" />
-        </div>
-      )}
-
-      <div className="overflow-hidden rounded-[12px] border-[0.5px] border-[#E5E5EA] bg-white">
-        <div className="flex min-h-[52px] flex-col gap-6 border-b-[0.5px] border-[#E5E5EA] bg-[#FAFAFA] px-6 py-3 md:flex-row md:items-center md:py-[9px]">
-          <label className="relative min-w-0 flex-1">
+      <div className="overflow-hidden rounded-xl border border-border bg-white shadow-sm">
+        <div className="grid gap-3 border-b border-border bg-surface p-4 md:grid-cols-[minmax(0,1fr)_11rem_12rem] md:items-end">
+          <label className="block min-w-0">
+            <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">Tìm tài khoản</span>
             <Input
               aria-label="Tìm kiếm người dùng"
               className={filterControlClass}
-              value={query}
+              type="search"
+              value={queryInput}
               onChange={(event) => {
-                setQuery(event.target.value);
+                setQueryInput(event.target.value);
                 setPage(1);
               }}
-              placeholder="Tìm theo họ tên hoặc email..."
+              placeholder="Tên hoặc email"
             />
           </label>
 
-          <Select
-            aria-label="Lọc theo trạng thái"
-            className={cn(filterControlClass, 'min-w-[130px] md:w-[148px]')}
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value);
-              setPage(1);
-            }}
-          >
-            {listStatusOptions.map((option) => (
-              <option key={option.label} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
+          <label className="block min-w-0">
+            <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">Trạng thái</span>
+            <Select
+              aria-label="Lọc theo trạng thái"
+              className={cn(filterControlClass, 'w-full')}
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPage(1);
+              }}
+            >
+              {listStatusOptions.map((option) => (
+                <option key={option.label} value={option.value}>{option.label}</option>
+              ))}
+            </Select>
+          </label>
 
-          <Select
-            aria-label="Lọc theo vai trò"
-            className={cn(filterControlClass, 'min-w-[130px] md:w-[164px]')}
-            value={roleId}
-            onChange={(event) => {
-              setRoleId(event.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">Tất cả vai trò</option>
-            {roleOptions.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.name}
-              </option>
-            ))}
-          </Select>
+          <label className="block min-w-0">
+            <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">Vai trò</span>
+            <Select
+              aria-label="Lọc theo vai trò"
+              className={cn(filterControlClass, 'w-full')}
+              value={roleId}
+              onChange={(event) => {
+                setRoleId(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Tất cả vai trò</option>
+              {roleOptions.map((role) => (
+                <option key={role.id} value={role.id}>{role.name}</option>
+              ))}
+            </Select>
+          </label>
+        </div>
+
+        <div className="flex min-h-14 flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+          <span className="font-semibold tabular-nums text-text">
+            {loading ? 'Đang tải tài khoản' : `${pagination.total} tài khoản`}
+          </span>
+          {filtersActive ? (
+            <button
+              type="button"
+              className="min-h-9 rounded-md px-2 text-sm font-semibold text-primary hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              onClick={() => {
+                setQueryInput('');
+                setQuery('');
+                setStatus('');
+                setRoleId('');
+                setPage(1);
+              }}
+            >
+              Xóa bộ lọc
+            </button>
+          ) : null}
         </div>
 
         {loading ? (
-          <UsersTableSkeleton />
+          <UsersCardSkeleton />
         ) : error ? (
           <div className="p-6">
             <ErrorState error={error} />
@@ -529,177 +544,56 @@ export function AdminUsersPage() {
           </div>
         ) : (
           <>
-            <div className="admin-table-scroll overflow-x-auto">
-              <table className="min-w-full table-fixed">
-                <thead className="bg-[#FAFAFA]">
-                  <tr className="h-9">
-                    <th className="px-6 text-left text-[10px] font-medium uppercase tracking-[0.06em] text-[#5B5B70]">
-                      Người dùng
-                    </th>
-                    <th className="w-[22%] px-6 text-left text-[10px] font-medium uppercase tracking-[0.06em] text-[#5B5B70]">
-                      Email
-                    </th>
-                    <th className="w-[22%] px-6 text-left text-[10px] font-medium uppercase tracking-[0.06em] text-[#5B5B70]">
-                      Vai trò
-                    </th>
-                    <th className="w-[12%] px-6 text-left text-[10px] font-medium uppercase tracking-[0.06em] text-[#5B5B70]">
-                      TT
-                    </th>
-                    <th className="w-[16%] px-6 text-left text-[10px] font-medium uppercase tracking-[0.06em] text-[#5B5B70]">
-                      Đăng nhập gần nhất
-                    </th>
-                    <th className="w-[80px] px-6 text-right text-[10px] font-medium uppercase tracking-[0.06em] text-[#5B5B70]">
-                      ...
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => {
-                    const nextStatus = item.status === 'active' ? 'locked' : 'active';
-                    const lockLabel = item.status === 'active' ? 'Tạm khóa' : 'Kích hoạt';
-                    const isCurrentSuperAdmin =
-                      item.is_current_user &&
-                      item.roles.some((role) => role.code === 'super_admin');
-                    const canOpenMenu =
-                      (canManageStatus && !item.is_current_user) || canResetPassword;
-
-                    return (
-                      <tr
-                        key={item.id}
-                        className={cn(
-                          'h-[52px] border-t-[0.5px] border-[#E5E5EA] align-middle',
-                          item.is_current_user ? 'bg-[#F9F9FF]' : 'bg-white hover:bg-[#FCFCFD]'
-                        )}
-                      >
-                        <td className="px-6 py-2.5">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={cn(
-                                'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-medium',
-                                userAvatarClasses(item)
-                              )}
-                            >
-                              {initialsForName(item.display_name)}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="truncate text-[13px] font-medium text-[#1A1A2E]">
-                                {item.display_name}
-                              </div>
-                              <div
-                                className={cn(
-                                  'mt-0.5 truncate text-[11px]',
-                                  item.is_current_user ? 'text-[#185FA5]' : 'text-[#64647A]'
-                                )}
-                              >
-                                {item.is_current_user
-                                  ? 'Tài khoản đang đăng nhập'
-                                  : `Tạo ${formatDate(item.created_at)}`}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-2.5 text-[12px] text-[#64647A]">{item.email}</td>
-                        <td className="px-6 py-2.5">
-                          <div className="flex flex-wrap gap-1.5">
-                            {item.roles.length === 0 ? (
-                              <span className="text-[11px] text-[#64647A]">Chưa gán vai trò</span>
-                            ) : (
-                              item.roles.map((role) => (
-                                <span
-                                  key={role.id}
-                                  className={cn(
-                                    'inline-flex min-h-6 items-center rounded-[99px] px-2.5 text-[11px] font-medium',
-                                    roleChipClasses(role.code, role.is_protected)
-                                  )}
-                                >
-                                  {role.name}
-                                </span>
-                              ))
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-2.5">
-                          <StatusChip status={item.status} />
-                        </td>
-                        <td className="px-6 py-2.5 text-[11px] text-[#64647A]">
-                          {item.last_login_at ? formatDate(item.last_login_at) : 'Chưa có'}
-                        </td>
-                        <td className="px-6 py-2.5">
-                          <div
-                            className="flex items-center justify-end gap-2"
-                            data-user-row-actions="true"
-                          >
-                            {canUpdate ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                disabled={isCurrentSuperAdmin}
-                                className={rowActionButtonClass}
-                                onClick={() => openEditModal(item.id)}
-                              >
-                                Sửa
-                              </Button>
-                            ) : null}
-
-                            {canOpenMenu ? (
-                              <div className="relative">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="secondary"
-                                  aria-label={`Thao tác cho ${item.display_name}`}
-                                  disabled={isCurrentSuperAdmin}
-                                  className={cn(rowActionButtonClass, 'w-7 px-0')}
-                                  onClick={() =>
-                                    setOpenMenuUserId((current) =>
-                                      current === item.id ? null : item.id
-                                    )
-                                  }
-                                >
-                                  <MoreVertical className="h-3.5 w-3.5" />
-                                </Button>
-
-                                {openMenuUserId === item.id ? (
-                                  <div className="absolute right-0 top-full z-20 mt-2 w-44 overflow-hidden rounded-[10px] border-[0.5px] border-[#E5E5EA] bg-white shadow-[0_12px_28px_rgba(26,26,46,0.08)]">
-                                    {canManageStatus && !item.is_current_user ? (
-                                      <button
-                                        type="button"
-                                        className="flex w-full items-center px-3 py-2.5 text-left text-[12px] text-[#1A1A2E] transition-colors hover:bg-[#F4F4F7]"
-                                        onClick={() => {
-                                          setStatusTarget({ user: item, nextStatus });
-                                          setOpenMenuUserId(null);
-                                        }}
-                                      >
-                                        {lockLabel}
-                                      </button>
-                                    ) : null}
-
-                                    {canResetPassword ? (
-                                      <button
-                                        type="button"
-                                        className="flex w-full items-center px-3 py-2.5 text-left text-[12px] text-[#1A1A2E] transition-colors hover:bg-[#F4F4F7]"
-                                        onClick={() => {
-                                          setResetTarget(item);
-                                          setOpenMenuUserId(null);
-                                        }}
-                                      >
-                                        Mật khẩu tạm
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="grid gap-3 border-t border-border bg-surface/50 p-3 sm:p-4 lg:grid-cols-2" aria-label="Danh sách tài khoản">
+              {items.map((item) => {
+                const actions = getUserActionState(item, roleOptions, isSuperAdmin, canManageStatus, canResetPassword);
+                return (
+                  <article
+                    key={item.id}
+                    data-testid="user-mobile-card"
+                    data-user-account-card="true"
+                    aria-label={`Tài khoản ${item.display_name}`}
+                    className="flex min-w-0 flex-col rounded-xl border border-border bg-white p-4 shadow-sm transition-colors hover:border-primary/30 sm:p-5"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-sm font-semibold', userAvatarClasses(item))}>
+                        {initialsForName(item.display_name)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-base font-semibold text-text">{item.display_name}</p>
+                        <p className="break-all text-sm leading-5 text-muted-foreground">{item.email}</p>
+                      </div>
+                      <StatusChip status={item.status} />
+                    </div>
+                    <div className="mt-5 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-muted-foreground">Vai trò</span>
+                      {item.roles.length === 0 ? (
+                        <span className="text-sm text-muted-foreground">Chưa gán</span>
+                      ) : item.roles.map((role) => (
+                        <span key={role.id} className={cn(
+                          'inline-flex min-h-7 items-center rounded-md px-2.5 text-xs font-semibold',
+                          roleChipClasses(role.code, role.is_protected)
+                        )}>
+                          {role.name}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-5 flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                      <span className="text-xs leading-5 text-muted-foreground">
+                        {item.is_current_user ? 'Phiên của bạn' : `Đăng nhập gần nhất: ${item.last_login_at ? formatDate(item.last_login_at) : 'Chưa có'}`}
+                      </span>
+                      {canUpdate && actions.canManageTarget ? (
+                          <Button type="button" size="sm" variant="secondary"
+                            className={rowActionButtonClass} onClick={() => openEditModal(item.id)}>Sửa</Button>
+                      ) : actions.hasOtherActions ? (
+                          <Button type="button" size="sm" variant="secondary" className={rowActionButtonClass}
+                            onClick={() => setActionTarget(item)}>Quản lý</Button>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-
             <UsersPagination
               page={pagination.page}
               pageSize={pagination.page_size}
@@ -715,39 +609,24 @@ export function AdminUsersPage() {
         title={modal.open && modal.mode === 'create' ? 'Tạo người dùng' : 'Chỉnh sửa người dùng'}
         onClose={requestCloseModal}
         panelClassName="max-w-2xl"
-        bodyClassName="p-5"
+        bodyClassName="p-5 sm:p-6"
         closeDisabled={savePending}
         footer={
           modalLoading ? null : (
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-xs text-slate-500">
-                {form.role_ids.length > 0
-                  ? `Đã chọn ${form.role_ids.length} vai trò`
-                  : 'Cần chọn ít nhất một vai trò'}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                {editTarget && editActions?.canResetPassword ? (
+                  <Button type="button" variant="secondary" disabled={savePending || userFormChanged}
+                    title={userFormChanged ? 'Lưu hoặc bỏ thay đổi trước khi đặt lại mật khẩu.' : undefined}
+                    onClick={() => { closeModal(); setResetTarget(editTarget); }}>
+                    Tạo mật khẩu tạm
+                  </Button>
+                ) : null}
               </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={requestCloseModal}
-                  disabled={savePending}
-                >
-                  Hủy
-                </Button>
-                <Button
-                  type="submit"
-                  form="admin-user-form"
-                  disabled={
-                    savePending ||
-                    !userFormValid ||
-                    (modal.open && modal.mode === 'edit' && !userFormChanged)
-                  }
-                >
-                  {savePending
-                    ? 'Đang lưu...'
-                    : modal.open && modal.mode === 'create'
-                      ? 'Tạo người dùng'
-                      : 'Lưu thay đổi'}
+              <div className="flex items-center justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={requestCloseModal} disabled={savePending}>Hủy</Button>
+                <Button type="submit" form="admin-user-form" disabled={savePending || !userFormValid || (modal.open && modal.mode === 'edit' && !userFormChanged)}>
+                  {savePending ? 'Đang lưu...' : modal.open && modal.mode === 'create' ? 'Tạo người dùng' : 'Lưu thay đổi'}
                 </Button>
               </div>
             </div>
@@ -761,133 +640,142 @@ export function AdminUsersPage() {
             <Skeleton className="h-28 w-full" />
           </div>
         ) : (
-          <form id="admin-user-form" className="space-y-4" onSubmit={handleSubmit}>
-                <FormFeedback
-                  error={saveError}
-                  successMessage={
-                    saveSuccess
-                      ? temporaryPassword
-                        ? `${saveSuccess} Mật khẩu tạm: ${temporaryPassword}`
-                        : saveSuccess
-                      : ''
-                  }
+          <form id="admin-user-form" className="space-y-5" onSubmit={handleSubmit}>
+            <FormFeedback error={saveError} context="save" />
+
+            <div>
+              <h2 className="text-sm font-semibold text-text">Thông tin đăng nhập</h2>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Dùng email để đăng nhập trang quản trị.</p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Họ tên" required>
+                <Input
+                  autoFocus required disabled={savePending}
+                  value={form.display_name}
+                  onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
+                  placeholder="Tên hiển thị"
                 />
+              </Field>
+              <Field label="Email" required>
+                <Input
+                  type="email" required autoComplete="email" disabled={savePending}
+                  value={form.email}
+                  onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                  placeholder="ten@songthanh.vn"
+                />
+              </Field>
+            </div>
 
-                <Field label="Họ tên">
+            <div className="border-t border-border pt-5">
+              <h2 className="mb-3 text-sm font-semibold text-text">Quyền truy cập</h2>
+            <Field label="Vai trò" required>
+              <Select
+                required
+                disabled={savePending || (modal.open && modal.mode === 'edit' && modal.userId === auth.user?.id && initialSuperAdmin)}
+                value={form.role_ids[0] ?? ''}
+                onChange={(event) => selectRole(event.target.value)}
+              >
+                <option value="" disabled>Chọn một vai trò</option>
+                {roleOptions.map((role) => (
+                  <option key={role.id} value={role.id} disabled={!role.can_assign}>
+                    {role.name}{!role.can_assign ? ' (không thể gán)' : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {selectedRole ? (
+              <div className={cn(
+                'mt-3 rounded-md border px-3 py-2.5 text-sm',
+                selectedRole.is_super_admin
+                  ? 'border-amber-200 bg-amber-50 text-amber-950'
+                  : 'border-border bg-surface text-text'
+              )}>
+                <p className="font-medium">
+                  {selectedRole.name}: {selectedRole.permission_count} quyền
+                </p>
+                <p className="mt-0.5 leading-5">
+                  {selectedRole.is_super_admin
+                    ? 'Toàn quyền hệ thống. Chỉ Super Admin được gán hoặc gỡ vai trò này.'
+                    : selectedRole.description || (selectedRole.permission_count === 0
+                      ? 'Vai trò chưa được cấp quyền truy cập.'
+                      : 'Tài khoản sẽ dùng các quyền đang được cấp cho vai trò này.')}
+                </p>
+              </div>
+            ) : null}
+            </div>
+
+            {privilegedTargetBlocked || outOfScopeTarget ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
+                {privilegedTargetBlocked
+                  ? 'Chỉ Super Admin được cập nhật tài khoản Super Admin.'
+                  : 'Vai trò hiện tại nằm ngoài phạm vi quyền của bạn.'}
+              </p>
+            ) : null}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Trạng thái">
+                <Select
+                  disabled={savePending || (modal.open && modal.mode === 'edit' &&
+                    (!canManageStatus || modal.userId === auth.user?.id))}
+                  value={form.status}
+                  onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as UserStatus }))}
+                >
+                  {editStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </Select>
+              </Field>
+              {modal.open && modal.mode === 'create' ? (
+                <Field label="Mật khẩu tạm" hint="Để trống để hệ thống tạo và hiển thị một lần sau khi lưu.">
                   <Input
-                    autoFocus
-                    required
-                    disabled={savePending}
-                    value={form.display_name}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, display_name: event.target.value }))
-                    }
-                    placeholder="Nhập họ tên hiển thị"
+                    type="password" minLength={8} autoComplete="new-password" disabled={savePending}
+                    value={form.temporary_password}
+                    onChange={(event) => setForm((current) => ({ ...current, temporary_password: event.target.value }))}
+                    placeholder="Tự tạo nếu để trống"
                   />
                 </Field>
-
-                <Field label="Email">
-                  <Input
-                    type="email"
-                    required
-                    autoComplete="email"
-                    disabled={savePending}
-                    value={form.email}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, email: event.target.value }))
-                    }
-                    placeholder="admin@songthanh.local"
-                  />
-                </Field>
-
-                {modal.open && modal.mode === 'create' ? (
-                  <Field
-                    label="Mật khẩu tạm"
-                    hint="Để trống để hệ thống tự tạo."
-                  >
-                    <Input
-                      type="password"
-                      minLength={8}
-                      autoComplete="new-password"
-                      disabled={savePending}
-                      value={form.temporary_password}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          temporary_password: event.target.value
-                        }))
-                      }
-                      placeholder="Tối thiểu 8 ký tự"
-                    />
-                  </Field>
-                ) : null}
-
-                <Field label="Vai trò" hint="Chọn ít nhất một vai trò.">
-                  <div className="space-y-2 rounded-[8px] border-[0.5px] border-[#E5E5EA] bg-[#FAFAFA] p-3">
-                    {roleOptions.length === 0 ? (
-                      <div className="text-sm text-[#64647A]">Chưa có vai trò khả dụng để gán.</div>
-                    ) : (
-                      roleOptions.map((role) => (
-                        <label
-                          key={role.id}
-                          className={cn(
-                            'flex cursor-pointer items-start gap-3 rounded-[8px] border-[0.5px] px-3 py-2.5 transition-colors',
-                            form.role_ids.includes(role.id)
-                              ? 'border-[#C5D0FA] bg-[#EEF2FF]'
-                              : 'border-[#E5E5EA] bg-white hover:border-[#C8C8D4] hover:bg-[#F9F9FB]'
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            disabled={savePending}
-                            checked={form.role_ids.includes(role.id)}
-                            onChange={() => toggleRole(role.id)}
-                            className="mt-1 h-4 w-4 accent-[#185FA5]"
-                          />
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-[13px] font-medium text-[#1A1A2E]">
-                                {role.name}
-                              </span>
-                              {role.is_protected ? (
-                                <span className="inline-flex min-h-6 items-center rounded-[99px] bg-[#185FA5] px-2.5 text-[11px] font-medium text-white">
-                                  Hệ thống
-                                </span>
-                              ) : null}
-                            </div>
-                            {role.description ? (
-                              <div className="mt-1 text-[12px] text-[#64647A]">
-                                {role.description}
-                              </div>
-                            ) : null}
-                          </div>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                </Field>
-
-                <Field label="Trạng thái">
-                  <Select
-                    disabled={savePending}
-                    value={form.status}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        status: event.target.value as UserStatus
-                      }))
-                    }
-                  >
-                    {editStatusOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+              ) : null}
+            </div>
           </form>
         )}
       </Modal>
+
+      <Modal open={Boolean(actionTarget)} title="Quản lý tài khoản" onClose={() => setActionTarget(null)}>
+        {actionTarget && limitedActions ? (
+          <div className="space-y-4">
+            <div>
+              <p className="font-semibold text-text">{actionTarget.display_name}</p>
+              <p className="break-all text-sm text-muted-foreground">{actionTarget.email}</p>
+            </div>
+            <div className="grid gap-2 border-t border-border pt-4">
+              {limitedActions.canManageStatus ? (
+                <Button type="button" variant="secondary" className="justify-start" onClick={() => {
+                  setActionTarget(null);
+                  setStatusTarget({ user: actionTarget, nextStatus: limitedActions.nextStatus });
+                }}>{limitedActions.lockLabel} tài khoản</Button>
+              ) : null}
+              {limitedActions.canResetPassword ? (
+                <Button type="button" variant="secondary" className="justify-start" onClick={() => {
+                  setActionTarget(null);
+                  setResetTarget(actionTarget);
+                }}>Tạo mật khẩu tạm</Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <ConfirmDialog
+        open={privilegedSubmitOpen}
+        title="Gán quyền Super Admin?"
+        description="Tài khoản này sẽ có toàn quyền với người dùng, vai trò, nội dung và dữ liệu hệ thống. Chỉ tiếp tục khi đây là người chịu trách nhiệm quản trị cao nhất."
+        confirmLabel={savePending ? 'Đang lưu...' : 'Xác nhận gán toàn quyền'}
+        tone="warning"
+        pending={savePending}
+        onClose={() => setPrivilegedSubmitOpen(false)}
+        onConfirm={saveUser}
+      />
 
       <ConfirmDialog
         open={Boolean(statusTarget)}
@@ -928,8 +816,36 @@ export function AdminUsersPage() {
         onClose={() => setDiscardModalOpen(false)}
         onConfirm={closeModal}
       />
+      <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
     </section>
   );
+}
+
+function getUserActionState(
+  user: UserRecord,
+  roleOptions: RoleOption[],
+  isSuperAdmin: boolean,
+  canManageStatus: boolean,
+  canResetPassword: boolean
+) {
+  const targetIsSuperAdmin = user.roles.some((role) => role.code === 'super_admin');
+  const canManageTarget =
+    (isSuperAdmin || !targetIsSuperAdmin) &&
+    user.roles.every((role) =>
+      roleOptions.find((option) => option.id === role.id)?.can_assign ?? false
+    );
+  const isCurrentSuperAdmin = user.is_current_user && targetIsSuperAdmin;
+  const mayChangeStatus = canManageTarget && canManageStatus && !user.is_current_user;
+  const mayResetPassword = canManageTarget && canResetPassword && !isCurrentSuperAdmin;
+
+  return {
+    canManageTarget,
+    canManageStatus: mayChangeStatus,
+    canResetPassword: mayResetPassword,
+    hasOtherActions: mayChangeStatus || mayResetPassword,
+    nextStatus: user.status === 'active' ? 'locked' as const : 'active' as const,
+    lockLabel: user.status === 'active' ? 'Tạm khóa' : 'Kích hoạt'
+  };
 }
 
 async function fetchUsers(params: {
@@ -951,112 +867,22 @@ async function fetchUsers(params: {
   );
 }
 
-async function fetchUsersSnapshot(params: {
-  page: number;
-  pageSize: number;
-  query: string;
-  status: string;
-  roleId: string;
-}) {
-  const [list, totalScope, activeScope, lockedScope] = await Promise.all([
-    fetchUsers(params),
-    fetchUsers({
-      page: 1,
-      pageSize: 1,
-      query: params.query,
-      status: '',
-      roleId: params.roleId
-    }),
-    fetchUsers({
-      page: 1,
-      pageSize: 1,
-      query: params.query,
-      status: 'active',
-      roleId: params.roleId
-    }),
-    fetchUsers({
-      page: 1,
-      pageSize: 1,
-      query: params.query,
-      status: 'locked',
-      roleId: params.roleId
-    })
-  ]);
-
-  return {
-    list,
-    summary: {
-      total: totalScope.pagination.total,
-      active: activeScope.pagination.total,
-      locked: lockedScope.pagination.total,
-      roleCount: totalScope.available_roles.length
-    }
-  };
-}
-
-function SummaryCard({
-  label,
-  value,
-  tone
-}: {
-  label: string;
-  value: number;
-  tone: keyof typeof metricCardStyles;
-}) {
+function UsersCardSkeleton() {
   return (
-    <div
-      className={cn(
-        'rounded-[8px] px-3 py-2.5',
-        metricCardStyles[tone]
-      )}
-    >
-      <div className="text-[10px] font-medium uppercase tracking-[0.06em]">
-        {label}
-      </div>
-      <div className="mt-1 text-[20px] font-medium leading-6">{value}</div>
-    </div>
-  );
-}
-
-function UserSummarySkeleton() {
-  return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {(['#F4F4F7', '#EAF3DE', '#FAEEDA', '#EEEDFE'] as const).map((background, index) => (
-        <div
-          key={index}
-          className="rounded-[8px] px-3 py-2.5"
-          style={{ backgroundColor: background }}
-        >
-          <Skeleton className="h-2.5 w-16 bg-white/70" />
-          <Skeleton className="mt-3 h-6 w-12 bg-white/70" />
+    <div className="grid gap-3 border-t border-border bg-surface/50 p-4 lg:grid-cols-2">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="rounded-xl border border-border bg-white p-5">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-11 w-11 rounded-lg" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-48 max-w-full" />
+            </div>
+          </div>
+          <Skeleton className="mt-6 h-7 w-28" />
+          <Skeleton className="mt-6 h-10 w-full" />
         </div>
       ))}
-    </div>
-  );
-}
-
-function UsersTableSkeleton() {
-  return (
-    <div>
-      <div className="grid h-9 grid-cols-[1.3fr_1fr_1fr_0.7fr_0.8fr_80px] gap-4 bg-[#FAFAFA] px-6">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <div key={index} className="flex items-center">
-            <Skeleton className="h-2.5 w-20" />
-          </div>
-        ))}
-      </div>
-      <div>
-        {Array.from({ length: 6 }).map((_, rowIndex) => (
-          <div
-            key={rowIndex}
-            className="grid h-[52px] grid-cols-[1.3fr_1fr_1fr_0.7fr_0.8fr_80px] items-center gap-4 border-t-[0.5px] border-[#E5E5EA] px-6"
-          >
-            {Array.from({ length: 6 }).map((__, cellIndex) => (
-              <Skeleton key={cellIndex} className="h-3.5 w-4/5" />
-            ))}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -1065,18 +891,18 @@ function StatusChip({ status }: { status: UserStatus }) {
   return (
     <span
       className={cn(
-        'inline-flex min-h-6 items-center gap-1.5 rounded-[99px] px-2.5 text-[11px] font-medium',
-        status === 'active' && 'bg-[#EAF3DE] text-[#27500A]',
-        status === 'locked' && 'bg-[#FAEEDA] text-[#633806]',
-        status === 'inactive' && 'bg-[#F4F4F7] text-[#64647A]'
+        'inline-flex min-h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold',
+        status === 'active' && 'bg-emerald-50 text-emerald-800',
+        status === 'locked' && 'bg-amber-50 text-amber-900',
+        status === 'inactive' && 'bg-muted text-muted-foreground'
       )}
     >
       <span
         className={cn(
           'h-1.5 w-1.5 rounded-full',
-          status === 'active' && 'bg-[#27500A]',
-          status === 'locked' && 'bg-[#633806]',
-          status === 'inactive' && 'bg-[#626275]'
+          status === 'active' && 'bg-emerald-600',
+          status === 'locked' && 'bg-amber-600',
+          status === 'inactive' && 'bg-muted-foreground'
         )}
       />
       {userStatusLabel(status)}
@@ -1155,43 +981,14 @@ function PaginationButton({
 }
 
 function roleChipClasses(roleCode: string, isProtected: boolean) {
-  if (roleCode === 'super_admin') {
-    return 'bg-[#EEEDFE] text-[#3C3489]';
-  }
-
-  if (roleCode === 'content_admin') {
-    return 'bg-[#E6F1FB] text-[#0C447C]';
-  }
-
-  if (roleCode === 'product_admin') {
-    return 'bg-[#EEF2FF] text-[#185FA5]';
-  }
-
-  if (roleCode === 'sales_admin') {
-    return 'bg-[#FAEEDA] text-[#633806]';
-  }
-
-  if (isProtected) {
-    return 'bg-[#185FA5] text-white';
-  }
-
-  return 'bg-[#F1EFE8] text-[#444441]';
+  if (roleCode === 'super_admin') return 'bg-primary/10 text-primary';
+  if (isProtected) return 'bg-muted text-text';
+  return 'border border-border bg-white text-text';
 }
 
 function userAvatarClasses(user: UserRecord) {
-  if (user.is_current_user) {
-    return 'bg-[#EEF2FF] text-[#185FA5]';
-  }
-
-  if (user.status === 'active') {
-    return 'bg-[#EAF3DE] text-[#27500A]';
-  }
-
-  if (user.status === 'locked') {
-    return 'bg-[#FAEEDA] text-[#633806]';
-  }
-
-  return 'bg-[#F4F4F7] text-[#64647A]';
+  if (user.is_current_user) return 'bg-primary/10 text-primary';
+  return 'bg-muted text-text';
 }
 
 function initialsForName(value: string) {

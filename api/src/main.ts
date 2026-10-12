@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
@@ -15,8 +16,15 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const env = getEnv();
 
-  // Đứng sau Nginx/Cloudflare → tin proxy để req.ip lấy đúng IP client (cho throttler/audit).
-  app.set('trust proxy', 1);
+  // Direct clients cannot claim a different IP via X-Forwarded-For. Deployments
+  // behind a reverse proxy must explicitly list its IP/CIDR and strip incoming
+  // forwarding headers at that proxy.
+  app.set('trust proxy', env.trustedProxies.length > 0 ? env.trustedProxies : false);
+
+  app.use(['/auth', '/song-thanh', '/public/contact-requests', '/public/quote-requests'], (_request: Request, response: Response, next: NextFunction) => {
+    response.setHeader('Cache-Control', 'private, no-store');
+    next();
+  });
 
   // Security headers. API trả JSON/file nên tắt CSP mặc định (đặt CSP riêng cho route SVG)
   // và cho phép cross-origin resource để frontend khác origin tải được ảnh/tài liệu.

@@ -268,7 +268,7 @@ interface Report {
 }
 
 const DEFAULT_ZIP_PATH = 'C:\\Users\\daikh\\Downloads\\kingled_output.zip';
-const DEFAULT_REPORT_DIR = path.resolve(__dirname, '..', '..', 'docs', 'working-notes');
+const DEFAULT_REPORT_DIR = path.resolve(__dirname, '..', '..', 'tmp', 'qa-artifacts', 'imports');
 const PRODUCT_SHEET_NAME = 'Danh sách SP';
 const CONTENT_SHEET_NAME = 'Noi dung - Anh';
 const BRAND_SLUG = 'kingled';

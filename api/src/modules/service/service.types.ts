@@ -28,7 +28,7 @@ export const SERVICE_ALLOWED_ICON_KEYS = [
 export type ServiceReviewStatus = (typeof SERVICE_ALLOWED_REVIEW_STATUSES)[number];
 export type ServicePublishStatus = (typeof SERVICE_ALLOWED_PUBLISH_STATUSES)[number];
 export type ServiceDeletedScope = (typeof SERVICE_DELETED_SCOPES)[number];
-export type ServiceIconKey = (typeof SERVICE_ALLOWED_ICON_KEYS)[number];
+type ServiceIconKey = (typeof SERVICE_ALLOWED_ICON_KEYS)[number];
 
 export interface ServiceRecord {
   id: string;

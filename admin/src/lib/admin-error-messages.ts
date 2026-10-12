@@ -68,17 +68,17 @@ const CONTEXT_DEFAULTS: Record<AdminErrorContext, PresentationDefaults> = {
   },
   'import-upload': {
     title: 'Không tạo được lô nhập',
-    message: 'Hệ thống chưa tạo được lô nhập từ workbook bạn vừa chọn.',
-    suggestedAction: 'Kiểm tra lại file Excel/CSV, khoảng dòng và thử lại.'
+    message: 'Hệ thống chưa đọc được tệp dữ liệu bạn vừa chọn.',
+    suggestedAction: 'Kiểm tra định dạng tệp, dung lượng và khoảng dòng rồi thử lại.'
   },
   'import-action': {
-    title: 'Không thực hiện được thao tác import',
-    message: 'Hệ thống chưa xử lý được thao tác duyệt, bỏ qua, xử lý xung đột hoặc áp dụng cho lô nhập.',
-    suggestedAction: 'Kiểm tra dữ liệu tạm, điều kiện chặn và thử lại.'
+    title: 'Chưa hoàn tất thao tác với lô nhập',
+    message: 'Thao tác vừa rồi chưa được thực hiện.',
+    suggestedAction: 'Mở mục Kiểm tra sẵn sàng, xử lý các vấn đề được chỉ ra rồi thử lại.'
   },
   'file-load': {
     title: 'Không tải được chi tiết tệp',
-    message: 'Hệ thống chưa lấy được metadata hoặc nơi sử dụng của tệp.',
+    message: 'Hệ thống chưa lấy được thông tin hoặc nơi đang sử dụng tệp.',
     suggestedAction: 'Chọn lại tệp hoặc tải lại danh sách.'
   },
   'file-action': {
@@ -130,7 +130,7 @@ export function formatAdminError(
   const normalized = normalizeError(error);
   const base = CONTEXT_DEFAULTS[context];
   const lowerMessage = normalized.message.toLowerCase();
-  const websiteContentError = mapWebsiteContentError(normalized, context);
+  const websiteContentError = mapWebsiteContentError(normalized);
 
   if (websiteContentError) {
     return websiteContentError;
@@ -142,7 +142,7 @@ export function formatAdminError(
         title: 'Không đọc được file Excel',
         message:
           'Hệ thống chưa đọc được file vừa tải lên. Hãy kiểm tra file có đúng định dạng .xlsx hoặc .csv và thử lại.',
-        suggestedAction: 'Chọn lại file hoặc thử workbook khác.'
+        suggestedAction: 'Chọn lại một tệp Excel hoặc CSV khác.'
       },
       normalized
     );
@@ -155,9 +155,9 @@ export function formatAdminError(
   ) {
     return withTechnicalDetail(
       {
-        title: 'Định dạng file chưa được hỗ trợ',
-        message: 'Luồng nhập dữ liệu chỉ nhận file Excel .xlsx hoặc CSV.',
-        suggestedAction: 'Chọn lại file .xlsx hoặc .csv rồi thử lại.'
+        title: 'Định dạng tệp chưa được hỗ trợ',
+        message: 'Nhập dữ liệu chỉ nhận tệp Excel .xlsx hoặc CSV .csv.',
+        suggestedAction: 'Chọn lại tệp đúng định dạng rồi thử lại.'
       },
       normalized
     );
@@ -171,9 +171,9 @@ export function formatAdminError(
   ) {
     return withTechnicalDetail(
       {
-        title: 'File vượt quá dung lượng cho phép',
-        message: 'Workbook tải lên đang lớn hơn giới hạn hiện tại của hệ thống.',
-        suggestedAction: 'Giảm dung lượng file hoặc tách file nhỏ hơn rồi thử lại.'
+        title: 'Tệp vượt quá dung lượng cho phép',
+        message: 'Tệp tải lên lớn hơn giới hạn hiện tại của hệ thống.',
+        suggestedAction: 'Tách dữ liệu thành các tệp nhỏ hơn rồi thử lại.'
       },
       normalized
     );
@@ -221,10 +221,10 @@ export function formatAdminError(
   ) {
     return withTechnicalDetail(
       {
-        title: 'Workbook chưa có dữ liệu phù hợp để nhập',
+        title: 'Tệp chưa có dữ liệu phù hợp để nhập',
         message:
-          'Hệ thống chưa tìm thấy cấu trúc cột hoặc dòng dữ liệu phù hợp trong workbook này.',
-        suggestedAction: 'Kiểm tra lại sheet đầu tiên, dòng tiêu đề và dữ liệu nguồn rồi thử lại.'
+          'Hệ thống chưa tìm thấy dòng tiêu đề hoặc dòng dữ liệu phù hợp trong tệp này.',
+        suggestedAction: 'Kiểm tra trang tính đầu tiên, tên cột và các dòng dữ liệu rồi thử lại.'
       },
       normalized
     );
@@ -352,7 +352,7 @@ export function formatAdminError(
         message:
           'Lô nhập đã tạo dữ liệu tạm ở bước trước, nên không thể xác nhận lại cột dữ liệu từ màn hình này.',
         suggestedAction:
-          'Mở phần dữ liệu tạm để tiếp tục duyệt, hoặc xóa lô nhập và tải lại file nếu cần đổi mapping.'
+          'Mở dữ liệu tạm để tiếp tục duyệt. Nếu cần đổi cách ghép cột, hãy tạo lại lô từ tệp nguồn.'
       },
       normalized
     );
@@ -361,11 +361,11 @@ export function formatAdminError(
   if (normalized.code === 'IMPORT_SOURCE_WORKBOOK_MISSING') {
     return withTechnicalDetail(
       {
-        title: 'Không đọc lại được workbook nguồn',
+        title: 'Không còn tệp nguồn',
         message:
-          'Hệ thống không còn tìm thấy workbook nguồn để dựng lại bước xác nhận cột dữ liệu.',
+          'Tệp nguồn của lô nhập này không còn khả dụng để xác nhận lại các cột.',
         suggestedAction:
-          'Tải lại workbook để tạo lô nhập mới, rồi xác nhận cột dữ liệu trên lô mới.'
+          'Tải tệp lên lại để tạo lô nhập mới, sau đó xác nhận cách ghép cột.'
       },
       normalized
     );
@@ -429,7 +429,7 @@ export function formatAdminError(
         message:
           'Có biến thể tạm chưa gắn được với nhóm sản phẩm chính thức nên lô nhập chưa thể áp dụng.',
         suggestedAction:
-          'Kiểm tra lại bước áp dụng nhóm sản phẩm tạm hoặc mapping của biến thể rồi thử lại.'
+          'Mở Nhóm sản phẩm tạm, hoàn tất liên kết còn thiếu rồi thử áp dụng lại.'
       },
       normalized
     );
@@ -442,12 +442,12 @@ export function formatAdminError(
         : null;
     return withTechnicalDetail(
       {
-        title: 'Áp dụng lô nhập thất bại',
+        title: 'Chưa áp dụng được lô nhập',
         message: failedStage
-          ? `Hệ thống gặp lỗi ở bước ${failedStage} khi áp dụng lô nhập này.`
-          : 'Hệ thống gặp lỗi khi áp dụng lô nhập này.',
+          ? `Quá trình dừng ở bước “${formatImportApplyStage(failedStage)}”.`
+          : 'Quá trình áp dụng chưa hoàn tất.',
         suggestedAction:
-          'Kiểm tra chi tiết kỹ thuật để xem batch, bước lỗi và nguyên nhân gốc trước khi thử lại.'
+          'Mở Kiểm tra sẵn sàng, xử lý mục đang bị chặn rồi thử áp dụng lại.'
       },
       normalized
     );
@@ -582,6 +582,19 @@ export function formatAdminError(
     );
   }
 
+  if (normalized.code === 'PRODUCT_VARIANT_MOVE_BLOCKED_BY_DOCUMENTS') {
+    return withTechnicalDetail(
+      {
+        title: 'Chưa thể chuyển biến thể sang nhóm khác',
+        message:
+          'Biến thể đang được tài liệu kỹ thuật sử dụng nên việc chuyển nhóm sẽ làm sai liên kết sản phẩm.',
+        suggestedAction:
+          'Gỡ liên kết hoặc lưu trữ các tài liệu kỹ thuật của biến thể trước, sau đó thử chuyển nhóm lại.'
+      },
+      normalized
+    );
+  }
+
   if (normalized.code === 'TECHNICAL_DOCUMENT_VARIANT_GROUP_MISMATCH') {
     return withTechnicalDetail(
       {
@@ -609,6 +622,39 @@ export function formatAdminError(
             : 'Mã định danh này đã tồn tại. Hãy nhập lại giá trị khác.',
         suggestedAction:
           'Để trống SKU để hệ thống tự tạo hoặc chỉnh lại mã trùng rồi thử lưu lại.'
+      },
+      normalized
+    );
+  }
+
+  if (normalized.code === 'ADMIN_USER_CHANGED_DURING_EDIT') {
+    return withTechnicalDetail(
+      {
+        title: 'Tài khoản đã được cập nhật ở nơi khác',
+        message: 'Thông tin đang mở không còn là bản mới nhất nên thay đổi chưa được lưu.',
+        suggestedAction: 'Đóng cửa sổ này, mở lại tài khoản để xem dữ liệu mới rồi chỉnh sửa tiếp.'
+      },
+      normalized
+    );
+  }
+
+  if (normalized.code === 'ADMIN_USER_LAST_SUPER_ADMIN_BLOCKED') {
+    return withTechnicalDetail(
+      {
+        title: 'Cần giữ ít nhất một Super Admin',
+        message: 'Không thể khóa hoặc gỡ quyền của Super Admin đang hoạt động cuối cùng.',
+        suggestedAction: 'Gán Super Admin cho một tài khoản khác trước khi thay đổi tài khoản này.'
+      },
+      normalized
+    );
+  }
+
+  if (normalized.code === 'ADMIN_ROLE_PROTECTED_METADATA_LOCKED') {
+    return withTechnicalDetail(
+      {
+        title: 'Vai trò hệ thống không sửa được thông tin cơ bản',
+        message: 'Tên, mô tả và trạng thái của vai trò này được hệ thống quản lý.',
+        suggestedAction: 'Nếu cần điều chỉnh quyền, hãy mở phần Ma trận quyền của vai trò.'
       },
       normalized
     );
@@ -659,10 +705,9 @@ export function formatAdminError(
   if (isNetworkError(normalized.message)) {
     return withTechnicalDetail(
       {
-        title: 'Không kết nối được tới hệ thống',
-        message:
-          'Trình quản trị chưa kết nối được tới API để hoàn tất thao tác này.',
-        suggestedAction: 'Kiểm tra lại kết nối hoặc trạng thái máy chủ rồi thử lại.'
+        title: 'Kết nối đang bị gián đoạn',
+        message: 'Hệ thống chưa thể hoàn tất thao tác do kết nối tạm thời bị gián đoạn.',
+        suggestedAction: 'Kiểm tra kết nối mạng rồi bấm thử lại.'
       },
       normalized
     );
@@ -674,7 +719,7 @@ export function formatAdminError(
         title: 'Hệ thống đang gặp lỗi xử lý',
         message:
           'Yêu cầu vừa rồi đã tới máy chủ nhưng chưa được xử lý thành công.',
-        suggestedAction: 'Thử lại sau ít phút. Nếu lỗi lặp lại, kiểm tra log kỹ thuật.'
+        suggestedAction: 'Thử lại sau ít phút. Nếu lỗi vẫn lặp lại, báo cho người phụ trách hệ thống.'
       },
       normalized
     );
@@ -706,9 +751,23 @@ function normalizeError(error: unknown): NormalizedError {
   return { message: '' };
 }
 
+function formatImportApplyStage(value: string) {
+  const normalized = value.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    categories: 'tạo danh mục',
+    product_categories: 'tạo danh mục',
+    product_groups: 'tạo nhóm sản phẩm',
+    groups: 'tạo nhóm sản phẩm',
+    product_variants: 'tạo biến thể sản phẩm',
+    variants: 'tạo biến thể sản phẩm',
+    documents: 'liên kết tài liệu',
+    finalize: 'hoàn tất lô nhập'
+  };
+  return labels[normalized] || 'xử lý dữ liệu';
+}
+
 function mapWebsiteContentError(
-  error: NormalizedError,
-  context: AdminErrorContext
+  error: NormalizedError
 ): AdminErrorPresentation | null {
   const lowerMessage = error.message.toLowerCase();
   const field =
@@ -717,9 +776,8 @@ function mapWebsiteContentError(
   const friendlyServerError = withTechnicalDetail(
     {
       title: 'Hệ thống đang gặp lỗi xử lý',
-      message:
-        'Hệ thống đang gặp lỗi xử lý. Vui lòng thử lại hoặc kiểm tra log kỹ thuật.',
-      suggestedAction: 'Thử lại sau ít phút. Nếu lỗi lặp lại, kiểm tra log kỹ thuật.'
+      message: 'Hệ thống chưa xử lý được yêu cầu vừa rồi.',
+      suggestedAction: 'Thử lại sau ít phút. Nếu lỗi vẫn lặp lại, báo cho người phụ trách hệ thống.'
     },
     error
   );
@@ -821,6 +879,36 @@ function mapWebsiteContentError(
   }
 
   if (
+    error.code === 'PRODUCT_GROUP_VERSION_CONFLICT' ||
+    error.code === 'PRODUCT_VARIANT_VERSION_CONFLICT' ||
+    error.code === 'TECHNICAL_DOCUMENT_VERSION_CONFLICT'
+  ) {
+    return withTechnicalDetail(
+      {
+        title: 'Dữ liệu sản phẩm đã được cập nhật ở nơi khác',
+        message:
+          'Bản đang mở không còn là phiên bản mới nhất nên hệ thống đã chặn ghi đè để tránh mất dữ liệu.',
+        suggestedAction:
+          'Tải lại trang để nhận dữ liệu mới nhất, đối chiếu thay đổi rồi chỉnh sửa và lưu lại.'
+      },
+      error
+    );
+  }
+
+  if (error.code === 'PAGE_CONTENT_VERSION_CONFLICT') {
+    return withTechnicalDetail(
+      {
+        title: 'Nội dung đã được người khác cập nhật',
+        message:
+          'Bản đang mở không còn là phiên bản mới nhất nên hệ thống đã chặn ghi đè để tránh mất dữ liệu.',
+        suggestedAction:
+          'Tải lại trang để nhận nội dung mới nhất, đối chiếu thay đổi rồi chỉnh sửa và lưu lại.'
+      },
+      error
+    );
+  }
+
+  if (
     lowerMessage.includes('self redirect is not allowed') ||
     lowerMessage.includes('redirect loop is not allowed')
   ) {
@@ -844,6 +932,20 @@ function mapWebsiteContentError(
         title: 'Đường dẫn chưa hợp lệ',
         message: 'Đường dẫn không hợp lệ.',
         suggestedAction: 'Đường dẫn nội bộ phải bắt đầu bằng dấu /.'
+      },
+      error
+    );
+  }
+
+  if (
+    field === 'file' &&
+    typeof error.details?.extension === 'string'
+  ) {
+    return withTechnicalDetail(
+      {
+        title: 'Định dạng tệp chưa được hỗ trợ',
+        message: 'Tệp đã chọn không thuộc các định dạng Kho tệp hỗ trợ.',
+        suggestedAction: 'Chọn ảnh, PDF, Word, Excel hoặc CSV rồi tải lên lại.'
       },
       error
     );

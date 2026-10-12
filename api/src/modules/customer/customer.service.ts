@@ -64,37 +64,33 @@ export class CustomerService {
 
   async updateCustomer(customerId: string, input: UpdateCustomerDto) {
     const id = assertUuid('customer_id', customerId);
-    const customer = await this.assertActiveCustomer(id);
     const mutation = this.normalizeUpdateInput(input);
-    await this.customerRepository.update(customer.id, mutation);
-    return this.getCustomerDetail(customer.id);
+    const outcome = await this.customerRepository.update(id, mutation);
+    this.assertActiveMutationOutcome(outcome);
+    return this.getCustomerDetail(id);
   }
 
   async archiveCustomer(customerId: string) {
     const id = assertUuid('customer_id', customerId);
-    const customer = await this.customerRepository.findById(id);
-    if (!customer) {
+    const outcome = await this.customerRepository.archive(id);
+    if (outcome === 'not_found') {
       throw this.notFound('Customer profile was not found.');
     }
-    if (customer.deleted_at) {
+    if (outcome === 'archived') {
       throw this.conflict('Customer profile is already archived.');
     }
-
-    await this.customerRepository.archive(id);
     return this.getCustomerDetail(id);
   }
 
   async restoreCustomer(customerId: string) {
     const id = assertUuid('customer_id', customerId);
-    const customer = await this.customerRepository.findById(id);
-    if (!customer) {
+    const outcome = await this.customerRepository.restore(id);
+    if (outcome === 'not_found') {
       throw this.notFound('Customer profile was not found.');
     }
-    if (!customer.deleted_at) {
+    if (outcome === 'active') {
       throw this.conflict('Customer profile is not archived.');
     }
-
-    await this.customerRepository.restore(id);
     return this.getCustomerDetail(id);
   }
 
@@ -108,25 +104,23 @@ export class CustomerService {
       });
     }
 
-    const customer = await this.customerRepository.findById(id);
-    if (!customer) {
+    const outcome = await this.customerRepository.permanentlyDeleteWithGuard(id);
+    if (outcome.status === 'not_found') {
       throw this.notFound('Customer profile was not found.');
     }
-    if (!customer.deleted_at) {
+    if (outcome.status === 'active') {
       throw this.conflict('Phải lưu trữ hồ sơ trước khi xóa vĩnh viễn.');
     }
 
-    const activeSources = await this.customerRepository.countActiveSources(id);
-    if (activeSources.contacts > 0 || activeSources.quotes > 0) {
+    if (outcome.status === 'blocked') {
       throw new AppError({
         code: 'CUSTOMER_PERMANENT_DELETE_BLOCKED',
         message: 'Không thể xóa vĩnh viễn vì hồ sơ vẫn còn liên hệ hoặc báo giá đang hoạt động.',
         statusCode: HttpStatus.CONFLICT,
-        details: activeSources
+        details: outcome.sources
       });
     }
 
-    await this.customerRepository.permanentlyDelete(id);
     return { id, deleted: true };
   }
 
@@ -152,23 +146,21 @@ export class CustomerService {
     };
   }
 
-  private async assertActiveCustomer(id: string): Promise<CustomerProfileRecord> {
-    const customer = await this.customerRepository.findById(id);
-    if (!customer) {
+  private assertActiveMutationOutcome(outcome: string): void {
+    if (outcome === 'not_found') {
       throw this.notFound('Customer profile was not found.');
     }
-    if (customer.deleted_at) {
+    if (outcome === 'archived') {
       throw this.conflict('Customer profile is archived.');
     }
-    return customer;
   }
 
   private normalizeCreateInput(input: CreateCustomerDto) {
     return {
-      full_name: normalizeRequiredText('full_name', input.full_name),
-      phone: normalizeNullableText('phone', input.phone) ?? null,
+      full_name: normalizeRequiredText('full_name', input.full_name, 128),
+      phone: normalizeNullableText('phone', input.phone, 32) ?? null,
       email: normalizeNullableEmail(input.email) ?? null,
-      company_name: normalizeNullableText('company_name', input.company_name) ?? null
+      company_name: normalizeNullableText('company_name', input.company_name, 255) ?? null
     };
   }
 
@@ -176,11 +168,11 @@ export class CustomerService {
     const mutation: CustomerMutationInput = {};
 
     if (typeof input.full_name !== 'undefined') {
-      mutation.full_name = normalizeRequiredText('full_name', input.full_name);
+      mutation.full_name = normalizeRequiredText('full_name', input.full_name, 128);
     }
 
     if (typeof input.phone !== 'undefined') {
-      mutation.phone = normalizeNullableText('phone', input.phone) ?? null;
+      mutation.phone = normalizeNullableText('phone', input.phone, 32) ?? null;
     }
 
     if (typeof input.email !== 'undefined') {
@@ -189,7 +181,7 @@ export class CustomerService {
 
     if (typeof input.company_name !== 'undefined') {
       mutation.company_name =
-        normalizeNullableText('company_name', input.company_name) ?? null;
+        normalizeNullableText('company_name', input.company_name, 255) ?? null;
     }
 
     return mutation;

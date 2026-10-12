@@ -8,7 +8,7 @@ import {
   useMemo,
   useState
 } from 'react';
-import { ArrowRightLeft, CheckSquare2, Layers3, Save } from '@/components/icons';
+import { ArrowRightLeft, CheckSquare2, Layers, Save } from '@/components/icons';
 
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -57,6 +57,8 @@ type MappingFormState = {
 
 type FlexibleRole = 'unmapped' | 'spec' | 'attribute' | 'ignore';
 type MappingMode = 'recognized_profile' | 'system_suggestion' | 'manual';
+type ColumnView = 'unmapped' | 'all' | 'attribute' | 'ignore';
+const COLUMN_PAGE_SIZE = 20;
 
 const REQUIRED_FIELDS: Array<{
   key: keyof Pick<
@@ -67,27 +69,22 @@ const REQUIRED_FIELDS: Array<{
     | 'product_variant_column'
   >;
   label: string;
-  helper: string;
 }> = [
   {
     key: 'category_main_column',
-    label: 'Danh mục chính',
-    helper: 'Tầng điều hướng đầu tiên của sản phẩm.'
+    label: 'Danh mục chính'
   },
   {
     key: 'category_sub_column',
-    label: 'Danh mục con',
-    helper: 'Nhánh con nằm dưới danh mục chính.'
+    label: 'Danh mục con'
   },
   {
     key: 'product_group_column',
-    label: 'Nhóm sản phẩm',
-    helper: 'Tên sản phẩm gốc, lặp lại qua nhiều biến thể.'
+    label: 'Tên sản phẩm (dùng chung)'
   },
   {
     key: 'product_variant_column',
-    label: 'Biến thể sản phẩm',
-    helper: 'Tên hiển thị chi tiết của từng biến thể.'
+    label: 'Tên biến thể'
   }
 ];
 
@@ -106,10 +103,10 @@ const OPTIONAL_FIELDS: Array<{
 }> = [
   { key: 'brand_column', label: 'Thương hiệu' },
   { key: 'short_description_column', label: 'Mô tả ngắn' },
-  { key: 'group_external_code_column', label: 'Mã nhóm ngoài' },
-  { key: 'variant_external_code_column', label: 'Mã biến thể ngoài' },
+  { key: 'group_external_code_column', label: 'Mã nhóm chung' },
+  { key: 'variant_external_code_column', label: 'Mã liên kết riêng' },
   { key: 'sku_column', label: 'SKU' },
-  { key: 'model_code_column', label: 'Mã model' },
+  { key: 'model_code_column', label: 'Mã sản phẩm' },
   { key: 'public_price_column', label: 'Giá công khai' }
 ];
 
@@ -168,6 +165,7 @@ export function ImportColumnMappingPanel({
 
   const [form, setForm] = useState<MappingFormState>(initialState);
   const [localError, setLocalError] = useState('');
+  const [invalidField, setInvalidField] = useState('');
   const [mappingMode, setMappingMode] = useState<MappingMode>(
     recognizedDefaults ? 'recognized_profile' : 'system_suggestion'
   );
@@ -175,13 +173,20 @@ export function ImportColumnMappingPanel({
   const [profileName, setProfileName] = useState(
     getProfileName(recognizedProfile, preview)
   );
+  const [columnQuery, setColumnQuery] = useState('');
+  const [columnView, setColumnView] = useState<ColumnView>('unmapped');
+  const [columnPage, setColumnPage] = useState(1);
 
   useEffect(() => {
     setForm(initialState);
     setLocalError('');
+    setInvalidField('');
     setMappingMode(recognizedDefaults ? 'recognized_profile' : 'system_suggestion');
     setSaveProfile(false);
     setProfileName(getProfileName(recognizedProfile, preview));
+    setColumnQuery('');
+    setColumnView('unmapped');
+    setColumnPage(1);
   }, [defaultsKey, initialState, preview, recognizedDefaults, recognizedProfile]);
 
   const singleAssignedColumns = useMemo(() => {
@@ -220,6 +225,28 @@ export function ImportColumnMappingPanel({
       }),
     [form, sampleRows]
   );
+  const usesProductNameAsDefaultVariant =
+    Boolean(form.product_group_column) &&
+    form.product_variant_column === form.product_group_column;
+  const assignedRequiredCount = REQUIRED_FIELDS.filter((field) => Boolean(form[field.key])).length;
+  const selectedOptionalFields = OPTIONAL_FIELDS.filter((field) => Boolean(form[field.key]));
+  const unresolvedHeaders = flexibleHeaders.filter(
+    (header) => getFlexibleRole(form, header) === 'unmapped'
+  );
+  const normalizedQuery = normalizeColumnSearch(columnQuery);
+  const filteredHeaders = flexibleHeaders.filter((header) => {
+    if (normalizedQuery && !normalizeColumnSearch(header).includes(normalizedQuery)) return false;
+    const role = getFlexibleRole(form, header);
+    return columnView === 'all' || role === columnView;
+  });
+  const filteredUnresolved = filteredHeaders.filter(
+    (header) => getFlexibleRole(form, header) === 'unmapped'
+  );
+  const columnPageCount = Math.max(1, Math.ceil(filteredHeaders.length / COLUMN_PAGE_SIZE));
+  const visibleHeaders = filteredHeaders.slice(
+    (Math.min(columnPage, columnPageCount) - 1) * COLUMN_PAGE_SIZE,
+    Math.min(columnPage, columnPageCount) * COLUMN_PAGE_SIZE
+  );
 
   if (!preview || headers.length === 0) {
     return null;
@@ -227,13 +254,25 @@ export function ImportColumnMappingPanel({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const errorMessage = validateForm(form, saveProfile, profileName);
-    if (errorMessage) {
-      setLocalError(errorMessage);
+    const validation = validateForm(form, headers, saveProfile, profileName);
+    if (validation) {
+      setLocalError(validation.message);
+      setInvalidField(validation.fieldId);
+      if (validation.fieldId === 'import-mapping-remaining-columns') {
+        setColumnQuery('');
+        setColumnView('unmapped');
+        setColumnPage(1);
+      }
+      requestAnimationFrame(() => {
+        const field = document.getElementById(validation.fieldId);
+        field?.focus();
+        field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
       return;
     }
 
     setLocalError('');
+    setInvalidField('');
     await onSubmit(toPayload(form, saveProfile, profileName));
   }
 
@@ -241,6 +280,8 @@ export function ImportColumnMappingPanel({
     setForm(defaults);
     setMappingMode('system_suggestion');
     setLocalError('');
+    setInvalidField('');
+    setColumnPage(1);
   }
 
   function useRecognizedProfile() {
@@ -248,6 +289,25 @@ export function ImportColumnMappingPanel({
     setForm(recognizedDefaults);
     setMappingMode('recognized_profile');
     setLocalError('');
+    setInvalidField('');
+    setColumnPage(1);
+  }
+
+  function assignUnresolvedColumns(role: 'attribute' | 'ignore') {
+    if (filteredUnresolved.length === 0) return;
+    setMappingMode('manual');
+    setLocalError('');
+    setInvalidField('');
+    setColumnPage(1);
+    setForm((current) => ({
+      ...current,
+      attribute_columns: role === 'attribute'
+        ? [...current.attribute_columns, ...filteredUnresolved]
+        : current.attribute_columns,
+      ignored_columns: role === 'ignore'
+        ? [...current.ignored_columns, ...filteredUnresolved]
+        : current.ignored_columns
+    }));
   }
 
   return (
@@ -257,12 +317,18 @@ export function ImportColumnMappingPanel({
           <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-sm border border-border bg-panel text-primary">
             <ArrowRightLeft className="h-4 w-4" />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold text-text">Xác nhận cột dữ liệu</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Chọn cấu hình gợi ý của hệ thống, dùng cấu hình đã lưu nếu đây là file
-              quen, hoặc tự chọn từng cột trước khi tạo dữ liệu tạm.
-            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge tone={assignedRequiredCount === REQUIRED_FIELDS.length ? 'success' : 'warning'}>
+              {assignedRequiredCount}/{REQUIRED_FIELDS.length} cột chính
+            </Badge>
+            {unresolvedHeaders.length > 0 ? (
+              <Badge tone="warning">{unresolvedHeaders.length} cột chưa xử lý</Badge>
+            ) : (
+              <Badge tone="success">Đã xử lý mọi cột</Badge>
+            )}
           </div>
         </div>
       </div>
@@ -273,12 +339,7 @@ export function ImportColumnMappingPanel({
           data-import-mapping-stage="true"
         >
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-text">Chọn cách gán cột</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Hệ thống có thể điền sẵn theo cấu hình đã lưu hoặc theo gợi ý mặc định.
-              </p>
-            </div>
+            <h3 className="text-sm font-semibold text-text">Cách ghép cột</h3>
             <Badge tone="info">
               {mappingMode === 'recognized_profile'
                 ? 'Đang dùng cấu hình đã lưu'
@@ -293,12 +354,11 @@ export function ImportColumnMappingPanel({
               className="rounded-sm border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"
               data-import-mapping-recognized-profile="true"
             >
-              Hệ thống đã nhận ra mẫu cột quen{' '}
+              Đã nhận ra mẫu cột quen{' '}
               <span className="font-semibold">
                 “{formatValue(recognizedProfile.profile_name)}”
               </span>
-              . Bạn có thể dùng lại cấu hình đã lưu này hoặc chuyển sang gợi ý hệ
-              thống rồi chỉnh tay.
+              . Kiểm tra lại bốn cột chính trước khi tiếp tục.
             </div>
           ) : null}
 
@@ -327,6 +387,7 @@ export function ImportColumnMappingPanel({
               onClick={() => {
                 setMappingMode('manual');
                 setLocalError('');
+                setInvalidField('');
               }}
               data-import-use-manual-mapping="true"
             >
@@ -337,24 +398,70 @@ export function ImportColumnMappingPanel({
 
         <section className="space-y-3">
           <div className="flex items-center gap-2">
-            <Layers3 className="h-4 w-4 text-primary" />
-            <h3 className="text-sm font-semibold text-text">Phân cấp sản phẩm</h3>
+            <Layers className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-text">Sản phẩm và biến thể / SKU</h3>
           </div>
+          <div className="grid overflow-hidden rounded-sm border border-border bg-slate-50 sm:grid-cols-2">
+            <div className="border-b border-border px-3 py-2.5 sm:border-b-0 sm:border-r">
+              <p className="text-xs font-semibold text-text">Sản phẩm</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Tên, danh mục, thương hiệu và nội dung dùng chung.</p>
+            </div>
+            <div className="px-3 py-2.5">
+              <p className="text-xs font-semibold text-text">Biến thể / SKU</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Mã hàng, model, giá và thông số của cấu hình bán được.</p>
+            </div>
+          </div>
+          <label className="flex items-start gap-3 rounded-sm border border-blue-200 bg-blue-50 px-3 py-3 text-sm text-text">
+            <input
+              className="mt-0.5 h-4 w-4"
+              type="checkbox"
+              checked={usesProductNameAsDefaultVariant}
+              disabled={!form.product_group_column}
+              data-import-flat-product-mode="true"
+              onChange={(event) => {
+                setMappingMode('manual');
+                setLocalError('');
+                setForm((current) => ({
+                  ...current,
+                  product_variant_column: event.target.checked
+                    ? current.product_group_column
+                    : current.product_variant_column === current.product_group_column
+                      ? ''
+                      : current.product_variant_column
+                }));
+              }}
+            />
+            <span>
+              <span className="block font-medium">Mỗi sản phẩm chỉ có một cấu hình</span>
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Tự tạo một biến thể mặc định từ tên sản phẩm.
+              </span>
+            </span>
+          </label>
           <div className="grid gap-4 lg:grid-cols-2">
             {REQUIRED_FIELDS.map((field) => (
               <label key={field.key} className="block space-y-2">
                 <span className="text-sm font-medium text-text">{field.label}</span>
                 <Select
+                  id={mappingFieldId(field.key)}
                   data-import-required-role={field.key}
                   value={form[field.key]}
-                  onChange={(event) =>
+                  aria-invalid={invalidField === mappingFieldId(field.key)}
+                  className={invalidField === mappingFieldId(field.key) ? 'border-red-500 ring-2 ring-red-100' : ''}
+                  disabled={
+                    field.key === 'product_variant_column' &&
+                    usesProductNameAsDefaultVariant
+                  }
+                  onChange={(event) => {
+                    setLocalError('');
+                    setInvalidField('');
                     updateSingleField(
                       setForm,
                       setMappingMode,
                       field.key,
                       event.target.value
                     )
-                  }
+                  }}
                 >
                   <option value="">Chọn cột dữ liệu</option>
                   {headers.map((header) => (
@@ -363,7 +470,6 @@ export function ImportColumnMappingPanel({
                     </option>
                   ))}
                 </Select>
-                <p className="text-xs text-muted-foreground">{field.helper}</p>
                 <SampleValueChips header={form[field.key]} sampleRows={sampleRows} />
               </label>
             ))}
@@ -371,46 +477,62 @@ export function ImportColumnMappingPanel({
         </section>
 
         <details className="rounded-sm border border-border bg-panel">
-          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-text">
-            Tùy chọn bổ sung
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-text">
+            <span>Thương hiệu, mã hàng, mô tả và giá</span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {selectedOptionalFields.length > 0
+                ? `${selectedOptionalFields.length} cột đã ghép: ${selectedOptionalFields.map((field) => field.label).join(', ')}`
+                : 'Chưa ghép cột nào'}
+            </span>
           </summary>
-          <div className="grid gap-4 border-t border-border px-4 py-4 lg:grid-cols-2">
-            {OPTIONAL_FIELDS.map((field) => (
-              <label key={field.key} className="block space-y-2">
-                <span className="text-sm font-medium text-text">{field.label}</span>
-                <Select
-                  value={form[field.key]}
-                  onChange={(event) =>
-                    updateSingleField(
-                      setForm,
-                      setMappingMode,
-                      field.key,
-                      event.target.value
-                    )
-                  }
-                >
-                  <option value="">Không dùng cột này</option>
-                  {headers.map((header) => (
-                    <option key={header} value={header}>
-                      {header}
-                    </option>
-                  ))}
-                </Select>
-                <SampleValueChips header={form[field.key]} sampleRows={sampleRows} />
-              </label>
-            ))}
+          <div className="border-t border-border px-4 py-4">
+            <p className="mb-4 text-sm text-muted-foreground">
+              Nhập lại file: ghép cột Mã sản phẩm của từng mặt hàng nếu có. SKU hoặc mã liên kết riêng cũng giúp nhận diện; khi không có mã, đổi tên sẽ cần đối chiếu lại.
+            </p>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {OPTIONAL_FIELDS.map((field) => (
+                <label key={field.key} className="block space-y-2">
+                  <span className="text-sm font-medium text-text">{field.label}</span>
+                  <Select
+                    id={mappingFieldId(field.key)}
+                    value={form[field.key]}
+                    aria-invalid={invalidField === mappingFieldId(field.key)}
+                    className={invalidField === mappingFieldId(field.key) ? 'border-red-500 ring-2 ring-red-100' : ''}
+                    onChange={(event) => {
+                      setLocalError('');
+                      setInvalidField('');
+                      updateSingleField(
+                        setForm,
+                        setMappingMode,
+                        field.key,
+                        event.target.value
+                      );
+                    }}
+                  >
+                    <option value="">Không dùng cột này</option>
+                    {headers.map((header) => (
+                      <option key={header} value={header}>
+                        {header}
+                      </option>
+                    ))}
+                  </Select>
+                  <SampleValueChips header={form[field.key]} sampleRows={sampleRows} />
+                </label>
+              ))}
+            </div>
           </div>
         </details>
 
-        <section className="space-y-3">
+        <section
+          id="import-mapping-remaining-columns"
+          tabIndex={-1}
+          className="space-y-3 outline-none"
+          data-import-remaining-columns="true"
+        >
           <div className="flex items-center gap-2">
             <CheckSquare2 className="h-4 w-4 text-primary" />
-            <h3 className="text-sm font-semibold text-text">Cột thông số và cột bỏ qua</h3>
+            <h3 className="text-sm font-semibold text-text">Các cột còn lại</h3>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Với các cột còn lại, bạn có thể đánh dấu giữ ở thông số sản phẩm, thuộc tính
-            biến thể hoặc bỏ qua trong lần nhập này.
-          </p>
 
           {flexibleHeaders.length === 0 ? (
             <div className="rounded-sm border border-dashed border-border px-4 py-4 text-sm text-muted-foreground">
@@ -418,46 +540,96 @@ export function ImportColumnMappingPanel({
             </div>
           ) : (
             <div className="space-y-3">
-              {flexibleHeaders.map((header) => (
+              <div className="flex flex-col gap-3 rounded-sm border border-border bg-slate-50 p-3 lg:flex-row lg:items-end lg:justify-between">
+                <label className="block min-w-0 flex-1 space-y-1.5">
+                  <span className="text-xs font-semibold text-text">Tìm cột trong tệp</span>
+                  <Input
+                    value={columnQuery}
+                    onChange={(event) => {
+                      setColumnQuery(event.target.value);
+                      setColumnPage(1);
+                    }}
+                    placeholder="Nhập tên cột Excel"
+                    data-import-column-search="true"
+                  />
+                </label>
+                <label className="block space-y-1.5 lg:w-56">
+                  <span className="text-xs font-semibold text-text">Hiển thị</span>
+                  <Select
+                    value={columnView}
+                    onChange={(event) => {
+                      setColumnView(event.target.value as ColumnView);
+                      setColumnPage(1);
+                    }}
+                    data-import-column-view="true"
+                  >
+                    <option value="unmapped">Chưa xử lý ({unresolvedHeaders.length})</option>
+                    <option value="all">Tất cả ({flexibleHeaders.length})</option>
+                    <option value="attribute">Giữ làm thuộc tính ({form.attribute_columns.length})</option>
+                    <option value="ignore">Bỏ qua ({form.ignored_columns.length})</option>
+                  </Select>
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>{filteredHeaders.length} cột phù hợp · Hiển thị tối đa {COLUMN_PAGE_SIZE} cột mỗi trang</span>
+                {filteredUnresolved.length > 0 ? (
+                  <span>Thao tác hàng loạt áp dụng cho {filteredUnresolved.length} cột chưa xử lý phù hợp, kể cả ở trang khác.</span>
+                ) : null}
+              </div>
+              {filteredUnresolved.length > 0 ? (
+                <div className="flex flex-wrap gap-2" data-import-column-bulk-actions="true">
+                  <Button type="button" variant="secondary" onClick={() => assignUnresolvedColumns('attribute')}>
+                    Giữ {filteredUnresolved.length} cột làm thuộc tính
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => assignUnresolvedColumns('ignore')}>
+                    Bỏ qua {filteredUnresolved.length} cột
+                  </Button>
+                </div>
+              ) : null}
+              {filteredHeaders.length === 0 ? (
+                <p className="rounded-sm border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                  {unresolvedHeaders.length === 0 && columnView === 'unmapped'
+                    ? 'Đã xử lý tất cả cột. Bạn có thể xem lại ở mục “Tất cả”.'
+                    : 'Không tìm thấy cột phù hợp. Thử tên khác hoặc đổi chế độ hiển thị.'}
+                </p>
+              ) : null}
+              {visibleHeaders.map((header) => (
                 <div
                   key={header}
-                  className="rounded-sm border border-border bg-panel px-3 py-3"
+                  className="rounded-sm border border-border bg-panel px-3 py-2.5"
+                  data-import-flexible-column={header}
                 >
-                  <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-text">{header}</div>
                       <SampleValueChips header={header} sampleRows={sampleRows} />
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                      {FLEXIBLE_ROLE_OPTIONS.map((option) => {
-                        const checked = getFlexibleRole(form, header) === option.value;
-                        return (
-                          <label
-                            key={option.value}
-                            className={[
-                              'flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-2 text-sm transition-colors',
-                              checked
-                                ? 'border-primary bg-primary/5 text-primary'
-                                : 'border-border bg-white text-muted-foreground hover:border-primary/40'
-                            ].join(' ')}
-                          >
-                            <input
-                              className="h-4 w-4"
-                              type="radio"
-                              name={`mapping-role-${header}`}
-                              checked={checked}
-                              onChange={() =>
-                                updateFlexibleRole(setForm, setMappingMode, header, option.value)
-                              }
-                            />
-                            {option.label}
-                          </label>
-                        );
-                      })}
-                    </div>
+                    <label className="block shrink-0 space-y-1 lg:w-52">
+                      <span className="sr-only">Cách xử lý cột {header}</span>
+                      <Select
+                        value={getFlexibleRole(form, header)}
+                        onChange={(event) => {
+                          setLocalError('');
+                          setInvalidField('');
+                          updateFlexibleRole(setForm, setMappingMode, header, event.target.value as FlexibleRole);
+                        }}
+                        data-import-flexible-role={header}
+                      >
+                        {FLEXIBLE_ROLE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </Select>
+                    </label>
                   </div>
                 </div>
               ))}
+              {columnPageCount > 1 ? (
+                <div className="flex items-center justify-end gap-3 text-sm">
+                  <Button type="button" variant="secondary" disabled={columnPage <= 1} onClick={() => setColumnPage((page) => page - 1)}>Trước</Button>
+                  <span>Trang {Math.min(columnPage, columnPageCount)} / {columnPageCount}</span>
+                  <Button type="button" variant="secondary" disabled={columnPage >= columnPageCount} onClick={() => setColumnPage((page) => page + 1)}>Tiếp</Button>
+                </div>
+              ) : null}
             </div>
           )}
         </section>
@@ -465,7 +637,7 @@ export function ImportColumnMappingPanel({
         <section className="space-y-3 rounded-sm border border-border bg-panel px-4 py-4">
           <div className="flex items-center gap-2">
             <Save className="h-4 w-4 text-primary" />
-            <h3 className="text-sm font-semibold text-text">Lưu cấu hình mapping</h3>
+            <h3 className="text-sm font-semibold text-text">Lưu cách ghép cột</h3>
           </div>
           <label className="flex items-start gap-3 text-sm text-text">
             <input
@@ -484,9 +656,16 @@ export function ImportColumnMappingPanel({
             <label className="block space-y-2">
               <span className="text-sm font-medium text-text">Tên cấu hình</span>
               <Input
+                id="import-mapping-profile-name"
                 value={profileName}
-                onChange={(event) => setProfileName(event.target.value)}
-                placeholder="Ví dụ: Mẫu import đèn LED tháng 4"
+                aria-invalid={invalidField === 'import-mapping-profile-name'}
+                className={invalidField === 'import-mapping-profile-name' ? 'border-red-500 ring-2 ring-red-100' : ''}
+                onChange={(event) => {
+                  setProfileName(event.target.value);
+                  setLocalError('');
+                  setInvalidField('');
+                }}
+                placeholder="Ví dụ: Mẫu đèn LED tháng 4"
                 data-import-mapping-profile-name="true"
               />
             </label>
@@ -494,7 +673,7 @@ export function ImportColumnMappingPanel({
         </section>
 
         <section className="space-y-3">
-          <h3 className="text-sm font-semibold text-text">Xem nhanh kết quả mapping</h3>
+          <h3 className="text-sm font-semibold text-text">Xem trước kết quả</h3>
           <div className="overflow-x-auto rounded-sm border border-border">
             <table className="min-w-full divide-y divide-border text-sm">
               <thead className="bg-muted">
@@ -536,24 +715,25 @@ export function ImportColumnMappingPanel({
         </section>
 
         {localError ? (
-          <div className="rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {localError}
+          <div
+            className="flex flex-col gap-2 rounded-sm border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between"
+            role="alert"
+            data-import-mapping-error="true"
+          >
+            <span>{localError}</span>
+            <button
+              type="button"
+              className="shrink-0 font-semibold underline underline-offset-4"
+              onClick={() => document.getElementById(invalidField)?.focus()}
+            >
+              Đi đến chỗ cần sửa
+            </button>
           </div>
         ) : null}
 
         <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
-            Sau khi xác nhận, hệ thống mới tạo dữ liệu tạm để bạn duyệt từng dòng.
-          </p>
+          <span />
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={useSuggestedMapping}
-              disabled={submitting}
-            >
-              Dùng cấu hình gợi ý
-            </Button>
             <Button type="submit" data-import-mapping-submit="true" disabled={submitting}>
               {submitting ? 'Đang tạo dữ liệu tạm' : 'Tạo dữ liệu tạm'}
             </Button>
@@ -582,8 +762,8 @@ function SampleValueChips({
 
   return (
     <div className="flex flex-wrap gap-2">
-      {values.map((value) => (
-        <Badge key={`${header}-${value}`} tone="default">
+      {values.map((value, index) => (
+        <Badge key={`${header}-${index}`} tone="default">
           {value}
         </Badge>
       ))}
@@ -646,11 +826,20 @@ function getProfileName(recognizedProfile: RecordMap, preview: RecordMap | null)
 
   const sheetName = readString(preview?.sheet_name);
   if (sheetName) return `Cấu hình ${sheetName}`;
-  return 'Cấu hình import quen';
+  return 'Cấu hình cột quen';
 }
 
 function readString(value: unknown) {
   return typeof value === 'string' ? value : '';
+}
+
+function normalizeColumnSearch(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/đ/g, 'd')
+    .trim();
 }
 
 function getStringArray(value: unknown) {
@@ -691,13 +880,20 @@ function updateSingleField(
   value: string
 ) {
   setMappingMode('manual');
-  setForm((current) => ({
-    ...current,
-    [key]: value,
-    spec_columns: current.spec_columns.filter((item) => item !== value),
-    attribute_columns: current.attribute_columns.filter((item) => item !== value),
-    ignored_columns: current.ignored_columns.filter((item) => item !== value)
-  }));
+  setForm((current) => {
+    const keepDefaultVariantInSync =
+      key === 'product_group_column' &&
+      current.product_variant_column === current.product_group_column;
+
+    return {
+      ...current,
+      [key]: value,
+      ...(keepDefaultVariantInSync ? { product_variant_column: value } : {}),
+      spec_columns: current.spec_columns.filter((item) => item !== value),
+      attribute_columns: current.attribute_columns.filter((item) => item !== value),
+      ignored_columns: current.ignored_columns.filter((item) => item !== value)
+    };
+  });
 }
 
 function getFlexibleRole(form: MappingFormState, header: string): FlexibleRole {
@@ -730,45 +926,83 @@ function updateFlexibleRole(
   });
 }
 
+type MappingValidation = {
+  message: string;
+  fieldId: string;
+};
+
+function mappingFieldId(key: string) {
+  return `import-mapping-${key}`;
+}
+
 function validateForm(
   form: MappingFormState,
+  headers: string[],
   saveProfile: boolean,
   profileName: string
-) {
+): MappingValidation | null {
   for (const field of REQUIRED_FIELDS) {
     if (!form[field.key]) {
-      return `Vui lòng chọn cột cho ${field.label.toLowerCase()}.`;
+      return {
+        message: `Chưa chọn cột “${field.label}”. Hãy chọn cột dữ liệu tương ứng để tiếp tục.`,
+        fieldId: mappingFieldId(field.key)
+      };
     }
   }
 
-  const singleAssignments = [
-    ['Danh mục chính', form.category_main_column],
-    ['Danh mục con', form.category_sub_column],
-    ['Nhóm sản phẩm', form.product_group_column],
-    ['Biến thể sản phẩm', form.product_variant_column],
-    ['Thương hiệu', form.brand_column],
-    ['Mô tả ngắn', form.short_description_column],
-    ['Mã nhóm ngoài', form.group_external_code_column],
-    ['Mã biến thể ngoài', form.variant_external_code_column],
-    ['SKU', form.sku_column],
-    ['Mã model', form.model_code_column],
-    ['Giá công khai', form.public_price_column]
-  ].filter(([, value]) => Boolean(value));
+  const singleAssignments: Array<[string, string, string]> = [
+    ['Danh mục chính', form.category_main_column, 'category_main_column'],
+    ['Danh mục con', form.category_sub_column, 'category_sub_column'],
+    ['Tên sản phẩm (dùng chung)', form.product_group_column, 'product_group_column'],
+    ['Tên biến thể', form.product_variant_column, 'product_variant_column'],
+    ['Thương hiệu', form.brand_column, 'brand_column'],
+    ['Mô tả ngắn', form.short_description_column, 'short_description_column'],
+    ['Mã nhóm chung', form.group_external_code_column, 'group_external_code_column'],
+    ['Mã liên kết riêng', form.variant_external_code_column, 'variant_external_code_column'],
+    ['SKU', form.sku_column, 'sku_column'],
+    ['Mã sản phẩm', form.model_code_column, 'model_code_column'],
+    ['Giá công khai', form.public_price_column, 'public_price_column']
+  ];
 
   const seen = new Map<string, string>();
-  for (const [label, column] of singleAssignments) {
+  for (const [label, column, key] of singleAssignments) {
+    if (!column) continue;
     const existing = seen.get(column);
     if (existing) {
-      return `Cột “${column}” đang được gán cho cả ${existing.toLowerCase()} và ${label.toLowerCase()}.`;
+      const isFlatProductNameReuse =
+        existing === 'Tên sản phẩm (dùng chung)' && label === 'Tên biến thể';
+      if (isFlatProductNameReuse) continue;
+
+      return {
+        message: `Cột “${column}” đang được dùng cho cả ${existing.toLowerCase()} và ${label.toLowerCase()}. Hãy chọn một cột khác cho “${label}”.`,
+        fieldId: mappingFieldId(key)
+      };
     }
     seen.set(column, label);
   }
 
-  if (saveProfile && profileName.trim().length === 0) {
-    return 'Vui lòng nhập tên cấu hình mapping để lưu lại.';
+  const handledColumns = new Set([
+    ...singleAssignments.map(([, column]) => column).filter(Boolean),
+    ...form.spec_columns,
+    ...form.attribute_columns,
+    ...form.ignored_columns
+  ]);
+  const unresolvedCount = headers.filter((header) => !handledColumns.has(header)).length;
+  if (unresolvedCount > 0) {
+    return {
+      message: `Còn ${unresolvedCount} cột chưa xử lý. Hãy chọn giữ làm thuộc tính hoặc bỏ qua rõ ràng trước khi tạo dữ liệu tạm.`,
+      fieldId: 'import-mapping-remaining-columns'
+    };
   }
 
-  return '';
+  if (saveProfile && profileName.trim().length === 0) {
+    return {
+      message: 'Chưa có tên cho cách ghép cột. Hãy nhập tên để lưu và dùng lại lần sau.',
+      fieldId: 'import-mapping-profile-name'
+    };
+  }
+
+  return null;
 }
 
 function toPayload(

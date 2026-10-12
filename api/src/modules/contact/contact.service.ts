@@ -82,24 +82,21 @@ export class ContactService {
 
   async updateStatus(contactId: string, input: ContactStatusDto) {
     const id = assertUuid('contact_id', contactId);
-    const contact = await this.assertProcessable(id);
     const status = normalizeMutationStatus(input.status);
-    await this.contactRepository.updateStatus(contact.id, status);
-    return this.getContactDetail(contact.id);
+    const outcome = await this.contactRepository.updateStatus(id, status);
+    this.assertActiveMutationOutcome(outcome);
+    return this.getContactDetail(id);
   }
 
   async updateAssignee(contactId: string, input: ContactAssigneeDto) {
     const id = assertUuid('contact_id', contactId);
-    const contact = await this.assertProcessable(id);
     const assignedTo = normalizeNullableAssignee(input.assigned_to);
-    if (
-      assignedTo !== null &&
-      !(await this.logicUsers.isAssignable(assignedTo))
-    ) {
+    const outcome = await this.contactRepository.updateAssignee(id, assignedTo);
+    if (outcome === 'assignee_not_found') {
       throw this.notFound('Assignee was not found.');
     }
-    await this.contactRepository.updateAssignee(contact.id, assignedTo);
-    return this.getContactDetail(contact.id);
+    this.assertActiveMutationOutcome(outcome);
+    return this.getContactDetail(id);
   }
 
   async createInternalNote(
@@ -108,44 +105,41 @@ export class ContactService {
     currentUser: CurrentUser | null
   ) {
     const id = assertUuid('contact_id', contactId);
-    const contact = await this.assertProcessable(id);
     const noteText = normalizeNoteText(input.note_text ?? input.note);
     const logicUserId = await this.requireLogicUserId(currentUser);
-    await this.contactRepository.createInternalNote(
-      contact.id,
+    const outcome = await this.contactRepository.createInternalNote(
+      id,
       noteText,
       logicUserId
     );
-    return this.getContactDetail(contact.id);
+    this.assertActiveMutationOutcome(outcome.status);
+    return this.getContactDetail(id);
   }
 
   async archiveContact(contactId: string) {
     const id = assertUuid('contact_id', contactId);
-    const contact = await this.contactRepository.findById(id);
-    if (!contact) throw this.notFound('Contact request was not found.');
-    if (contact.deleted_at) throw this.conflict('Contact request is already archived.');
-    await this.contactRepository.archive(id);
+    const outcome = await this.contactRepository.archive(id);
+    if (outcome === 'not_found') throw this.notFound('Contact request was not found.');
+    if (outcome === 'archived') throw this.conflict('Contact request is already archived.');
     return this.getContactDetail(id);
   }
 
   async restoreContact(contactId: string) {
     const id = assertUuid('contact_id', contactId);
-    const contact = await this.contactRepository.findById(id);
-    if (!contact) throw this.notFound('Contact request was not found.');
-    if (!contact.deleted_at) throw this.conflict('Contact request is not archived.');
-    await this.contactRepository.restore(id);
+    const outcome = await this.contactRepository.restore(id);
+    if (outcome === 'not_found') throw this.notFound('Contact request was not found.');
+    if (outcome === 'active') throw this.conflict('Contact request is not archived.');
     return this.getContactDetail(id);
   }
 
   async permanentlyDeleteContact(contactId: string, currentUser: CurrentUser | null) {
     const id = assertUuid('contact_id', contactId);
     this.assertSuperAdmin(currentUser);
-    const contact = await this.contactRepository.findById(id);
-    if (!contact) throw this.notFound('Contact request was not found.');
-    if (!contact.deleted_at) {
+    const outcome = await this.contactRepository.permanentlyDelete(id);
+    if (outcome === 'not_found') throw this.notFound('Contact request was not found.');
+    if (outcome === 'active') {
       throw this.conflict('Phải lưu trữ liên hệ trước khi xóa vĩnh viễn.');
     }
-    await this.contactRepository.permanentlyDelete(id);
     return { id, deleted: true };
   }
 
@@ -157,11 +151,11 @@ export class ContactService {
     };
   }
 
-  private async assertProcessable(id: string): Promise<ContactDetailRecord> {
-    const contact = await this.contactRepository.findById(id);
-    if (!contact) throw this.notFound('Contact request was not found.');
-    if (contact.deleted_at) throw this.conflict('Contact request is archived and cannot be processed.');
-    return contact;
+  private assertActiveMutationOutcome(outcome: string): void {
+    if (outcome === 'not_found') throw this.notFound('Contact request was not found.');
+    if (outcome === 'archived') {
+      throw this.conflict('Contact request is archived and cannot be processed.');
+    }
   }
 
   private notFound(message: string): AppError {

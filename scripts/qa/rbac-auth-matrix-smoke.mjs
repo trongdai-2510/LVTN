@@ -14,15 +14,15 @@ const ADMIN_EMAIL = process.env.ADMIN_QA_EMAIL || 'admin@songthanh.local';
 const ADMIN_PASSWORD = process.env.ADMIN_QA_PASSWORD || 'ChangeMe123!';
 const INVENTORY_PATH = path.join(
   ROOT,
-  'docs',
-  'qa',
+  'tmp',
+  'qa-artifacts',
   'generated',
   'system-inventory.json'
 );
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'rbac-auth-qa-last-run.md'
 );
 const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);

@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -17,10 +18,12 @@ const QA_CLIENT_IP = '198.51.100.61';
 const RUN_ID = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'content-domain-invariants-qa-last-run.md'
 );
+const requireFromApi = createRequire(path.join(ROOT, 'api', 'package.json'));
+const { Client: PostgresClient } = requireFromApi('pg');
 
 const results = [];
 const context = {
@@ -452,12 +455,39 @@ await runCase('PAGE-PUBLISH-READINESS', 'Pages require approved review, meaningf
   });
   if (empty.ok) context.pageIds.push(record(empty.body, 'page_content').id);
   assert(empty.status === 409, `empty page publish returned ${empty.status}`);
+  const emptyStructured = await adminRequest('/song-thanh/page-contents', {
+    method: 'POST',
+    body: {
+      title: `Empty structured page ${RUN_ID}`,
+      slug: `empty-structured-page-${RUN_ID}`,
+      review_status: 'approved',
+      publish_status: 'published',
+      extra_blocks: {
+        blocks: [
+          {
+            id: randomUUID(),
+            type: 'bullet_list',
+            title: 'A block shell is not public content',
+            items: []
+          }
+        ]
+      }
+    }
+  });
+  if (emptyStructured.ok) {
+    context.pageIds.push(record(emptyStructured.body, 'page_content').id);
+  }
+  assert(
+    emptyStructured.status === 409,
+    `empty structured page publish returned ${emptyStructured.status}`
+  );
   return {
     page_id: context.pageId,
     unapproved_code: errorCode(unapproved),
     wrong_file_status: wrongFile.status,
     wrong_rich_file_status: wrongRichFile.status,
-    empty_status: empty.status
+    empty_status: empty.status,
+    empty_structured_status: emptyStructured.status
   };
 });
 
@@ -472,6 +502,60 @@ await runCase('PAGE-EXTRA-BLOCK-LIMITS', 'Structured page blocks enforce count a
     }
   });
   assert(tooMany.status === 400, `21 blocks returned ${tooMany.status}`);
+
+  const unsafeLink = await updatePage({
+    extra_blocks: {
+      blocks: [
+        {
+          id: randomUUID(),
+          type: 'bullet_list',
+          items: [
+            {
+              text: 'Unsafe navigation target',
+              link: { label: 'Run script', target: 'javascript:alert(1)' }
+            }
+          ]
+        }
+      ]
+    }
+  });
+  assert(unsafeLink.status === 400, `unsafe extra-block link returned ${unsafeLink.status}`);
+
+  const duplicateSlot = await updatePage({
+    extra_blocks: {
+      blocks: [
+        {
+          id: randomUUID(),
+          type: 'image_card',
+          slot_key: 'eligible',
+          image_file_id: context.imageFileId
+        },
+        {
+          id: randomUUID(),
+          type: 'image_card',
+          slot_key: 'eligible',
+          image_file_id: context.mobileImageFileId
+        }
+      ]
+    }
+  });
+  assert(duplicateSlot.status === 400, `duplicate image-card slot returned ${duplicateSlot.status}`);
+
+  const tooLongNestedText = await updatePage({
+    extra_blocks: {
+      blocks: [
+        {
+          id: randomUUID(),
+          type: 'bullet_list',
+          items: [{ text: 'x'.repeat(1001) }]
+        }
+      ]
+    }
+  });
+  assert(
+    tooLongNestedText.status === 400,
+    `1001-character bullet item returned ${tooLongNestedText.status}`
+  );
 
   const nonImageBlock = await updatePage({
     extra_blocks: {
@@ -532,8 +616,315 @@ await runCase('PAGE-EXTRA-BLOCK-LIMITS', 'Structured page blocks enforce count a
   );
   return {
     max_block_status: tooMany.status,
+    unsafe_link_status: unsafeLink.status,
+    duplicate_slot_status: duplicateSlot.status,
+    nested_text_limit_status: tooLongNestedText.status,
     image_reference_status: nonImageBlock.status,
     managed_usage_field: fieldName
+  };
+});
+
+await runCase('PAGE-LIST-QUERY-BOUNDS', 'Page-content list rejects oversized search and database-overflow pagination values', async () => {
+  const accepted = await adminRequest(
+    `/song-thanh/page-contents?q=${encodeURIComponent('q'.repeat(255))}&page=1&page_size=1`
+  );
+  assert(accepted.ok, responseError(accepted));
+
+  const oversizedSearch = await adminRequest(
+    `/song-thanh/page-contents?q=${encodeURIComponent('q'.repeat(256))}`
+  );
+  assert(oversizedSearch.status === 400, `256-character search returned ${oversizedSearch.status}`);
+
+  const overflowPage = await adminRequest(
+    '/song-thanh/page-contents?page=2147483648&page_size=1'
+  );
+  assert(overflowPage.status === 400, `overflow page returned ${overflowPage.status}`);
+  return {
+    accepted_search_length: 255,
+    oversized_search_status: oversizedSearch.status,
+    overflow_page_status: overflowPage.status
+  };
+});
+
+await runCase('PAGE-FILE-ATTACH-ARCHIVE-RACES', 'Page writes and file archival serialize without dangling references', async () => {
+  const attachedFileId = await uploadFile(
+    'page-attach-race.png',
+    'image/png',
+    tinyPng(),
+    'other'
+  );
+  const writerClient = createDatabaseClient();
+  await writerClient.connect();
+  let writerCommitted = false;
+  let attachPromise;
+  let archivePromise;
+  try {
+    await writerClient.query('BEGIN');
+    await writerClient.query('SELECT id FROM file_metadata WHERE id = $1 FOR UPDATE', [
+      attachedFileId
+    ]);
+
+    let attachSettled = false;
+    attachPromise = updatePage({ featured_image_file_id: attachedFileId }).then((response) => {
+      attachSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!attachSettled, 'page update did not wait for the managed-file row lock');
+
+    let archiveSettled = false;
+    archivePromise = adminRequest(`/song-thanh/files/${attachedFileId}/archive`, {
+      method: 'POST',
+      body: {}
+    }).then((response) => {
+      archiveSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!archiveSettled, 'file archive bypassed the queued page attachment');
+
+    await writerClient.query('COMMIT');
+    writerCommitted = true;
+    const attached = await attachPromise;
+    assert(attached.ok, responseError(attached));
+    const blockedArchive = await archivePromise;
+    assertError(blockedArchive, 409, 'FILE_ARCHIVE_BLOCKED');
+
+    const usages = await adminRequest(
+      `/song-thanh/files/${attachedFileId}/usages?deleted_scope=active`
+    );
+    assert(usages.ok, responseError(usages));
+    assert(
+      (unwrap(usages.body)?.usages || []).some(
+        (usage) =>
+          usage.entity_type === 'page_content' &&
+          usage.entity_id === context.pageId &&
+          usage.field_name === 'featured_image_file_id'
+      ),
+      'writer-winning race did not retain active featured-image usage'
+    );
+  } finally {
+    if (!writerCommitted) await writerClient.query('ROLLBACK').catch(() => undefined);
+    await writerClient.end();
+    await Promise.allSettled([attachPromise, archivePromise].filter(Boolean));
+  }
+
+  assertOk(await updatePage({ featured_image_file_id: context.imageFileId }));
+  assertOk(
+    await adminRequest(`/song-thanh/files/${attachedFileId}/archive`, {
+      method: 'POST',
+      body: {}
+    })
+  );
+
+  const archivedFileId = await uploadFile(
+    'page-archive-race.png',
+    'image/png',
+    tinyPng(),
+    'other'
+  );
+  const before = await adminRequest(`/song-thanh/page-contents/${context.pageId}`);
+  assert(before.ok, responseError(before));
+  const originalOgImageId = record(before.body, 'page_content')?.seo_og_image_file_id ?? null;
+  const archiveClient = createDatabaseClient();
+  await archiveClient.connect();
+  let archiveCommitted = false;
+  let losingWritePromise;
+  try {
+    await archiveClient.query('BEGIN');
+    await archiveClient.query('SELECT id FROM file_metadata WHERE id = $1 FOR UPDATE', [
+      archivedFileId
+    ]);
+    await archiveClient.query(
+      'UPDATE file_metadata SET deleted_at = NOW(), is_orphan = TRUE WHERE id = $1',
+      [archivedFileId]
+    );
+
+    let losingWriteSettled = false;
+    losingWritePromise = updatePage({ seo_og_image_file_id: archivedFileId }).then((response) => {
+      losingWriteSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!losingWriteSettled, 'page update did not wait for the archiving file transaction');
+
+    await archiveClient.query('COMMIT');
+    archiveCommitted = true;
+    const rejectedWrite = await losingWritePromise;
+    assertError(rejectedWrite, 404, 'NOT_FOUND');
+
+    const after = await adminRequest(`/song-thanh/page-contents/${context.pageId}`);
+    assert(after.ok, responseError(after));
+    assert(
+      (record(after.body, 'page_content')?.seo_og_image_file_id ?? null) === originalOgImageId,
+      'archive-winning race partially changed page metadata'
+    );
+    const usageCount = await archiveClient.query(
+      'SELECT COUNT(*)::integer AS total FROM file_usage WHERE file_id = $1 AND deleted_at IS NULL',
+      [archivedFileId]
+    );
+    assert(Number(usageCount.rows[0]?.total || 0) === 0, 'archived file retained active usage');
+  } finally {
+    if (!archiveCommitted) await archiveClient.query('ROLLBACK').catch(() => undefined);
+    await archiveClient.end();
+    await Promise.allSettled([losingWritePromise].filter(Boolean));
+    await adminRequest(`/song-thanh/files/${archivedFileId}/restore`, {
+      method: 'POST',
+      body: {}
+    }).catch(() => undefined);
+  }
+
+  return {
+    writer_wins_archive_code: 'FILE_ARCHIVE_BLOCKED',
+    archive_wins_write_code: 'NOT_FOUND',
+    dangling_active_usage_count: 0
+  };
+});
+
+await runCase('PAGE-NEWS-CATEGORY-INTEGRITY', 'News categories remain active, linked, race-safe, and isolated from static pages', async () => {
+  const invalidId = await adminRequest('/song-thanh/news-categories/not-a-uuid');
+  assertError(invalidId, 400, 'VALIDATION_ERROR');
+
+  const oversizedSearch = await adminRequest(
+    `/song-thanh/news-categories?q=${encodeURIComponent('n'.repeat(256))}`
+  );
+  assert(oversizedSearch.status === 400, `news-category 256-character search returned ${oversizedSearch.status}`);
+
+  async function createCategory(label) {
+    const response = await adminRequest('/song-thanh/news-categories', {
+      method: 'POST',
+      body: {
+        name: `${label} ${RUN_ID}`,
+        slug: `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${RUN_ID}`,
+        sort_order: 9999
+      }
+    });
+    assert(response.ok, responseError(response));
+    return String(record(response.body, 'news_category')?.id || '');
+  }
+
+  const writerCategoryId = await createCategory('Writer race category');
+  const writerClient = createDatabaseClient();
+  await writerClient.connect();
+  let writerCommitted = false;
+  let categoryAttachPromise;
+  let categoryArchivePromise;
+  try {
+    await writerClient.query('BEGIN');
+    await writerClient.query('SELECT id FROM news_category WHERE id = $1 FOR UPDATE', [
+      writerCategoryId
+    ]);
+
+    let attachSettled = false;
+    categoryAttachPromise = updatePage({
+      content_type: 'news',
+      news_category_id: writerCategoryId,
+      published_at: new Date().toISOString(),
+      is_featured: true
+    }).then((response) => {
+      attachSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!attachSettled, 'news page did not wait for the category row lock');
+
+    let archiveSettled = false;
+    categoryArchivePromise = adminRequest(
+      `/song-thanh/news-categories/${writerCategoryId}`,
+      { method: 'DELETE' }
+    ).then((response) => {
+      archiveSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!archiveSettled, 'category archive bypassed the queued article attachment');
+
+    await writerClient.query('COMMIT');
+    writerCommitted = true;
+    const attached = await categoryAttachPromise;
+    assert(attached.ok, responseError(attached));
+    const blockedArchive = await categoryArchivePromise;
+    assertError(blockedArchive, 409, 'NEWS_CATEGORY_IN_USE');
+  } finally {
+    if (!writerCommitted) await writerClient.query('ROLLBACK').catch(() => undefined);
+    await writerClient.end();
+    await Promise.allSettled([categoryAttachPromise, categoryArchivePromise].filter(Boolean));
+  }
+
+  const missingCategory = await updatePage({
+    content_type: 'news',
+    news_category_id: randomUUID()
+  });
+  assertError(missingCategory, 404, 'NOT_FOUND');
+
+  const archiveCategoryId = await createCategory('Archive race category');
+  const archiveClient = createDatabaseClient();
+  await archiveClient.connect();
+  let archiveCommitted = false;
+  let rejectedAttachPromise;
+  try {
+    await archiveClient.query('BEGIN');
+    await archiveClient.query('SELECT id FROM news_category WHERE id = $1 FOR UPDATE', [
+      archiveCategoryId
+    ]);
+    await archiveClient.query(
+      'UPDATE news_category SET deleted_at = NOW() WHERE id = $1',
+      [archiveCategoryId]
+    );
+
+    let rejectedAttachSettled = false;
+    rejectedAttachPromise = updatePage({
+      content_type: 'news',
+      news_category_id: archiveCategoryId
+    }).then((response) => {
+      rejectedAttachSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!rejectedAttachSettled, 'article attachment did not wait for category archival');
+
+    await archiveClient.query('COMMIT');
+    archiveCommitted = true;
+    const rejectedAttach = await rejectedAttachPromise;
+    assertError(rejectedAttach, 404, 'NOT_FOUND');
+    const afterRace = await adminRequest(`/song-thanh/page-contents/${context.pageId}`);
+    assert(afterRace.ok, responseError(afterRace));
+    assert(
+      record(afterRace.body, 'page_content')?.news_category_id === writerCategoryId,
+      'archive-winning category race partially changed the article category'
+    );
+  } finally {
+    if (!archiveCommitted) await archiveClient.query('ROLLBACK').catch(() => undefined);
+    await archiveClient.end();
+    await Promise.allSettled([rejectedAttachPromise].filter(Boolean));
+  }
+
+  assertOk(
+    await adminRequest(`/song-thanh/news-categories/${archiveCategoryId}/restore`, {
+      method: 'POST',
+      body: {}
+    })
+  );
+  const converted = await updatePage({ content_type: 'page' });
+  assert(converted.ok, responseError(converted));
+  const staticPage = record(converted.body, 'page_content');
+  assert(staticPage.news_category_id === null, 'static page retained news_category_id');
+  assert(staticPage.published_at === null, 'static page retained published_at');
+  assert(staticPage.is_featured === false, 'static page retained is_featured');
+
+  for (const categoryId of [writerCategoryId, archiveCategoryId]) {
+    const archived = await adminRequest(`/song-thanh/news-categories/${categoryId}`, {
+      method: 'DELETE'
+    });
+    assert(archived.ok, responseError(archived));
+  }
+
+  return {
+    invalid_id_status: invalidId.status,
+    oversized_search_status: oversizedSearch.status,
+    writer_wins_archive_code: 'NEWS_CATEGORY_IN_USE',
+    archive_wins_attach_code: 'NOT_FOUND',
+    static_page_news_fields_cleared: true
   };
 });
 
@@ -563,21 +954,22 @@ await runCase('PAGE-ACTOR-WORKFLOW', 'Page mutations retain actor identities and
   };
 });
 
-await runCase('PAGE-MAJOR-EDIT-REVIEW', 'A major edit to published page returns it to review and hides the changed row', async () => {
+await runCase('PAGE-MAJOR-EDIT-REVIEW', 'A Super Admin major edit keeps an approved page public with the new copy', async () => {
   const edited = await updatePage({ title: `Major page edit ${RUN_ID}` });
   assert(edited.ok, responseError(edited));
   const page = record(edited.body, 'page_content');
-  assert(page.review_status === 'pending_review', `review_status=${page.review_status}`);
-  assert(page.publish_status === 'unpublished', `publish_status=${page.publish_status}`);
+  assert(page.review_status === 'approved', `review_status=${page.review_status}`);
+  assert(page.publish_status === 'published', `publish_status=${page.publish_status}`);
   const publicPage = await request(`/public/page-contents/${context.pageSlug}`);
-  assert(publicPage.status === 404, `major-edited page stayed public with ${publicPage.status}`);
-  const hiddenFile = await request(`/public/files/${context.pageContentImageFileId}`);
-  assert(hiddenFile.status === 404, `unpublished page file stayed public with ${hiddenFile.status}`);
+  assert(publicPage.ok, responseError(publicPage));
+  assert(record(publicPage.body, 'page_content').title === page.title, 'Public page did not show the edit');
+  const publicFile = await request(`/public/files/${context.pageContentImageFileId}`);
+  assert(publicFile.ok, responseError(publicFile));
   return {
     review_status: page.review_status,
     publish_status: page.publish_status,
     public_status: publicPage.status,
-    rich_content_file_status: hiddenFile.status
+    rich_content_file_status: publicFile.status
   };
 });
 
@@ -656,7 +1048,7 @@ await runCase('SERVICE-PUBLISH-BOUNDARIES', 'Services require description and im
   };
 });
 
-await runCase('SERVICE-ACTOR-MAJOR-EDIT', 'Service actors are retained and major edits reopen review', async () => {
+await runCase('SERVICE-ACTOR-MAJOR-EDIT', 'Service actor identities remain and a Super Admin major edit stays public', async () => {
   const detail = await adminRequest(`/song-thanh/services/${context.serviceId}`);
   assert(detail.ok, responseError(detail));
   const before = record(detail.body, 'service');
@@ -669,19 +1061,20 @@ await runCase('SERVICE-ACTOR-MAJOR-EDIT', 'Service actors are retained and major
   });
   assert(edited.ok, responseError(edited));
   const service = record(edited.body, 'service');
-  assert(service.review_status === 'pending_review', `review_status=${service.review_status}`);
-  assert(service.publish_status === 'unpublished', `publish_status=${service.publish_status}`);
+  assert(service.review_status === 'approved', `review_status=${service.review_status}`);
+  assert(service.publish_status === 'published', `publish_status=${service.publish_status}`);
   assert(service.updated_by === context.logicUserId, `updated_by=${service.updated_by}`);
   const publicService = await request(`/public/services/${context.serviceSlug}`);
-  assert(publicService.status === 404, `major-edited service stayed public with ${publicService.status}`);
-  const hiddenFile = await request(`/public/files/${context.serviceContentImageFileId}`);
-  assert(hiddenFile.status === 404, `unpublished service file stayed public with ${hiddenFile.status}`);
+  assert(publicService.ok, responseError(publicService));
+  assert(record(publicService.body, 'service').description === service.description, 'Public service did not show the edit');
+  const publicFile = await request(`/public/files/${context.serviceContentImageFileId}`);
+  assert(publicFile.ok, responseError(publicFile));
   return {
     created_by: before.created_by,
     approved_by: before.approved_by,
     updated_by: service.updated_by,
     public_status: publicService.status,
-    rich_content_file_status: hiddenFile.status
+    rich_content_file_status: publicFile.status
   };
 });
 
@@ -929,7 +1322,7 @@ await runCase('PROJECT-RELATION-LIFECYCLE', 'Project-product relation uses attac
   return { duplicate_code: errorCode(duplicate) };
 });
 
-await runCase('PROJECT-ACTOR-MAJOR-EDIT', 'Project actors are retained and major edits reopen review', async () => {
+await runCase('PROJECT-ACTOR-MAJOR-EDIT', 'Project actor identities remain and a Super Admin major edit stays public', async () => {
   const detail = await adminRequest(`/song-thanh/projects/${context.projectId}`);
   assert(detail.ok, responseError(detail));
   const before = record(detail.body, 'project');
@@ -942,19 +1335,20 @@ await runCase('PROJECT-ACTOR-MAJOR-EDIT', 'Project actors are retained and major
   });
   assert(edited.ok, responseError(edited));
   const project = record(edited.body, 'project');
-  assert(project.review_status === 'pending_review', `review_status=${project.review_status}`);
-  assert(project.publish_status === 'unpublished', `publish_status=${project.publish_status}`);
+  assert(project.review_status === 'approved', `review_status=${project.review_status}`);
+  assert(project.publish_status === 'published', `publish_status=${project.publish_status}`);
   assert(project.updated_by === context.logicUserId, `updated_by=${project.updated_by}`);
   const publicProject = await request(`/public/projects/${context.projectSlug}`);
-  assert(publicProject.status === 404, `major-edited project stayed public with ${publicProject.status}`);
-  const hiddenFile = await request(`/public/files/${context.projectContentImageFileId}`);
-  assert(hiddenFile.status === 404, `unpublished project file stayed public with ${hiddenFile.status}`);
+  assert(publicProject.ok, responseError(publicProject));
+  assert(record(publicProject.body, 'project').description === project.description, 'Public project did not show the edit');
+  const publicFile = await request(`/public/files/${context.projectContentImageFileId}`);
+  assert(publicFile.ok, responseError(publicFile));
   return {
     created_by: before.created_by,
     approved_by: before.approved_by,
     updated_by: project.updated_by,
     public_status: publicProject.status,
-    rich_content_file_status: hiddenFile.status
+    rich_content_file_status: publicFile.status
   };
 });
 
@@ -1288,6 +1682,20 @@ function responseError(response) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function createDatabaseClient() {
+  return new PostgresClient({
+    host: process.env.DATABASE_HOST,
+    port: Number(process.env.DATABASE_PORT || 5432),
+    user: process.env.DATABASE_USER,
+    password: process.env.DATABASE_PASSWORD,
+    database: process.env.DATABASE_NAME
+  });
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function assertSafeTarget() {

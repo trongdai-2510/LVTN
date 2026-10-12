@@ -13,6 +13,9 @@ const STEPS = [];
 
 let accessToken = '';
 let pageContentId = '';
+let currentUpdatedAt = '';
+let staleActionVersion = '';
+let preArchiveVersion = '';
 
 assertSafeTarget();
 
@@ -52,7 +55,9 @@ try {
     assert(response.ok, responseError(response));
     const record = pageRecord(response.body);
     pageContentId = String(record?.id || '');
+    currentUpdatedAt = String(record?.updated_at || '');
     assert(pageContentId, 'Create response did not include page_content.id.');
+    assert(currentUpdatedAt, 'Create response did not include page_content.updated_at.');
     assert(record.review_status === 'draft', `Expected draft, received ${record.review_status}`);
     assert(record.publish_status === 'unpublished', `Expected unpublished, received ${record.publish_status}`);
   });
@@ -74,6 +79,7 @@ try {
     const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}`, {
       method: 'PUT',
       body: {
+        expected_updated_at: currentUpdatedAt,
         review_status: 'approved',
         publish_status: 'published',
         published_at: new Date().toISOString()
@@ -81,6 +87,7 @@ try {
     });
     assert(response.ok, responseError(response));
     const record = pageRecord(response.body);
+    currentUpdatedAt = String(record?.updated_at || '');
     assert(record.review_status === 'approved', `Expected approved, received ${record.review_status}`);
     assert(record.publish_status === 'published', `Expected published, received ${record.publish_status}`);
   });
@@ -93,11 +100,12 @@ try {
     assert(record?.content_html?.includes('Initial QA content'), 'Public content did not match the saved draft.');
   });
 
-  await step('Major editing reopens review and hides the mutable row', async () => {
+  await step('Super Admin major edit keeps the approved page live and updates the public copy', async () => {
     const updatedTitle = `Updated QA page ${RUN_ID}`;
     const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}`, {
       method: 'PUT',
       body: {
+        expected_updated_at: currentUpdatedAt,
         title: updatedTitle,
         excerpt: 'Updated QA excerpt',
         content_html: '<p>Updated QA content</p>',
@@ -107,34 +115,41 @@ try {
     });
     assert(response.ok, responseError(response));
     const adminRecord = pageRecord(response.body);
+    currentUpdatedAt = String(adminRecord?.updated_at || '');
     assert(
-      adminRecord?.review_status === 'pending_review',
-      `Expected pending_review, received ${adminRecord?.review_status}`
+      adminRecord?.review_status === 'approved',
+      `Expected approved, received ${adminRecord?.review_status}`
     );
     assert(
-      adminRecord?.publish_status === 'unpublished',
-      `Expected unpublished, received ${adminRecord?.publish_status}`
+      adminRecord?.publish_status === 'published',
+      `Expected published, received ${adminRecord?.publish_status}`
     );
 
     const publicResponse = await request(`/public/page-contents/${SLUG}`);
-    assert(
-      publicResponse.status === 404,
-      `Major-edited row should be hidden, received ${publicResponse.status}`
-    );
+    assert(publicResponse.ok, responseError(publicResponse));
+    const publicRecord = publicPageRecord(publicResponse.body);
+    assert(publicRecord?.title === updatedTitle, 'Public title did not reflect the edit.');
+    assert(publicRecord?.content_html?.includes('Updated QA content'), 'Public HTML did not reflect the edit.');
   });
 
-  await step('Reviewed edit can be explicitly republished', async () => {
-    const response = await adminRequest(
-      `/song-thanh/page-contents/${pageContentId}`,
-      {
-        method: 'PUT',
-        body: {
-          review_status: 'approved',
-          publish_status: 'published'
-        }
-      }
-    );
+  await step('Approved page can be hidden and explicitly republished', async () => {
+    const hidden = await adminRequest(`/song-thanh/page-contents/${pageContentId}`, {
+      method: 'PUT',
+      body: { expected_updated_at: currentUpdatedAt, publish_status: 'unpublished' }
+    });
+    assert(hidden.ok, responseError(hidden));
+    const hiddenRecord = pageRecord(hidden.body);
+    currentUpdatedAt = String(hiddenRecord?.updated_at || '');
+    assert(hiddenRecord?.publish_status === 'unpublished', 'Page did not become unpublished.');
+    const hiddenResponse = await request(`/public/page-contents/${SLUG}`);
+    assert(hiddenResponse.status === 404, `Hidden page returned ${hiddenResponse.status}`);
+
+    const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}`, {
+      method: 'PUT',
+      body: { expected_updated_at: currentUpdatedAt, publish_status: 'published' }
+    });
     assert(response.ok, responseError(response));
+    currentUpdatedAt = String(pageRecord(response.body)?.updated_at || '');
 
     const publicResponse = await request(`/public/page-contents/${SLUG}`);
     assert(publicResponse.ok, responseError(publicResponse));
@@ -148,26 +163,96 @@ try {
     assert(record?.seo_description === 'Updated QA search description', 'Public SEO description was not updated.');
   });
 
-  await step('Archive hides the page and keeps an admin record', async () => {
+  await step('Stale admin write is rejected without losing the first writer change', async () => {
+    const staleVersion = currentUpdatedAt;
+    staleActionVersion = staleVersion;
+    const firstWriter = await adminRequest(`/song-thanh/page-contents/${pageContentId}`, {
+      method: 'PUT',
+      body: {
+        expected_updated_at: staleVersion,
+        seo_description: 'First writer keeps this value'
+      }
+    });
+    assert(firstWriter.ok, responseError(firstWriter));
+    const firstWriterRecord = pageRecord(firstWriter.body);
+    currentUpdatedAt = String(firstWriterRecord?.updated_at || '');
+    assert(currentUpdatedAt && currentUpdatedAt !== staleVersion, 'First write did not advance updated_at.');
+
+    const staleWriter = await adminRequest(`/song-thanh/page-contents/${pageContentId}`, {
+      method: 'PUT',
+      body: {
+        expected_updated_at: staleVersion,
+        seo_description: 'Stale writer must not overwrite'
+      }
+    });
+    assert(staleWriter.status === 409, `Expected stale write 409, received ${staleWriter.status}`);
+    assert(
+      staleWriter.body?.error?.code === 'PAGE_CONTENT_VERSION_CONFLICT',
+      `Expected PAGE_CONTENT_VERSION_CONFLICT, received ${staleWriter.body?.error?.code}`
+    );
+
+    const detail = await adminRequest(`/song-thanh/page-contents/${pageContentId}`);
+    assert(detail.ok, responseError(detail));
+    const persisted = pageRecord(detail.body);
+    assert(
+      persisted?.seo_description === 'First writer keeps this value',
+      'Stale writer overwrote the first writer value.'
+    );
+  });
+
+  await step('Stale archive action is rejected and leaves the page active', async () => {
     const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}/archive`, {
       method: 'POST',
-      body: {}
+      body: { expected_updated_at: staleActionVersion }
+    });
+    assert(response.status === 409, `Expected stale archive 409, received ${response.status}`);
+    assert(
+      response.body?.error?.code === 'PAGE_CONTENT_VERSION_CONFLICT',
+      `Expected PAGE_CONTENT_VERSION_CONFLICT, received ${response.body?.error?.code}`
+    );
+    const detail = await adminRequest(`/song-thanh/page-contents/${pageContentId}`);
+    assert(detail.ok, responseError(detail));
+    assert(!pageRecord(detail.body)?.deleted_at, 'Stale archive unexpectedly archived the page.');
+  });
+
+  await step('Archive hides the page and keeps an admin record', async () => {
+    preArchiveVersion = currentUpdatedAt;
+    const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}/archive`, {
+      method: 'POST',
+      body: { expected_updated_at: currentUpdatedAt }
     });
     assert(response.ok, responseError(response));
     const record = pageRecord(response.body);
+    currentUpdatedAt = String(record?.updated_at || '');
     assert(record?.deleted_at, 'Archived record did not receive deleted_at.');
 
     const publicResponse = await request(`/public/page-contents/${SLUG}`);
     assert(publicResponse.status === 404, `Expected public 404, received ${publicResponse.status}`);
   });
 
+  await step('Stale restore action is rejected and leaves the page archived', async () => {
+    const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}/restore`, {
+      method: 'POST',
+      body: { expected_updated_at: preArchiveVersion }
+    });
+    assert(response.status === 409, `Expected stale restore 409, received ${response.status}`);
+    assert(
+      response.body?.error?.code === 'PAGE_CONTENT_VERSION_CONFLICT',
+      `Expected PAGE_CONTENT_VERSION_CONFLICT, received ${response.body?.error?.code}`
+    );
+    const detail = await adminRequest(`/song-thanh/page-contents/${pageContentId}`);
+    assert(detail.ok, responseError(detail));
+    assert(pageRecord(detail.body)?.deleted_at, 'Stale restore unexpectedly restored the page.');
+  });
+
   await step('Restore is safe and does not republish automatically', async () => {
     const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}/restore`, {
       method: 'POST',
-      body: {}
+      body: { expected_updated_at: currentUpdatedAt }
     });
     assert(response.ok, responseError(response));
     const record = pageRecord(response.body);
+    currentUpdatedAt = String(record?.updated_at || '');
     assert(!record?.deleted_at, 'Restored record still has deleted_at.');
     assert(record?.publish_status !== 'published', 'Restore unexpectedly republished the page.');
 
@@ -178,7 +263,7 @@ try {
   await step('Cleanup archives the temporary QA page', async () => {
     const response = await adminRequest(`/song-thanh/page-contents/${pageContentId}/archive`, {
       method: 'POST',
-      body: {}
+      body: { expected_updated_at: currentUpdatedAt }
     });
     assert(response.ok, responseError(response));
     const record = pageRecord(response.body);

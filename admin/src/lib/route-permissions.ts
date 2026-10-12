@@ -1,6 +1,7 @@
 import { PERMISSIONS } from './permissions';
 
 const routePermissions: Array<{ prefix: string; permission?: string }> = [
+  { prefix: '/home-page', permission: PERMISSIONS.homePageRead },
   { prefix: '/website-settings', permission: PERMISSIONS.websiteSettingsRead },
   { prefix: '/menu', permission: PERMISSIONS.menuRead },
   { prefix: '/page-contents', permission: PERMISSIONS.pageContentRead },
@@ -14,6 +15,7 @@ const routePermissions: Array<{ prefix: string; permission?: string }> = [
   { prefix: '/technical-documents', permission: PERMISSIONS.technicalDocumentRead },
   { prefix: '/services', permission: PERMISSIONS.serviceRead },
   { prefix: '/projects', permission: PERMISSIONS.projectRead },
+  { prefix: '/customers', permission: PERMISSIONS.customerRead },
   { prefix: '/contacts', permission: PERMISSIONS.contactRead },
   { prefix: '/quotes', permission: PERMISSIONS.quoteRead },
   { prefix: '/import', permission: PERMISSIONS.importRead },

@@ -16,8 +16,11 @@ import {
   type ProductVariantStatus
 } from './product-variant.types';
 
-export const UUID_PATTERN =
+const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const PRODUCT_VARIANT_NAME_MAX_LENGTH = 255;
+export const PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH = 128;
+export const VARIANT_ATTRIBUTE_NAME_MAX_LENGTH = 128;
 
 export function assertUuid(fieldName: string, value: string): string {
   if (!UUID_PATTERN.test(value)) {
@@ -41,7 +44,11 @@ export function normalizeNullableUuid(
   return normalized === '' ? null : assertUuid(fieldName, normalized);
 }
 
-export function normalizeRequiredText(fieldName: string, value: string): string {
+export function normalizeRequiredText(
+  fieldName: string,
+  value: string,
+  maxLength?: number
+): string {
   const normalized = value.trim();
   if (normalized === '') {
     throw new AppError({
@@ -51,10 +58,22 @@ export function normalizeRequiredText(fieldName: string, value: string): string 
       details: { field: fieldName }
     });
   }
+  if (typeof maxLength === 'number' && normalized.length > maxLength) {
+    throw new AppError({
+      code: ErrorCodes.VALIDATION_ERROR,
+      message: `${fieldName} must be ${maxLength} characters or fewer.`,
+      statusCode: HttpStatus.BAD_REQUEST,
+      details: { field: fieldName, max_length: maxLength }
+    });
+  }
   return normalized;
 }
 
-export function normalizeNullableText(value: string | null | undefined): string | null | undefined {
+export function normalizeNullableText(
+  fieldName: string,
+  value: string | null | undefined,
+  maxLength?: number
+): string | null | undefined {
   if (typeof value === 'undefined') {
     return undefined;
   }
@@ -62,6 +81,14 @@ export function normalizeNullableText(value: string | null | undefined): string 
     return null;
   }
   const normalized = value.trim();
+  if (typeof maxLength === 'number' && normalized.length > maxLength) {
+    throw new AppError({
+      code: ErrorCodes.VALIDATION_ERROR,
+      message: `${fieldName} must be ${maxLength} characters or fewer.`,
+      statusCode: HttpStatus.BAD_REQUEST,
+      details: { field: fieldName, max_length: maxLength }
+    });
+  }
   return normalized === '' ? null : normalized;
 }
 

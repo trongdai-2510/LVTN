@@ -1,11 +1,14 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsISO8601, IsObject, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsISO8601, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+
+import { POSTGRES_INTEGER_MAX } from '../../common/validation/databaseLimits';
 
 import { PAGE_CONTENT_DELETED_SCOPES, PAGE_CONTENT_PUBLISH_STATUSES, PAGE_CONTENT_REVIEW_STATUSES, PAGE_CONTENT_TYPES } from './page-content.types';
 
 export class PageContentListQueryDto {
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   q?: string;
 
   @IsOptional()
@@ -32,6 +35,7 @@ export class PageContentListQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(POSTGRES_INTEGER_MAX)
   page?: number;
 
   @IsOptional()
@@ -105,6 +109,10 @@ export class CreatePageContentDto {
 
 export class UpdatePageContentDto {
   @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
+
+  @IsOptional()
   @IsString()
   title?: string;
 
@@ -163,4 +171,10 @@ export class UpdatePageContentDto {
   @IsOptional()
   @IsObject()
   extra_blocks?: Record<string, unknown>;
+}
+
+export class PageContentVersionDto {
+  @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
 }

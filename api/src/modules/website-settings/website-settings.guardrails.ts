@@ -31,11 +31,6 @@ export function normalizeRequiredText(fieldName: string, value: unknown, maxLeng
   return normalized;
 }
 
-export function normalizeOptionalRequiredText(fieldName: string, value: unknown, maxLength?: number): string | undefined {
-  if (typeof value === 'undefined') return undefined;
-  return normalizeRequiredText(fieldName, value, maxLength);
-}
-
 export function normalizeNullableText(fieldName: string, value: unknown, maxLength?: number): string | null | undefined {
   if (typeof value === 'undefined') return undefined;
   if (value === null || value === '') return null;
@@ -136,7 +131,7 @@ export function normalizeDeletedScope(value: unknown): WebsiteSettingsDeletedSco
   return value as WebsiteSettingsDeletedScope;
 }
 
-export function validationError(message: string, details?: Record<string, unknown>): AppError {
+function validationError(message: string, details?: Record<string, unknown>): AppError {
   return new AppError({
     code: ErrorCodes.VALIDATION_ERROR,
     message,

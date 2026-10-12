@@ -6,8 +6,9 @@ import { usePathname } from 'next/navigation';
 const routeLabels: Record<string, string> = {
   dashboard: 'Tổng quan',
   'website-settings': 'Cấu hình website',
-  menu: 'Menu điều hướng',
+  menu: 'Menu website',
   'page-contents': 'Trang nội dung',
+  'brand-pages': 'Hồ sơ thương hiệu',
   banners: 'Banner',
   redirects: 'Chuyển hướng',
   files: 'Kho tệp',
@@ -16,7 +17,7 @@ const routeLabels: Record<string, string> = {
   sub: 'Danh mục con',
   brands: 'Thương hiệu',
   'product-groups': 'Sản phẩm',
-  'product-variants': 'Biến thể sản phẩm',
+  'product-variants': 'Biến thể / SKU',
   'technical-documents': 'Tài liệu kỹ thuật',
   services: 'Dịch vụ',
   projects: 'Dự án',
@@ -37,12 +38,16 @@ export function Breadcrumbs() {
     .filter(Boolean)
     .filter((part) => part !== 'dashboard');
 
+  if (usesPageBreadcrumbs(parts)) {
+    return null;
+  }
+
   return (
     <div
       data-admin-breadcrumbs="true"
       className="mb-2 flex items-center gap-2 text-xs text-slate-600"
     >
-      <Link href="/dashboard" className="hover:text-slate-800">
+      <Link href="/dashboard" className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-slate-800 md:min-h-8 md:min-w-0">
         Tổng quan
       </Link>
       {parts.map((part, index) => {
@@ -50,13 +55,20 @@ export function Breadcrumbs() {
         return (
           <span key={href} className="flex items-center gap-2">
             <span>/</span>
-            <Link href={href} className="hover:text-slate-800">
+            <Link href={href} className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-slate-800 md:min-h-8 md:min-w-0">
               {breadcrumbLabel(part, index, parts)}
             </Link>
           </span>
         );
       })}
     </div>
+  );
+}
+
+function usesPageBreadcrumbs(parts: string[]) {
+  return (
+    parts.length >= 2 &&
+    ['banners', 'projects', 'services'].includes(parts[0])
   );
 }
 

@@ -9,7 +9,6 @@ import {
   BadgeCheck,
   BookOpen,
   Boxes,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -17,7 +16,6 @@ import {
   Eye,
   ExternalLink,
   FileCheck2,
-  Image as ImageIcon,
   Link2,
   ListChecks,
   Loader2,
@@ -31,6 +29,7 @@ import {
 } from '@/components/icons';
 
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
+import { ActionResultDialog, type ActionResultDialogState } from '@/components/feedback/ActionResultDialog';
 import { Badge } from '@/components/ui/Badge';
 import { Button, LinkButton } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -42,7 +41,6 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { Field } from '@/components/form/Field';
 import { FormActions } from '@/components/form/FormActions';
-import { FormFeedback } from '@/components/form/FormFeedback';
 import { FileReferencePicker } from '@/components/form/ReferencePickers';
 import { UnsavedChangesGuard } from '@/components/form/UnsavedChangesGuard';
 import { authStore } from '@/features/auth/auth.store';
@@ -170,15 +168,24 @@ const SECTIONS: ReadonlyArray<{
   icon: ComponentType<{ className?: string }>;
   activeClass: string;
 }> = [
-  { id: 'section-hero', label: 'Banner', icon: Sparkles, activeClass: 'border-indigo-500 bg-indigo-50/60 text-indigo-900' },
-  { id: 'section-overview', label: 'Nội dung hãng', icon: BookOpen, activeClass: 'border-purple-500 bg-purple-50/60 text-purple-900' },
-  { id: 'section-products', label: 'Trưng bày', icon: Boxes, activeClass: 'border-emerald-500 bg-emerald-50/60 text-emerald-900' },
-  { id: 'section-stats', label: 'Xác minh', icon: BadgeCheck, activeClass: 'border-amber-500 bg-amber-50/60 text-amber-900' },
-  { id: 'section-sources', label: 'Nguồn', icon: FileCheck2, activeClass: 'border-slate-500 bg-slate-100 text-slate-900' },
-  { id: 'section-support', label: 'Hỗ trợ', icon: ListChecks, activeClass: 'border-teal-500 bg-teal-50/60 text-teal-900' },
-  { id: 'section-cta', label: 'CTA', icon: Link2, activeClass: 'border-orange-500 bg-orange-50/60 text-orange-900' },
-  { id: 'section-seo', label: 'SEO', icon: Search, activeClass: 'border-rose-500 bg-rose-50/60 text-rose-900' }
+  { id: 'section-hero', label: 'Nhận diện', icon: Sparkles, activeClass: 'border-primary bg-primarySoft text-primaryStrong' },
+  { id: 'section-overview', label: 'Giới thiệu', icon: BookOpen, activeClass: 'border-primary bg-primarySoft text-primaryStrong' },
+  { id: 'section-products', label: 'Sản phẩm & tài liệu', icon: Boxes, activeClass: 'border-primary bg-primarySoft text-primaryStrong' },
+  { id: 'section-seo', label: 'Xuất bản', icon: Search, activeClass: 'border-primary bg-primarySoft text-primaryStrong' }
 ];
+
+function workspaceForSection(sectionId: SectionId): SectionId {
+  if (sectionId === 'section-stats' || sectionId === 'section-support') {
+    return 'section-overview';
+  }
+  if (sectionId === 'section-sources') {
+    return 'section-products';
+  }
+  if (sectionId === 'section-cta') {
+    return 'section-seo';
+  }
+  return sectionId;
+}
 
 function useAuth() {
   const [authState, setAuthState] = useState<AuthState>(() => authStore.getState());
@@ -240,10 +247,10 @@ export function BrandPageListPage() {
             Quay lại trang nội dung
           </Link>
           <p className="mt-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Trang thương hiệu
+            Nội dung website
           </p>
           <h1 className="mt-2 text-[26px] font-semibold leading-8 tracking-tight text-text">
-            Quản lý trang chi tiết thương hiệu
+            Hồ sơ thương hiệu
           </h1>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -325,7 +332,7 @@ function BrandPageRow({ item, canCreate }: { item: BrandPageListItem; canCreate:
         </div>
         <div className="mt-1 font-mono text-xs text-muted-foreground">/doi-tac-thuong-hieu/{item.brand_slug}</div>
         <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
-          {item.title || 'Chưa có nội dung chi tiết. Card thương hiệu vẫn có thể hiện ở trang tổng quan nhưng chưa link vào detail.'}
+          {item.title || 'Chưa thiết lập hồ sơ chi tiết. Thương hiệu vẫn xuất hiện trong danh sách nhưng chưa mở được trang riêng.'}
         </p>
       </div>
       <div className="grid grid-cols-3 gap-2 text-sm">
@@ -342,7 +349,7 @@ function BrandPageRow({ item, canCreate }: { item: BrandPageListItem; canCreate:
         ) : null}
         {item.page_id || canCreate ? (
           <LinkButton href={href} variant={item.page_id ? 'secondary' : 'primary'} size="sm">
-            {item.page_id ? 'Sửa trang' : 'Tạo nội dung'}
+            {item.page_id ? 'Mở hồ sơ' : 'Thiết lập hồ sơ'}
           </LinkButton>
         ) : null}
       </div>
@@ -359,17 +366,20 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
   const canArchive = auth.permissions.includes(PERMISSIONS.pageContentArchive);
   const canRestore = auth.permissions.includes(PERMISSIONS.pageContentRestore);
   const canSave = isCreate ? canCreate : canUpdate;
+  const canPrivilegedWorkflow = auth.roles.includes('super_admin');
   const [form, setForm] = useState<BrandPageForm>(() => defaultForm(initialBrandId));
   const [baselineForm, setBaselineForm] = useState<BrandPageForm>(() => defaultForm(initialBrandId));
   const [record, setRecord] = useState<BrandPageDetail | null>(null);
   const [refs, setRefs] = useState<ReferenceState>({ loading: true, brands: [], banners: [], products: [] });
+  const [pageBanners, setPageBanners] = useState<RecordMap[]>([]);
+  const requestedBannerIds = useRef(new Set<string>());
   const [loading, setLoading] = useState(!isCreate);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<'archive' | 'restore' | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFileUrls, setPreviewFileUrls] = useState<Record<string, string>>({});
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState('');
+  const [resultDialog, setResultDialog] = useState<ActionResultDialogState | null>(null);
   const [productSearch, setProductSearch] = useState('');
   const deferredProductSearch = useDeferredValue(productSearch.trim());
   const [productPage, setProductPage] = useState(1);
@@ -384,7 +394,6 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
   });
   const [readinessExpanded, setReadinessExpanded] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>('section-hero');
-  const [justSaved, setJustSaved] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -441,6 +450,19 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const bannerId = form.hero_banner_id;
+    if (!bannerId || refs.loading || refs.banners.some((item) => String(item.id ?? '') === bannerId) || requestedBannerIds.current.has(bannerId)) return;
+    requestedBannerIds.current.add(bannerId);
+    let active = true;
+    apiClient.get<{ banner: RecordMap }>(byId(endpoints.songThanh.banners, bannerId))
+      .then((data) => {
+        if (active && data.banner) setRefs((current) => ({ ...current, banners: mergeRecordMaps(current.banners, [data.banner]) }));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [form.hero_banner_id, refs.banners, refs.loading]);
 
   useEffect(() => {
     setProductSearch('');
@@ -514,17 +536,34 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
   }, [deferredProductSearch, form.brand_id, productPage]);
 
   const brand = record?.brand ?? refs.brands.find((item) => String(item.id) === form.brand_id) ?? null;
-  const selectedHeroBanner = refs.banners.find((item) => String(item.id ?? '') === form.hero_banner_id) ?? null;
+  const activePageBanner = pageBanners.find((item) => item.status === 'active') ?? null;
+  const selectedHeroBanner = activePageBanner ?? refs.banners.find((item) => String(item.id ?? '') === form.hero_banner_id) ?? null;
   const usesImageOnlyHero = selectedHeroBanner?.display_mode === 'image_only';
   const publicPath = brand ? `/doi-tac-thuong-hieu/${String(brand.slug ?? '')}` : '/doi-tac-thuong-hieu';
-  const readiness = buildReadiness(form, brand, refs.products, usesImageOnlyHero, productBrowser.publicTotal);
+  useEffect(() => {
+    if (!brand?.slug) {
+      setPageBanners([]);
+      return;
+    }
+    let active = true;
+    apiClient.get<unknown>(`${endpoints.songThanh.banners}?page_size=20&deleted_scope=active&position=${encodeURIComponent(publicPath)}`)
+      .then((data) => { if (active) setPageBanners(extractItems(data)); })
+      .catch(() => { if (active) setPageBanners([]); });
+    return () => { active = false; };
+  }, [brand?.slug, publicPath]);
+  const previewForm = useMemo(
+    () => activePageBanner ? { ...form, hero_banner_id: String(activePageBanner.id) } : form,
+    [activePageBanner, form]
+  );
+  const previewBanners = useMemo(() => mergeRecordMaps(refs.banners, pageBanners), [pageBanners, refs.banners]);
+  const readiness = buildReadiness(previewForm, brand, refs.products, usesImageOnlyHero);
   const archived = Boolean(record?.brand_page?.deleted_at);
   const readOnly = !canSave || archived;
   const publicStatus = composedBrandPageStatus(form, archived);
   const isDirty = !loading && JSON.stringify(form) !== JSON.stringify(baselineForm);
 
   const sectionCompletion = useMemo<Record<SectionId, boolean>>(() => ({
-    'section-hero': Boolean(form.brand_id && (usesImageOnlyHero ? form.hero_banner_id : form.title.trim())),
+    'section-hero': Boolean(form.brand_id && (usesImageOnlyHero ? previewForm.hero_banner_id : form.title.trim())),
     'section-overview': Boolean(form.overview_body.trim()),
     'section-stats': form.stats.length > 0,
     'section-support': Boolean(form.support_intro.trim() || form.support_items.some((i) => i.title.trim() || i.description.trim())),
@@ -532,15 +571,15 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
     'section-sources': form.sources.length > 0,
     'section-cta': Boolean(form.cta_title.trim() && form.cta_button_label.trim()),
     'section-seo': Boolean(form.seo_title.trim())
-  }), [form, usesImageOnlyHero]);
+  }), [form, previewForm.hero_banner_id, usesImageOnlyHero]);
   const previewDraft = useMemo(
-    () => buildBrandPagePreviewDraft(form, brand, refs.banners, refs.products, record, previewFileUrls),
-    [brand, form, previewFileUrls, record, refs.banners, refs.products]
+    () => buildBrandPagePreviewDraft(previewForm, brand, previewBanners, refs.products, record, previewFileUrls),
+    [brand, previewForm, previewFileUrls, record, previewBanners, refs.products]
   );
 
   useEffect(() => {
     if (!previewOpen) return;
-    const fileIds = collectBrandPagePreviewFileIds(form, brand, refs.banners, refs.products);
+    const fileIds = collectBrandPagePreviewFileIds(previewForm, brand, previewBanners, refs.products);
     const missingIds = fileIds.filter((fileId) => !previewFileUrls[fileId]);
     if (missingIds.length === 0) return;
 
@@ -571,44 +610,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
     return () => {
       active = false;
     };
-  }, [brand, form, previewFileUrls, previewOpen, refs.banners, refs.products]);
-
-  useEffect(() => {
-    if (!message) return;
-    const timer = setTimeout(() => setMessage(''), 4000);
-    return () => clearTimeout(timer);
-  }, [message]);
-
-  useEffect(() => {
-    if (!justSaved) return;
-    const timer = setTimeout(() => setJustSaved(false), 2200);
-    return () => clearTimeout(timer);
-  }, [justSaved]);
-
-  // Scrollspy — observe form sections and update active tab
-  useEffect(() => {
-    if (loading) return;
-    const elements = SECTIONS
-      .map((s) => document.getElementById(s.id))
-      .filter((el): el is HTMLElement => Boolean(el));
-    if (elements.length === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const intersecting = entries.filter((e) => e.isIntersecting);
-        if (intersecting.length === 0) return;
-        // Among visible sections, pick the one appearing earliest in document order
-        const orderedIds = SECTIONS.map((s) => s.id);
-        const visibleIds = new Set(intersecting.map((e) => e.target.id as SectionId));
-        const firstActive = orderedIds.find((id) => visibleIds.has(id));
-        if (firstActive) setActiveSection(firstActive);
-      },
-      { rootMargin: '-18% 0px -70% 0px', threshold: 0 }
-    );
-
-    elements.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [loading]);
+  }, [brand, previewForm, previewFileUrls, previewOpen, previewBanners, refs.products]);
 
   // Ctrl/Cmd + S → submit form
   useEffect(() => {
@@ -627,7 +629,6 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
 
   function updateForm(patch: Partial<BrandPageForm>) {
     setForm((current) => ({ ...current, ...patch }));
-    setMessage('');
   }
 
   async function save(event: FormEvent) {
@@ -635,10 +636,9 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
     if (!canSave) return;
     setSaving(true);
     setError(null);
-    setMessage('');
     try {
       const titleFallback = usesImageOnlyHero ? String(brand?.name ?? '').trim() || 'Trang thương hiệu' : '';
-      const payload = formToPayload(form, titleFallback);
+      const payload = formToPayload(form, titleFallback, canPrivilegedWorkflow);
       const result = isCreate
         ? await apiClient.post<BrandPageDetail>(endpoints.songThanh.brandPages, payload)
         : await apiClient.put<BrandPageDetail>(byId(endpoints.songThanh.brandPages, id), payload);
@@ -646,11 +646,27 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
       setRecord(result);
       setForm(saved);
       setBaselineForm(saved);
-      setJustSaved(true);
-      setMessage(isCreate ? 'Đã tạo trang thương hiệu.' : 'Đã lưu trang thương hiệu.');
-      if (isCreate) router.replace(`/page-contents/brand-pages/${String(result.brand_page.id)}`);
+      const detailPath = `/page-contents/brand-pages/${String(result.brand_page.id)}`;
+      setResultDialog({
+        tone: 'success',
+        title: isCreate ? 'Đã tạo trang thương hiệu' : 'Đã lưu trang thương hiệu',
+        description: isCreate
+          ? 'Hồ sơ đã được tạo. Tiếp tục hoàn thiện trước khi công khai.'
+          : !canPrivilegedWorkflow && saved.review_status === 'pending_review'
+            ? 'Đã lưu. Hồ sơ đang chờ Super Admin duyệt và tạm ẩn khỏi website.'
+            : 'Thay đổi hồ sơ đã được lưu.',
+        primaryAction: {
+          label: isCreate ? 'Xem hồ sơ' : 'Về danh sách',
+          onSelect: () => router.push(isCreate ? detailPath : '/page-contents/brand-pages'),
+        },
+        secondaryAction: {
+          label: isCreate ? 'Về danh sách' : 'Tiếp tục chỉnh sửa',
+          onSelect: () => isCreate ? router.push('/page-contents/brand-pages') : setResultDialog(null),
+        },
+        afterClose: isCreate ? () => router.replace(detailPath) : undefined,
+      });
     } catch (err) {
-      setError(err);
+      setResultDialog({ tone: 'error', title: 'Không lưu được trang thương hiệu', error: err });
     } finally {
       setSaving(false);
     }
@@ -660,7 +676,6 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
     if (!pendingAction || isCreate) return;
     setSaving(true);
     setError(null);
-    setMessage('');
     try {
       const result = await apiClient.post<BrandPageDetail>(
         `${byId(endpoints.songThanh.brandPages, id)}/${pendingAction}`,
@@ -671,9 +686,19 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
       setForm(actioned);
       setBaselineForm(actioned);
       setPendingAction(null);
-      setMessage(pendingAction === 'restore' ? 'Đã khôi phục trang thương hiệu.' : 'Đã lưu trữ trang thương hiệu.');
+      const restored = pendingAction === 'restore';
+      setResultDialog({
+        tone: 'success',
+        title: restored ? 'Đã khôi phục trang thương hiệu' : 'Đã lưu trữ trang thương hiệu',
+        description: restored ? 'Hồ sơ đã trở lại trạng thái chưa công khai.' : 'Hồ sơ không còn hiển thị trên website.',
+        primaryAction: {
+          label: restored ? 'Tiếp tục chỉnh sửa' : 'Về danh sách',
+          onSelect: () => restored ? setResultDialog(null) : router.push('/page-contents/brand-pages'),
+        },
+      });
     } catch (err) {
-      setError(err);
+      setPendingAction(null);
+      setResultDialog({ tone: 'error', title: 'Không đổi được trạng thái trang thương hiệu', error: err });
     } finally {
       setSaving(false);
     }
@@ -714,10 +739,10 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
             <Badge tone={brandPageStatusTone(publicStatus)}>
               {brandPageStatusLabel(publicStatus)}
             </Badge>
-            {readiness.warnings.length > 0 ? <Badge tone="warning">{readiness.warnings.length} cảnh báo</Badge> : null}
+            {readiness.warnings.length > 0 ? <Badge tone="warning">{readiness.warnings.length} mục cần xem lại</Badge> : null}
           </div>
           <h1 className="mt-2 text-[26px] font-semibold leading-8 tracking-tight text-text">
-            {brand ? `Trang thương hiệu: ${String(brand.name ?? '')}` : 'Tạo trang thương hiệu'}
+            {brand ? `Hồ sơ thương hiệu ${String(brand.name ?? '')}` : 'Thiết lập hồ sơ thương hiệu'}
           </h1>
           <p className="mt-2 font-mono text-xs text-muted-foreground">{publicPath}</p>
         </div>
@@ -727,43 +752,38 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
             Xem trước
           </Button>
           <a className="inline-flex min-h-10 items-center gap-2 rounded-sm border border-border bg-panel px-3 text-sm font-medium text-slate-700 hover:bg-muted" href={`${PUBLIC_SITE_BASE_URL}${publicPath}`} target="_blank" rel="noreferrer">
-            Xem public
+            Xem trên website
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
           {canSave && !archived ? (
             <Button
               type="submit"
               form="brand-page-form"
-              disabled={saving || (!isDirty && !justSaved)}
-              className={cn(
-                'transition-colors',
-                justSaved && 'bg-emerald-600 text-white hover:bg-emerald-600 disabled:opacity-100'
-              )}
+              disabled={saving || !isDirty}
               title="Ctrl + S để lưu nhanh"
             >
               {saving ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
-              ) : justSaved ? (
-                <Check className="h-4 w-4" />
               ) : (
                 <Save className="h-4 w-4" />
               )}
-              {saving ? 'Đang lưu...' : justSaved ? 'Đã lưu!' : isDirty ? 'Lưu thay đổi' : 'Đã lưu'}
+              {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
             </Button>
           ) : null}
         </div>
       </div>
 
       <UnsavedChangesGuard when={isDirty && !saving} />
+      {error ? <ErrorState error={error} context="module-load" /> : null}
       {archived ? (
         <div className="rounded-sm border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          Trang thương hiệu này đang lưu trữ. FE sẽ không mở trang chi tiết cho tới khi admin khôi phục và xuất bản lại.
+          Hồ sơ này đang lưu trữ và không hiển thị trên website. Khôi phục hồ sơ trước khi chỉnh sửa hoặc xuất bản lại.
         </div>
       ) : null}
 
       {/* Section navigation — sticky, scroll-spy, click to jump */}
       <nav
-        aria-label="Điều hướng phần trong trang"
+        aria-label="Các bước hoàn thiện hồ sơ thương hiệu"
         className="sticky top-0 z-20 -mx-1 rounded-sm border border-border bg-panel/95 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-panel/80"
       >
         <div className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -776,11 +796,10 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                 key={section.id}
                 type="button"
                 onClick={() => {
-                  const el = document.getElementById(section.id);
-                  if (el) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    setActiveSection(section.id);
-                  }
+                  setActiveSection(section.id);
+                  document
+                    .getElementById('brand-page-workspace')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }}
                 aria-current={isActive ? 'true' : undefined}
                 className={cn(
@@ -812,7 +831,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
           const totalCount = readiness.items.length;
           const allReady = passedCount === totalCount;
           return (
-            <Card className="mx-auto mb-4 w-full max-w-5xl overflow-hidden">
+            <Card className="mx-auto mb-4 w-full max-w-[1320px] overflow-hidden">
               {/* Row 1: Status switcher + readiness summary */}
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-muted/40 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-3">
@@ -822,13 +841,18 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                   <div className="min-w-[240px]">
                     <Select
                       value={publicStatus === 'archived' ? 'draft' : publicStatus}
-                      disabled={readOnly}
-                      onChange={(event) => updateForm(applyBrandPagePublicStatus(form, event.target.value as BrandPagePublicStatus))}
+                      disabled={readOnly || !canPrivilegedWorkflow}
+                      onChange={(event) => updateForm(applyBrandPagePublicStatus(event.target.value as BrandPagePublicStatus))}
                     >
                       <option value="draft">Bản nháp, chưa hiện ngoài web</option>
                       <option value="hidden">Đã duyệt, tạm ẩn ngoài web</option>
                       <option value="published">Đã xuất bản ngoài web</option>
                     </Select>
+                    {!canPrivilegedWorkflow ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Lưu nội dung sẽ gửi Super Admin duyệt; trang đang công khai sẽ tạm ẩn.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <button
@@ -838,11 +862,13 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                   aria-expanded={readinessExpanded}
                 >
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Sẵn sàng public
+                    {allReady ? 'Có thể xuất bản' : 'Cần xử lý trước khi xuất bản'}
                   </span>
-                  <span className={cn('text-base font-bold tabular-nums', allReady ? 'text-emerald-600' : 'text-amber-600')}>
-                    {passedCount}/{totalCount}
-                  </span>
+                  {!allReady ? (
+                    <span className="text-base font-bold tabular-nums text-amber-700">
+                      {totalCount - passedCount} mục
+                    </span>
+                  ) : null}
                   <div className="h-1.5 w-28 overflow-hidden rounded-full bg-border">
                     <div
                       className={cn('h-full transition-all duration-300', allReady ? 'bg-emerald-500' : 'bg-amber-400')}
@@ -860,22 +886,19 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                 </span>
                 <AutoDataChip
                   ok={Boolean(brand)}
-                  label={brand ? `Brand: ${String(brand.name ?? '')}` : 'Chưa chọn brand'}
+                  label={brand ? `Thương hiệu: ${String(brand.name ?? '')}` : 'Chưa chọn thương hiệu'}
                   href={brand ? `/brands/${String(brand.id)}` : undefined}
                 />
                 <AutoDataChip
-                  ok={Boolean(form.hero_banner_id)}
-                  label={form.hero_banner_id ? 'Đã chọn banner' : 'Chưa chọn banner'}
-                  href="/banners"
+                  ok={pageBanners.length > 0 || Boolean(form.hero_banner_id)}
+                  label={pageBanners.length > 0 ? `${pageBanners.length} banner của trang` : form.hero_banner_id ? 'Banner cũ đang hiển thị' : 'Chưa có banner riêng'}
+                  href={brand?.slug ? `/banners?position=${encodeURIComponent(publicPath)}` : '/banners'}
+                  optional
                 />
                 <AutoDataChip
                   ok={productBrowser.publicTotal > 0}
-                  label={`${productBrowser.publicTotal} sản phẩm public có ảnh`}
+                  label={`${productBrowser.publicTotal} sản phẩm đang hiển thị có ảnh`}
                   href="/product-groups"
-                />
-                <AutoDataChip
-                  ok={form.featured_product_group_ids.length > 0}
-                  label={`${form.featured_product_group_ids.length} sản phẩm đã ghim`}
                 />
               </div>
 
@@ -883,7 +906,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
               {readinessExpanded ? (
                 <div className="space-y-1.5 border-t border-border bg-muted/30 p-4">
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Chi tiết kiểm tra trước khi xuất bản
+                    Điều kiện bắt buộc trước khi xuất bản
                   </div>
                   {readiness.items.map((item) => (
                     <div key={item.label} className="flex items-start gap-2 rounded-sm border border-border bg-panel px-3 py-2 text-sm">
@@ -892,7 +915,23 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                       ) : (
                         <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                       )}
-                      <span className={item.ok ? 'text-slate-700' : 'text-amber-800'}>{item.label}</span>
+                      <span className={cn('min-w-0 flex-1', item.ok ? 'text-slate-700' : 'text-amber-800')}>{item.label}</span>
+                      {!item.ok ? (
+                        <button
+                          type="button"
+                          className="shrink-0 text-xs font-semibold text-primary hover:underline"
+                          onClick={() => {
+                            setActiveSection(workspaceForSection(item.target));
+                            requestAnimationFrame(() =>
+                              document
+                                .getElementById(item.target)
+                                ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                            );
+                          }}
+                        >
+                          Đi đến
+                        </button>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -901,7 +940,11 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
           );
         })()}
 
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+        <div
+          id="brand-page-workspace"
+          className="mx-auto flex w-full max-w-[1320px] scroll-mt-24 flex-col gap-4"
+        >
+          {activeSection === 'section-hero' ? (
             <EditorCard
               id="section-hero"
               layoutOrder="order-1"
@@ -926,36 +969,36 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
               <div>
                 <div className="mb-1.5 flex items-center justify-between gap-3">
                   <span className="text-[13px] font-medium leading-5 text-slate-700">Banner đầu trang</span>
-                  <Link href="/banners/new?position=brand-hero" className="text-xs font-semibold text-primary hover:text-primary/80">
-                    Tạo banner
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {brand?.slug ? <Link href={`/banners?position=${encodeURIComponent(publicPath)}`} className="text-xs font-semibold text-primary hover:underline">Xem banner của trang</Link> : null}
+                    {brand?.slug ? <Link href={`/banners/new?position=${encodeURIComponent(publicPath)}`} className="text-xs font-semibold text-primary hover:underline">Tạo banner</Link> : null}
+                  </div>
                 </div>
-                <Select
-                  value={form.hero_banner_id}
-                  disabled={readOnly}
-                  onChange={(event) => updateForm({ hero_banner_id: event.target.value })}
-                >
-                  <option value="">Không chọn banner</option>
-                  {refs.banners.map((item) => (
-                    <option key={String(item.id)} value={String(item.id)}>
-                      {String(item.title ?? item.id)}
-                    </option>
+                <div className="space-y-2 rounded-lg border border-border bg-panel p-3">
+                  {!brand?.slug ? <p className="text-sm text-muted-foreground">Chọn thương hiệu để quản lý banner của trang đó.</p> : null}
+                  {brand?.slug && pageBanners.length === 0 && !selectedHeroBanner ? <p className="text-sm text-muted-foreground">Trang này chưa có banner riêng.</p> : null}
+                  {pageBanners.map((item) => (
+                    <Link className="flex min-h-11 items-center justify-between gap-3 rounded-lg px-2 text-sm hover:bg-blue-50" href={`/banners/${String(item.id)}`} key={String(item.id)}>
+                      <span className="min-w-0 truncate font-medium text-text">{String(item.title ?? item.id)}</span>
+                      <span className="shrink-0 text-xs font-semibold text-primary">Sửa banner</span>
+                    </Link>
                   ))}
-                </Select>
+                  {selectedHeroBanner && pageBanners.length === 0 ? <Link className="inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline" href={`/banners/${String(selectedHeroBanner.id)}`}>Sửa banner đã gán trước đây: {String(selectedHeroBanner.title ?? selectedHeroBanner.id)}</Link> : null}
+                </div>
               </div>
               {!usesImageOnlyHero ? (
                 <>
-                  <Field label="Tiêu đề public" required readOnly={readOnly}>
+                  <Field label="Tiêu đề ngoài website" required readOnly={readOnly}>
                     <Input value={form.title} readOnly={readOnly} onChange={(event) => updateForm({ title: event.target.value })} />
                   </Field>
                   <Field label="Mô tả ngắn" readOnly={readOnly}>
                     <Textarea className="min-h-24" value={form.excerpt} readOnly={readOnly} onChange={(event) => updateForm({ excerpt: event.target.value })} />
                   </Field>
-                  <div className="rounded-md border border-dashed border-indigo-200 bg-indigo-50/30 p-3">
-                    <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
-                      Thiết kế hero (chữ &amp; màu)
-                    </div>
-                    <div className="space-y-3">
+                  <details className="rounded-sm border border-border bg-muted/25">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">
+                      Chữ ở đầu trang (nền sáng)
+                    </summary>
+                    <div className="grid gap-4 border-t border-border px-4 py-4 sm:grid-cols-2">
                       <Field label="Cỡ tiêu đề" readOnly={readOnly}>
                         <Select
                           value={form.hero_title_size}
@@ -977,18 +1020,20 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                           <option value="large">Chuẩn</option>
                         </Select>
                       </Field>
-                      <ColorField label="Màu nhãn (eyebrow)" value={form.hero_eyebrow_color} readOnly={readOnly} onChange={(value) => updateForm({ hero_eyebrow_color: value })} />
+                      <ColorField label="Màu nhãn nhỏ" value={form.hero_eyebrow_color} readOnly={readOnly} onChange={(value) => updateForm({ hero_eyebrow_color: value })} />
                       <ColorField label="Màu tiêu đề" value={form.hero_title_color} readOnly={readOnly} onChange={(value) => updateForm({ hero_title_color: value })} />
                       <ColorField label="Màu mô tả" value={form.hero_excerpt_color} readOnly={readOnly} onChange={(value) => updateForm({ hero_excerpt_color: value })} />
                     </div>
-                  </div>
+                  </details>
                 </>
               ) : null}
 
-              <div className="mt-6 border-t border-borderBlue pt-5">
-                <p className="text-[13px] font-semibold text-text">Nhận diện &amp; bố cục trang</p>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <ColorField label="Màu nhận diện (accent)" value={form.accent_color} readOnly={readOnly} onChange={(value) => updateForm({ accent_color: value })} />
+              <details className="mt-2 rounded-sm border border-border bg-muted/25">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">
+                  Tùy chỉnh màu nhận diện và bố cục
+                </summary>
+                <div className="grid gap-4 border-t border-border px-4 py-4 sm:grid-cols-2">
+                  <ColorField label="Màu nhấn của thương hiệu" value={form.accent_color} readOnly={readOnly} onChange={(value) => updateForm({ accent_color: value })} />
                   <Field label="Bố cục trang" readOnly={readOnly}>
                     <Select
                       value={form.layout_archetype}
@@ -1003,13 +1048,16 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                   </Field>
                 </div>
                 {form.accent_color.trim() && !readOnly ? (
-                  <button type="button" className="mt-3 type-caption font-semibold text-primaryStrong" onClick={() => updateForm({ accent_color: '' })}>
+                  <button type="button" className="mb-4 ml-4 type-caption font-semibold text-primaryStrong" onClick={() => updateForm({ accent_color: '' })}>
                     Dùng màu tự động
                   </button>
                 ) : null}
-              </div>
+              </details>
             </EditorCard>
+          ) : null}
 
+          {activeSection === 'section-overview' ? (
+            <>
             <EditorCard
               id="section-overview"
               layoutOrder="order-2"
@@ -1017,7 +1065,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
               icon={BookOpen}
               tone="purple"
             >
-              <Field label="Tiêu đề section" readOnly={readOnly}>
+              <Field label="Tiêu đề khu vực" readOnly={readOnly}>
                 <Input value={form.overview_title} readOnly={readOnly} onChange={(event) => updateForm({ overview_title: event.target.value })} />
               </Field>
               <Field label="Nội dung tổng quan" readOnly={readOnly}>
@@ -1108,7 +1156,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
               icon={ListChecks}
               tone="teal"
             >
-              <Field label="Tiêu đề section" readOnly={readOnly}>
+              <Field label="Tiêu đề khu vực" readOnly={readOnly}>
                 <Input value={form.support_title} readOnly={readOnly} onChange={(event) => updateForm({ support_title: event.target.value })} />
               </Field>
               <Field label="Đoạn mở đầu" readOnly={readOnly}>
@@ -1157,7 +1205,11 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                 ) : null}
               </div>
             </EditorCard>
+            </>
+          ) : null}
 
+          {activeSection === 'section-products' ? (
+            <>
             <EditorCard
               id="section-products"
               layoutOrder="order-3"
@@ -1169,9 +1221,9 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
               ) : null}
             >
               {!form.brand_id ? (
-                <EmptyEditorLine text="Chọn thương hiệu trước để xem sản phẩm public." />
+                <EmptyEditorLine text="Chọn thương hiệu trước để xem sản phẩm đang hiển thị." />
               ) : productBrowser.publicTotal === 0 && !productBrowser.loading ? (
-                <EmptyEditorLine text="Chưa có sản phẩm public có ảnh. Website sẽ tự ẩn khu vực danh mục và sản phẩm." />
+                <EmptyEditorLine text="Chưa có sản phẩm đang hiển thị kèm ảnh. Website sẽ tự ẩn khu vực này." />
               ) : (
                 <div className="space-y-5">
                   <div className="rounded-sm border border-emerald-200 bg-emerald-50/40 p-3">
@@ -1216,7 +1268,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                       <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <input
                         className="min-w-0 flex-1 bg-transparent text-sm outline-none"
-                        placeholder="Tìm tên hoặc mã sản phẩm public..."
+                        placeholder="Tìm tên hoặc mã sản phẩm đang hiển thị..."
                         value={productSearch}
                         onChange={(event) => {
                           setProductSearch(event.target.value);
@@ -1235,7 +1287,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                     {productBrowser.loading ? (
                       <div className="space-y-2"><Skeleton className="h-11" /><Skeleton className="h-11" /><Skeleton className="h-11" /></div>
                     ) : productBrowser.items.length === 0 ? (
-                      <EmptyEditorLine text="Không tìm thấy sản phẩm public có ảnh phù hợp." />
+                      <EmptyEditorLine text="Không tìm thấy sản phẩm đang hiển thị có ảnh phù hợp." />
                     ) : (
                       <div className="space-y-1 rounded-sm border border-border p-2">
                         {productBrowser.items.map((product) => {
@@ -1251,7 +1303,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                             >
                               <input type="checkbox" className="mt-px shrink-0" checked={checked} disabled={readOnly} onChange={(event) => toggleProduct(idValue, event.target.checked)} />
                               <span className="min-w-0 flex-1 truncate text-sm font-medium text-text">{String(product.name ?? '')}</span>
-                              <Badge tone="success" className="shrink-0">Public</Badge>
+                              <Badge tone="success" className="shrink-0">Đang hiển thị</Badge>
                             </label>
                           );
                         })}
@@ -1279,7 +1331,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
               id="section-sources"
               layoutOrder="order-5"
               title="Tài liệu và nguồn tham khảo"
-              description="Tải PDF (catalogue/bảng giá) → hiện ở khu Tài liệu ngoài web. Hoặc thêm link hãng."
+              description="Catalogue, chứng nhận hoặc website chính thức hiển thị cho khách hàng."
               icon={FileCheck2}
               tone="slate"
               action={!readOnly ? <Button type="button" variant="secondary" size="sm" onClick={() => updateForm({ sources: [...form.sources, emptySource()] })}><Plus className="h-4 w-4" />Thêm nguồn</Button> : null}
@@ -1349,24 +1401,28 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                 ))}
               </div>
             </EditorCard>
+            </>
+          ) : null}
 
+          {activeSection === 'section-seo' ? (
+            <>
             <EditorCard
               id="section-cta"
               layoutOrder="order-7"
-              title="CTA cuối trang"
+              title="Kêu gọi liên hệ cuối trang"
               icon={Link2}
               tone="orange"
             >
-              <Field label="Tiêu đề CTA" readOnly={readOnly}>
+              <Field label="Tiêu đề" readOnly={readOnly}>
                 <Input value={form.cta_title} readOnly={readOnly} onChange={(event) => updateForm({ cta_title: event.target.value })} />
               </Field>
-              <Field label="Mô tả CTA" readOnly={readOnly}>
+              <Field label="Mô tả" readOnly={readOnly}>
                 <Textarea className="min-h-24" value={form.cta_description} readOnly={readOnly} onChange={(event) => updateForm({ cta_description: event.target.value })} />
               </Field>
-              <Field label="Text nút" readOnly={readOnly}>
+              <Field label="Nhãn nút" readOnly={readOnly}>
                 <Input value={form.cta_button_label} readOnly={readOnly} onChange={(event) => updateForm({ cta_button_label: event.target.value })} />
               </Field>
-              <Field label="Link nút" readOnly={readOnly} hint="Ví dụ: /lien-he hoặc https://...">
+              <Field label="Đường dẫn nút" readOnly={readOnly}>
                 <Input value={form.cta_button_url} readOnly={readOnly} onChange={(event) => updateForm({ cta_button_url: event.target.value })} />
               </Field>
             </EditorCard>
@@ -1374,14 +1430,14 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
             <EditorCard
               id="section-seo"
               layoutOrder="order-8"
-              title="SEO và chia sẻ"
+              title="Tìm kiếm và chia sẻ"
               icon={Search}
               tone="rose"
             >
-              <Field label="SEO title" readOnly={readOnly} hint="Tối ưu 50–60 ký tự, hiện ở tab trình duyệt và kết quả Google">
+              <Field label="Tiêu đề khi tìm kiếm" readOnly={readOnly}>
                 <Input value={form.seo_title} readOnly={readOnly} onChange={(event) => updateForm({ seo_title: event.target.value })} />
               </Field>
-              <Field label="SEO description" readOnly={readOnly} hint="Tối ưu 150–160 ký tự, hiện trong kết quả Google">
+              <Field label="Mô tả khi tìm kiếm" readOnly={readOnly}>
                 <Textarea className="min-h-24" value={form.seo_description} readOnly={readOnly} onChange={(event) => updateForm({ seo_description: event.target.value })} />
               </Field>
               {!form.hero_banner_id || form.seo_og_image_file_id ? (
@@ -1401,14 +1457,15 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                 </Field>
               ) : null}
             </EditorCard>
+            </>
+          ) : null}
         </div>
-        <div className="mx-auto w-full max-w-5xl">
+        <div className="mx-auto w-full max-w-[1320px]">
           <FormActions
             canSave={canSave && !archived}
             saving={saving}
             submitLabel="Lưu trang"
             saveNotice={isDirty ? 'Có thay đổi chưa lưu.' : 'Chưa có thay đổi.'}
-            feedback={<FormFeedback successMessage={message} error={error} context="module-save" />}
             archived={archived}
             onArchive={!isCreate && canArchive && !archived ? () => setPendingAction('archive') : undefined}
             onRestore={!isCreate && canRestore && archived ? () => setPendingAction('restore') : undefined}
@@ -1431,7 +1488,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
         title={pendingAction === 'restore' ? 'Khôi phục trang thương hiệu?' : 'Lưu trữ trang thương hiệu?'}
         description={
           pendingAction === 'restore'
-            ? 'Trang sẽ trở lại trạng thái chưa xuất bản. Admin cần kiểm tra lại nội dung trước khi đưa ra public.'
+            ? 'Hồ sơ sẽ trở lại trạng thái chưa xuất bản. Hãy kiểm tra lại nội dung trước khi đưa lên website.'
             : 'Trang sẽ được lưu trữ mềm, không còn mở được ngoài website và có thể khôi phục sau.'
         }
         confirmLabel={pendingAction === 'restore' ? 'Khôi phục' : 'Lưu trữ'}
@@ -1439,6 +1496,7 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
         onConfirm={runRecordAction}
         onClose={() => setPendingAction(null)}
       />
+      <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
     </section>
   );
 
@@ -1545,25 +1603,25 @@ function ColorField({ label, value, readOnly, onChange }: { label: string; value
 type EditorCardTone = 'indigo' | 'purple' | 'amber' | 'teal' | 'emerald' | 'slate' | 'orange' | 'rose';
 
 const EDITOR_CARD_TONE_CHIP: Record<EditorCardTone, string> = {
-  indigo: 'bg-indigo-100 text-indigo-700',
-  purple: 'bg-purple-100 text-purple-700',
-  amber: 'bg-amber-100 text-amber-700',
-  teal: 'bg-teal-100 text-teal-700',
-  emerald: 'bg-emerald-100 text-emerald-700',
-  slate: 'bg-slate-200 text-slate-700',
-  orange: 'bg-orange-100 text-orange-700',
-  rose: 'bg-rose-100 text-rose-700'
+  indigo: 'bg-primarySoft text-primaryStrong',
+  purple: 'bg-primarySoft text-primaryStrong',
+  amber: 'bg-primarySoft text-primaryStrong',
+  teal: 'bg-primarySoft text-primaryStrong',
+  emerald: 'bg-primarySoft text-primaryStrong',
+  slate: 'bg-primarySoft text-primaryStrong',
+  orange: 'bg-primarySoft text-primaryStrong',
+  rose: 'bg-primarySoft text-primaryStrong'
 };
 
 const EDITOR_CARD_TONE_DESC: Record<EditorCardTone, string> = {
-  indigo: 'text-indigo-700',
-  purple: 'text-purple-700',
-  amber: 'text-amber-700',
-  teal: 'text-teal-700',
-  emerald: 'text-emerald-700',
-  slate: 'text-slate-700',
-  orange: 'text-orange-700',
-  rose: 'text-rose-700'
+  indigo: 'text-muted-foreground',
+  purple: 'text-muted-foreground',
+  amber: 'text-muted-foreground',
+  teal: 'text-muted-foreground',
+  emerald: 'text-muted-foreground',
+  slate: 'text-muted-foreground',
+  orange: 'text-muted-foreground',
+  rose: 'text-muted-foreground'
 };
 
 function EditorCard({
@@ -1651,14 +1709,18 @@ function EmptyEditorCTA({
   );
 }
 
-function AutoDataChip({ ok, label, href }: { ok: boolean; label: string; href?: string }) {
+function AutoDataChip({ ok, label, href, optional = false }: { ok: boolean; label: string; href?: string; optional?: boolean }) {
   const tone = ok
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-    : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100';
+    : optional
+      ? 'border-border bg-muted text-muted-foreground hover:bg-muted/70'
+      : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100';
   const inner = (
     <>
       {ok ? (
         <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+      ) : optional ? (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" />
       ) : (
         <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" />
       )}
@@ -1685,7 +1747,11 @@ function AutoDataChip({ ok, label, href }: { ok: boolean; label: string; href?: 
     <span
       className={cn(
         'inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
-        ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'
+        ok
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+          : optional
+            ? 'border-border bg-muted text-muted-foreground'
+            : 'border-amber-200 bg-amber-50 text-amber-800'
       )}
     >
       {inner}
@@ -1720,7 +1786,16 @@ function BrandPagePreviewDialog({
     }
   }, []);
   const postPreviewDraft = useCallback(() => {
-    iframeRef.current?.contentWindow?.postMessage(
+    const targetWindow = iframeRef.current?.contentWindow;
+    if (!targetWindow) return;
+    if (targetOrigin !== '*') {
+      try {
+        if (targetWindow.location.origin !== targetOrigin) return;
+      } catch {
+        // Cross-origin access is expected after the public preview loads.
+      }
+    }
+    targetWindow.postMessage(
       {
         type: BRAND_PAGE_PREVIEW_MESSAGE_TYPE,
         payload: draft
@@ -1731,31 +1806,42 @@ function BrandPagePreviewDialog({
 
   useEffect(() => {
     if (!open) return;
-    const timer = window.setTimeout(postPreviewDraft, 60);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [open, postPreviewDraft]);
 
-  useEffect(() => {
-    if (!open) return;
+    let retryTimer: number | null = null;
+    const stopRetries = () => {
+      if (retryTimer !== null) {
+        window.clearInterval(retryTimer);
+        retryTimer = null;
+      }
+    };
 
     function handleMessage(event: MessageEvent<unknown>) {
       if (targetOrigin !== '*' && event.origin !== targetOrigin) return;
+      if (event.source !== iframeRef.current?.contentWindow) return;
       if (
         typeof event.data === 'object' &&
         event.data !== null &&
         (event.data as { type?: unknown }).type === BRAND_PAGE_PREVIEW_READY_MESSAGE_TYPE
       ) {
         postPreviewDraft();
+        stopRetries();
       }
     }
 
     window.addEventListener('message', handleMessage);
+    const initialTimer = window.setTimeout(() => {
+      postPreviewDraft();
+      retryTimer = window.setInterval(postPreviewDraft, 250);
+    }, 60);
+    const retryDeadline = window.setTimeout(stopRetries, 10_000);
+
     return () => {
+      window.clearTimeout(initialTimer);
+      window.clearTimeout(retryDeadline);
+      stopRetries();
       window.removeEventListener('message', handleMessage);
     };
-  }, [open, postPreviewDraft, targetOrigin]);
+  }, [open, postPreviewDraft, targetOrigin, viewport]);
 
   return (
     <Modal
@@ -1769,7 +1855,7 @@ function BrandPagePreviewDialog({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              Render bằng website public
+              Hiển thị bằng giao diện website
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <Badge tone="info">Bản xem trước</Badge>
@@ -1846,9 +1932,9 @@ function defaultForm(brandId?: string): BrandPageForm {
     hero_banner_id: '',
     hero_title_size: 'large',
     hero_excerpt_size: 'large',
-    hero_eyebrow_color: '#DBEAFE',
-    hero_title_color: '#F8FAFC',
-    hero_excerpt_color: '#F1F5F9',
+    hero_eyebrow_color: '#004AB4',
+    hero_title_color: '#0B1C30',
+    hero_excerpt_color: '#334155',
     accent_color: '',
     layout_archetype: 'auto',
     support_title: 'Song Thanh hỗ trợ sản phẩm như thế nào',
@@ -1886,9 +1972,9 @@ function detailToForm(detail: BrandPageDetail): BrandPageForm {
     hero_banner_id: String(page.hero_banner_id ?? ''),
     hero_title_size: normalizeHeroTitleSize(String(page.hero_title_size ?? 'large')),
     hero_excerpt_size: normalizeHeroExcerptSize(String(page.hero_excerpt_size ?? 'large')),
-    hero_eyebrow_color: normalizeHexColor(String(page.hero_eyebrow_color ?? ''), '#DBEAFE'),
-    hero_title_color: normalizeHexColor(String(page.hero_title_color ?? ''), '#F8FAFC'),
-    hero_excerpt_color: normalizeHexColor(String(page.hero_excerpt_color ?? ''), '#F1F5F9'),
+    hero_eyebrow_color: normalizeLegacyHeroColor(String(page.hero_eyebrow_color ?? ''), '#DBEAFE', '#004AB4'),
+    hero_title_color: normalizeLegacyHeroColor(String(page.hero_title_color ?? ''), '#F8FAFC', '#0B1C30'),
+    hero_excerpt_color: normalizeLegacyHeroColor(String(page.hero_excerpt_color ?? ''), '#F1F5F9', '#334155'),
     accent_color: (page as { accent_color?: unknown }).accent_color
       ? normalizeHexColor(String((page as { accent_color?: unknown }).accent_color), '#2563EB')
       : '',
@@ -1927,7 +2013,7 @@ function detailToForm(detail: BrandPageDetail): BrandPageForm {
   };
 }
 
-function formToPayload(form: BrandPageForm, titleFallback = '') {
+function formToPayload(form: BrandPageForm, titleFallback = '', canPrivilegedWorkflow = true) {
   return {
     brand_id: form.brand_id,
     title: form.title.trim() || titleFallback,
@@ -1937,9 +2023,9 @@ function formToPayload(form: BrandPageForm, titleFallback = '') {
     hero_banner_id: nullable(form.hero_banner_id),
     hero_title_size: form.hero_title_size,
     hero_excerpt_size: form.hero_excerpt_size,
-    hero_eyebrow_color: nullable(normalizeHexColor(form.hero_eyebrow_color, '#DBEAFE')),
-    hero_title_color: nullable(normalizeHexColor(form.hero_title_color, '#F8FAFC')),
-    hero_excerpt_color: nullable(normalizeHexColor(form.hero_excerpt_color, '#F1F5F9')),
+    hero_eyebrow_color: nullable(normalizeHexColor(form.hero_eyebrow_color, '#004AB4')),
+    hero_title_color: nullable(normalizeHexColor(form.hero_title_color, '#0B1C30')),
+    hero_excerpt_color: nullable(normalizeHexColor(form.hero_excerpt_color, '#334155')),
     accent_color: form.accent_color.trim() ? normalizeHexColor(form.accent_color, '#2563EB') : null,
     layout_archetype: form.layout_archetype,
     support_title: nullable(form.support_title),
@@ -1957,8 +2043,7 @@ function formToPayload(form: BrandPageForm, titleFallback = '') {
     cta_description: nullable(form.cta_description),
     cta_button_label: nullable(form.cta_button_label),
     cta_button_url: nullable(form.cta_button_url),
-    review_status: form.review_status,
-    publish_status: form.publish_status,
+    ...(canPrivilegedWorkflow ? { review_status: form.review_status, publish_status: form.publish_status } : {}),
     seo_title: nullable(form.seo_title),
     seo_description: nullable(form.seo_description),
     seo_og_image_file_id: nullable(form.seo_og_image_file_id)
@@ -2004,9 +2089,9 @@ function buildBrandPagePreviewDraft(
       support_image_file: previewFile(nullable(form.support_image_file_id), 'Ảnh minh họa', previewFileUrls),
       hero_title_size: form.hero_title_size,
       hero_excerpt_size: form.hero_excerpt_size,
-      hero_eyebrow_color: normalizeHexColor(form.hero_eyebrow_color, '#DBEAFE'),
-      hero_title_color: normalizeHexColor(form.hero_title_color, '#F8FAFC'),
-      hero_excerpt_color: normalizeHexColor(form.hero_excerpt_color, '#F1F5F9'),
+      hero_eyebrow_color: normalizeHexColor(form.hero_eyebrow_color, '#004AB4'),
+      hero_title_color: normalizeHexColor(form.hero_title_color, '#0B1C30'),
+      hero_excerpt_color: normalizeHexColor(form.hero_excerpt_color, '#334155'),
       accent_color: form.accent_color.trim() ? normalizeHexColor(form.accent_color, '#2563EB') : null,
       layout_archetype: form.layout_archetype,
       cta_title: nullable(form.cta_title),
@@ -2114,6 +2199,11 @@ function normalizeHexColor(value: string, fallback: string) {
   return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : fallback;
 }
 
+function normalizeLegacyHeroColor(value: string, previousDefault: string, currentDefault: string) {
+  const normalized = normalizeHexColor(value, currentDefault);
+  return normalized === previousDefault ? currentDefault : normalized;
+}
+
 function nullable(value: string) {
   const normalized = value.trim();
   return normalized ? normalized : null;
@@ -2184,24 +2274,24 @@ function buildReadiness(
   form: BrandPageForm,
   brand: RecordMap | null,
   products: RecordMap[],
-  usesImageOnlyHero: boolean,
-  publicProductTotal: number
+  usesImageOnlyHero: boolean
 ) {
   const items = [
-    { label: 'Đã chọn thương hiệu', ok: Boolean(form.brand_id && brand) },
     {
-      label: usesImageOnlyHero ? 'Có banner chỉ ảnh' : 'Có tiêu đề public',
-      ok: usesImageOnlyHero ? Boolean(form.hero_banner_id) : Boolean(form.title.trim())
+      label: 'Đã chọn thương hiệu',
+      ok: Boolean(form.brand_id && brand),
+      target: 'section-hero' as SectionId
     },
-    ...(usesImageOnlyHero ? [] : [{ label: 'Có mô tả ngắn', ok: Boolean(form.excerpt.trim()) }]),
-    { label: 'Có nội dung tổng quan', ok: Boolean(form.overview_body.trim()) },
-    { label: 'Có nguồn xác minh', ok: form.sources.some((source) => source.status === 'active' && Boolean(source.title.trim() && (source.url.trim() || source.file_id.trim()))) },
     {
-      label: publicProductTotal > 0 ? 'Có sản phẩm trưng bày đã ghim' : 'Không có sản phẩm public, website sẽ ẩn khối hàng',
-      ok: publicProductTotal === 0 || form.featured_product_group_ids.length > 0
+      label: usesImageOnlyHero ? 'Có banner chỉ ảnh' : 'Có tiêu đề ngoài website',
+      ok: usesImageOnlyHero ? Boolean(form.hero_banner_id) : Boolean(form.title.trim()),
+      target: 'section-hero' as SectionId
     },
-    { label: 'Có CTA cuối trang', ok: Boolean(form.cta_title.trim() && form.cta_button_label.trim()) },
-    { label: 'Brand đang active', ok: brand ? brand.status === 'active' : false }
+    {
+      label: 'Thương hiệu đang hoạt động',
+      ok: brand ? brand.status === 'active' : false,
+      target: 'section-hero' as SectionId
+    }
   ];
   const warnings = [
     ...items.filter((item) => !item.ok).map((item) => item.label),
@@ -2211,7 +2301,7 @@ function buildReadiness(
         const product = products.find((item) => String(item.id) === idValue);
         return product && !(product.status === 'active' && product.review_status === 'approved' && product.publish_status === 'published');
       })
-      .map(() => 'Sản phẩm ghim chưa sẵn sàng public')
+      .map(() => 'Sản phẩm ghim chưa đủ điều kiện hiển thị')
   ];
   return { items, warnings };
 }
@@ -2226,7 +2316,7 @@ function composedBrandPageStatus(form: BrandPageForm, archived: boolean): BrandP
   return 'draft';
 }
 
-function applyBrandPagePublicStatus(form: BrandPageForm, next: BrandPagePublicStatus): Partial<BrandPageForm> {
+function applyBrandPagePublicStatus(next: BrandPagePublicStatus): Partial<BrandPageForm> {
   if (next === 'published') {
     return { review_status: 'approved', publish_status: 'published' };
   }

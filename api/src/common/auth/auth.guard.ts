@@ -7,6 +7,7 @@ import { KnexService } from '../../db/knex.service';
 import { AppError } from '../errors/app-error';
 import { ErrorCodes } from '../errors/error-codes';
 import type { AccessTokenPayload, CurrentUser } from './auth.types';
+import { assertSingleRole } from './singleRole';
 
 type RequestWithUser = Request & {
   user?: CurrentUser;
@@ -18,6 +19,7 @@ interface AdminUserRow {
   display_name: string;
   status: 'active' | 'inactive' | 'locked';
   deleted_at: Date | string | null;
+  updated_at: Date | string;
 }
 
 @Injectable()
@@ -55,8 +57,19 @@ export class AuthGuard implements CanActivate {
       });
     }
 
+    if (payload.revision !== new Date(user.updated_at).getTime()) {
+      throw new AppError({
+        code: ErrorCodes.AUTH_UNAUTHORIZED,
+        message: 'Phiên đăng nhập đã thay đổi. Vui lòng đăng nhập lại.',
+        statusCode: HttpStatus.UNAUTHORIZED
+      });
+    }
+
     const roles = await this.loadRoleCodes(user.id);
-    const permissions = await this.loadPermissionCodes(user.id);
+    assertSingleRole(roles);
+    const permissions = roles.includes('super_admin')
+      ? await this.loadAllPermissionCodes()
+      : await this.loadPermissionCodes(user.id);
 
     request.user = {
       id: user.id,
@@ -105,7 +118,7 @@ export class AuthGuard implements CanActivate {
 
   private async loadUser(userId: string): Promise<AdminUserRow | null> {
     const user = await this.knexService.db<AdminUserRow>('admin_user')
-      .select('id', 'email', 'display_name', 'status', 'deleted_at')
+      .select('id', 'email', 'display_name', 'status', 'deleted_at', 'updated_at')
       .where({ id: userId })
       .whereNull('deleted_at')
       .first();
@@ -141,6 +154,14 @@ export class AuthGuard implements CanActivate {
       .where('role.status', 'active')
       .whereNull('role.deleted_at')
       .orderBy('permission.code', 'asc');
+
+    return rows.map((row) => row.code);
+  }
+
+  private async loadAllPermissionCodes(): Promise<string[]> {
+    const rows = await this.knexService.db('admin_permission')
+      .select<{ code: string }[]>('code')
+      .orderBy('code', 'asc');
 
     return rows.map((row) => row.code);
   }

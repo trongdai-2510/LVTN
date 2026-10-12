@@ -181,7 +181,7 @@ export function extractImportedVariantAttributesFromCells(
   //   process exactly those (in order) — this enables fully dynamic columns.
   // - Otherwise, fall back to the curated definitions list (legacy behavior).
   const headersToProcess: string[] =
-    allowedHeaders && allowedHeaders.length > 0
+    Array.isArray(allowedHeaders)
       ? allowedHeaders
       : IMPORTED_VARIANT_ATTRIBUTE_DEFINITIONS.map((d) => d.source_header);
 

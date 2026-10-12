@@ -8,15 +8,15 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
 
 const FILES = {
-  rootLayout: 'frontend/app/layout.tsx',
-  publicFetcher: 'frontend/lib/api/public-fetcher.ts',
-  dynamicPage: 'frontend/app/[slug]/page.tsx',
-  redirectProxy: 'frontend/proxy.ts',
-  siteShellPublic: 'frontend/features/site-shell/site-shell.public.ts',
-  siteFooter: 'frontend/components/layout/SiteFooter.tsx',
-  floatingContactButtons: 'frontend/components/layout/FloatingContactButtons.tsx',
-  socialBrandIcons: 'frontend/components/ui/SocialBrandIcons.tsx',
-  contactInfo: 'frontend/features/contact-request/ContactInfo.tsx',
+  rootLayout: 'frontend/src/app/layout.tsx',
+  publicFetcher: 'frontend/src/lib/api/public-fetcher.ts',
+  dynamicPage: 'frontend/src/app/[slug]/page.tsx',
+  redirectProxy: 'frontend/src/proxy.ts',
+  siteShellPublic: 'frontend/src/features/site-shell/site-shell.public.ts',
+  siteFooter: 'frontend/src/components/layout/SiteFooter.tsx',
+  floatingContactButtons: 'frontend/src/components/layout/FloatingContactButtons.tsx',
+  socialBrandIcons: 'frontend/src/components/ui/SocialBrandIcons.tsx',
+  contactInfo: 'frontend/src/features/contact-request/ContactInfo.tsx',
   websiteSettingsPage: 'admin/src/features/website-content/WebsiteSettingsPage.tsx',
   websiteSettingsDto: 'api/src/modules/website-settings/website-settings.dto.ts',
   websiteSettingsGuardrails: 'api/src/modules/website-settings/website-settings.guardrails.ts',
@@ -26,9 +26,9 @@ const FILES = {
   menuService: 'api/src/modules/menu/menu.service.ts',
   publicRepository: 'api/src/modules/public/public.repository.ts',
   publicService: 'api/src/modules/public/public.service.ts',
-  htmlContent: 'frontend/components/content/HtmlContent.tsx',
-  sanitizedHtmlContent: 'frontend/components/content/SanitizedHtmlContent.tsx',
-  pageContentPreviewClient: 'frontend/app/admin-preview/page-content/PageContentPreviewClient.tsx',
+  htmlContent: 'frontend/src/components/content/HtmlContent.tsx',
+  sanitizedHtmlContent: 'frontend/src/components/content/SanitizedHtmlContent.tsx',
+  pageContentPreviewClient: 'frontend/src/app/admin-preview/page-content/PageContentPreviewClient.tsx',
   publicController: 'api/src/modules/public/public.controller.ts',
   adminModuleConfig: 'admin/src/features/module-config.ts',
   adminApiEndpoints: 'admin/src/lib/api-endpoints.ts',
@@ -38,9 +38,9 @@ const FILES = {
   richTextEditor: 'admin/src/components/RichTextEditor.tsx',
   referencePickers: 'admin/src/components/form/ReferencePickers.tsx',
   fileWorkflow: 'admin/src/lib/file-workflow.ts',
-  siteShellTypes: 'frontend/types/contracts/public-site-shell.ts',
-  jsonLd: 'frontend/lib/seo/json-ld.ts',
-  ddl: 'database/ddl/song_thanh_physical_schema_v2.sql'
+  siteShellTypes: 'frontend/src/types/contracts/public-site-shell.ts',
+  jsonLd: 'frontend/src/lib/seo/json-ld.ts',
+  ddl: 'database/ddl/song_thanh_deployment_schema_20260730.sql'
 };
 
 const sourceCache = new Map();
@@ -603,7 +603,7 @@ runCase('RICH-HTML-XSS-DEFENSE', 'public-ui/public-api', 'Rich HTML has API sani
     pageContentPreviewClient.includes("await import('@/lib/security/sanitize-rich-text')"),
     'draft preview rich text sanitizer is not lazy-loaded'
   );
-  assert(pageContentPreviewClient.includes('sanitizePreviewRichText(value)'), 'draft preview rich text sanitizer missing');
+  assert(pageContentPreviewClient.includes('sanitizeRichTextHtml(value)'), 'draft preview rich text sanitizer missing');
   assert(pageContentPreviewClient.includes('return null;'), 'draft preview sanitizer should fail closed');
   return {
     defense_in_depth: true,
@@ -613,7 +613,7 @@ runCase('RICH-HTML-XSS-DEFENSE', 'public-ui/public-api', 'Rich HTML has API sani
 });
 
 function writeReport() {
-  const reportPath = path.join(ROOT, 'docs', 'working-notes', 'edge-case-static-audit-last-run.md');
+  const reportPath = path.join(ROOT, 'tmp', 'qa-artifacts', 'edge-case-static-audit-last-run.md');
   mkdirSync(path.dirname(reportPath), { recursive: true });
   const lines = [
     '# Edge case static audit last run',

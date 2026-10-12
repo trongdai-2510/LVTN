@@ -9,6 +9,7 @@ import {
 } from '../../common/pagination/pagination';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
+import { buildContentDisposition } from '../../common/http/contentdisposition';
 import { sanitizeSvgMarkup } from '../../common/sanitize/html-sanitizer';
 import {
   CreateFileMetadataDto,
@@ -143,7 +144,7 @@ export class FileService {
     }
 
     response.setHeader('Content-Type', file.mime_type);
-    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader(
       'Content-Disposition',
@@ -348,7 +349,25 @@ export class FileService {
       });
     }
 
-    await this.fileRepository.archive(id);
+    const outcome = await this.fileRepository.archive(id);
+    if (outcome.status === 'not_found') {
+      throw this.notFound('File metadata was not found.');
+    }
+    if (outcome.status === 'archived') {
+      throw new AppError({
+        code: 'FILE_INVALID_STATE',
+        message: 'File metadata is already archived.',
+        statusCode: HttpStatus.CONFLICT
+      });
+    }
+    if (outcome.status === 'blocked') {
+      throw new AppError({
+        code: 'FILE_ARCHIVE_BLOCKED',
+        message: 'File metadata is still used by active records.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { active_usage_count: outcome.active_usage_count }
+      });
+    }
     return this.getFileDetail(id);
   }
 
@@ -428,16 +447,4 @@ export class FileService {
 
     return { file, resolvedPath };
   }
-}
-
-function buildContentDisposition(disposition: 'inline' | 'attachment', filename: string): string {
-  const fallbackName = filename.trim() || 'song-thanh-file';
-  const quotedFilename = fallbackName.replace(/["\\/\r\n]/g, '_');
-  return `${disposition}; filename="${quotedFilename}"; filename*=UTF-8''${encodeHeaderFilename(fallbackName)}`;
-}
-
-function encodeHeaderFilename(value: string): string {
-  return encodeURIComponent(value).replace(/['()*]/g, (char) =>
-    `%${char.charCodeAt(0).toString(16).toUpperCase()}`
-  );
 }

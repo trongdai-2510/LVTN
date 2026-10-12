@@ -1,5 +1,10 @@
 import type { Knex } from 'knex';
 
+import { HttpStatus } from '@nestjs/common';
+
+import { AppError } from '../errors/app-error';
+import { ErrorCodes } from '../errors/error-codes';
+
 export type FileUsageDatabase = Knex | Knex.Transaction;
 
 interface SyncManagedFileUsageInput {
@@ -101,6 +106,10 @@ export async function syncManagedFileUsage(
   }
 
   if (nextFileId) {
+    // This is the authoritative check after any concurrent file archival has
+    // finished. Keeping the file row locked until the owner's transaction
+    // commits makes attachment and archival serializable.
+    await lockActiveManagedFiles(db, input.fileMetadataTable, [nextFileId]);
     const existing = await db(input.fileUsageTable)
       .where({
         file_id: nextFileId,
@@ -129,6 +138,39 @@ export async function syncManagedFileUsage(
       input.fileMetadataTable,
       nextFileId
     );
+  }
+}
+
+/**
+ * Locks active managed files in a stable order before a business record starts
+ * or restores references to them. Service-level existence checks are still
+ * useful for fast feedback; this is the race-safe transaction boundary.
+ */
+export async function lockActiveManagedFiles(
+  db: FileUsageDatabase,
+  fileMetadataTable: string,
+  fileIds: Iterable<string>
+): Promise<void> {
+  const ids = Array.from(new Set(fileIds)).filter(Boolean).sort();
+  if (ids.length === 0) return;
+
+  const rows = await db(fileMetadataTable)
+    .whereIn('id', ids)
+    .orderBy('id', 'asc')
+    .forUpdate()
+    .select<Array<{ id: string; deleted_at: Date | string | null }>>(
+      'id',
+      'deleted_at'
+    );
+  const activeIds = new Set(
+    rows.filter((row) => !row.deleted_at).map((row) => row.id)
+  );
+  if (ids.some((id) => !activeIds.has(id))) {
+    throw new AppError({
+      code: ErrorCodes.NOT_FOUND,
+      message: 'Referenced file metadata was not found.',
+      statusCode: HttpStatus.NOT_FOUND
+    });
   }
 }
 

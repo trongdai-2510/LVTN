@@ -1,6 +1,7 @@
 'use client';
 
 import { type ComponentType, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Building2,
   Clock,
@@ -29,7 +30,6 @@ import {
   getSocialBrandIcon,
 } from '@/components/icons/SocialIcons';
 
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -38,6 +38,7 @@ import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
+import { ActionResultDialog, type ActionResultDialogState } from '@/components/feedback/ActionResultDialog';
 import { Field } from '@/components/form/Field';
 import { FileReferencePicker } from '@/components/form/ReferencePickers';
 import { apiClient } from '@/lib/api-client';
@@ -94,7 +95,7 @@ function mapSocialLinks(data: unknown): SocialLink[] {
     status: String(item.status ?? 'active'),
     sort_order: Number(item.sort_order ?? 0),
     deleted_at: item.deleted_at ? String(item.deleted_at) : null,
-  }));
+  })).filter((item) => !item.deleted_at);
 }
 
 function normalizeHotlines(record: RecordMap): string[] {
@@ -153,12 +154,13 @@ function isEmbeddableMapSrc(src: string): boolean {
 }
 
 export function WebsiteSettingsPage() {
+  const router = useRouter();
   const [authState, setAuthState] = useState<AuthState>(() => authStore.getState());
   const [tab, setTab] = useState<Tab>('company');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState('');
+  const [resultDialog, setResultDialog] = useState<ActionResultDialogState | null>(null);
 
   const [form, setForm] = useState<RecordMap>({});
   const [hotlines, setHotlines] = useState<string[]>(['']);
@@ -243,10 +245,20 @@ export function WebsiteSettingsPage() {
     setHotlines((items) => (items.length >= 5 ? items : [...items, '']));
   }
 
-  async function syncWebsiteLink(nextUrl: string, currentLinks: SocialLink[]) {
+  function assertCanSyncWebsiteLink(nextUrl: string, currentLinks: SocialLink[]) {
     const existing = currentLinks.find((link) => link.platform === 'website' && !link.deleted_at);
+    if (nextUrl === (existing?.url.trim() ?? '')) return;
+    if (nextUrl && existing && !canUpdateLink) throw new Error('Bạn không có quyền sửa liên kết Website.');
+    if (nextUrl && !existing && !canCreateLink) throw new Error('Bạn không có quyền thêm liên kết Website.');
+    if (!nextUrl && existing && !canArchiveLink) throw new Error('Bạn không có quyền lưu trữ liên kết Website.');
+  }
+
+  async function syncWebsiteLink(nextUrl: string, currentLinks: SocialLink[]) {
+    assertCanSyncWebsiteLink(nextUrl, currentLinks);
+    const existing = currentLinks.find((link) => link.platform === 'website' && !link.deleted_at);
+    if (nextUrl === (existing?.url.trim() ?? '')) return;
     if (nextUrl) {
-      if (existing && canUpdateLink) {
+      if (existing) {
         const result = await apiClient.put<unknown>(byId(endpoints.songThanh.socialLinks, existing.id), {
           platform: 'website',
           label: existing.label || 'Website',
@@ -260,7 +272,7 @@ export function WebsiteSettingsPage() {
             ? { ...link, label: String(updated.label ?? link.label), url: String(updated.url ?? nextUrl), status: String(updated.status ?? 'active') }
             : link
         )));
-      } else if (!existing && canCreateLink) {
+      } else {
         const result = await apiClient.post<unknown>(endpoints.songThanh.socialLinks, {
           platform: 'website',
           label: 'Website',
@@ -285,7 +297,7 @@ export function WebsiteSettingsPage() {
       return;
     }
 
-    if (existing && canArchiveLink) {
+    if (existing) {
       await apiClient.post(`${byId(endpoints.songThanh.socialLinks, existing.id)}/archive`, {});
       setSocialLinks((links) => links.filter((link) => link.id !== existing.id));
     }
@@ -295,7 +307,7 @@ export function WebsiteSettingsPage() {
     e.preventDefault();
     if (!canUpdate) return;
     setSaving(true);
-    setSaveMsg('');
+    let settingsSaved = false;
     try {
       const cleanHotlines = hotlines.map((item) => item.trim()).filter(Boolean).slice(0, 5);
       if (cleanHotlines.length === 0) {
@@ -317,15 +329,34 @@ export function WebsiteSettingsPage() {
         favicon_file_id: form.favicon_file_id ? String(form.favicon_file_id) : null,
       };
 
+      const requestedWebsiteUrl = websiteUrl.trim();
+      assertCanSyncWebsiteLink(requestedWebsiteUrl, socialLinks);
+
       const result = await apiClient.put<unknown>(endpoints.songThanh.websiteSettings, payload);
+      settingsSaved = true;
       applySettingsRecord(extractRecord(result));
       const responseLinks = mapSocialLinks(result);
-      if (responseLinks.length > 0) setSocialLinks(responseLinks);
-      await syncWebsiteLink(websiteUrl.trim(), responseLinks.length > 0 ? responseLinks : socialLinks);
-      setSaveMsg('Đã lưu thành công.');
-      setTimeout(() => setSaveMsg(''), 3000);
+      setSocialLinks(responseLinks);
+      await syncWebsiteLink(requestedWebsiteUrl, responseLinks);
+      setResultDialog({
+        tone: 'success',
+        title: 'Đã lưu cài đặt website',
+        description: 'Thông tin đã được cập nhật. Các thay đổi hiển thị trên website theo dữ liệu vừa lưu.',
+        primaryAction: { label: 'Về tổng quan', onSelect: () => router.push('/dashboard') },
+        secondaryAction: { label: 'Tiếp tục chỉnh sửa', onSelect: () => setResultDialog(null) },
+      });
     } catch (err) {
-      setSaveMsg(err instanceof Error ? err.message : 'Không lưu được.');
+      const localMessage = err instanceof Error && /^(Bạn không có quyền|Cần ít nhất|Giờ làm việc)/.test(err.message)
+        ? err.message
+        : null;
+      setResultDialog({
+        tone: settingsSaved ? 'warning' : 'error',
+        title: settingsSaved ? 'Đã lưu thông tin, chưa cập nhật liên kết Website' : localMessage ? 'Kiểm tra thông tin trước khi lưu' : 'Không lưu được cài đặt website',
+        error: settingsSaved || localMessage ? undefined : err,
+        description: settingsSaved
+          ? 'Thông tin công ty đã lưu, nhưng liên kết Website chưa đồng bộ. Hãy kiểm tra và lưu lại.'
+          : localMessage ?? undefined,
+      });
     } finally {
       setSaving(false);
     }
@@ -357,6 +388,8 @@ export function WebsiteSettingsPage() {
       ]);
       setNewLink({ platform: 'facebook', url: '' });
       setAddingLink(false);
+    } catch (err) {
+      setResultDialog({ tone: 'error', title: 'Không thêm được liên kết', error: err });
     } finally {
       setSocialLoading(false);
     }
@@ -368,6 +401,9 @@ export function WebsiteSettingsPage() {
       await apiClient.post(`${byId(endpoints.songThanh.socialLinks, linkId)}/archive`, {});
       setSocialLinks((prev) => prev.filter((l) => l.id !== linkId));
       setDeleteLinkId(null);
+    } catch (err) {
+      setDeleteLinkId(null);
+      setResultDialog({ tone: 'error', title: 'Không lưu trữ được liên kết', error: err });
     } finally {
       setDeletingLink(false);
     }
@@ -378,7 +414,6 @@ export function WebsiteSettingsPage() {
 
     const nextStatus = link.status === 'active' ? 'inactive' : 'active';
     setTogglingLinkId(link.id);
-    setSaveMsg('');
     try {
       const result = await apiClient.put<unknown>(
         byId(endpoints.songThanh.socialLinks, link.id),
@@ -392,10 +427,8 @@ export function WebsiteSettingsPage() {
             : item
         )
       );
-      setSaveMsg(nextStatus === 'active' ? 'Đã bật liên kết.' : 'Đã tắt liên kết.');
-      setTimeout(() => setSaveMsg(''), 3000);
     } catch (err) {
-      setSaveMsg(err instanceof Error ? err.message : 'Không đổi được trạng thái liên kết.');
+      setResultDialog({ tone: 'error', title: 'Không đổi được trạng thái liên kết', error: err });
     } finally {
       setTogglingLinkId(null);
     }
@@ -668,27 +701,24 @@ export function WebsiteSettingsPage() {
                         type="button"
                         role="switch"
                         aria-checked={link.status === 'active'}
+                        aria-busy={togglingLinkId === link.id}
                         aria-label={`${link.status === 'active' ? 'Tắt' : 'Bật'} ${link.label || link.platform}`}
                         title={canUpdateLink ? 'Bật hoặc tắt hiển thị trên website' : 'Không có quyền cập nhật'}
                         disabled={!canUpdateLink || togglingLinkId === link.id}
                         onClick={() => void handleToggleLink(link)}
-                        className="inline-flex shrink-0 items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-11 shrink-0 items-center gap-2 disabled:cursor-not-allowed md:min-h-8"
                       >
                         <span className="text-xs font-medium text-muted-foreground">
-                          {togglingLinkId === link.id
-                            ? 'Đang lưu'
-                            : link.status === 'active'
-                              ? 'Bật'
-                              : 'Tắt'}
+                          {link.status === 'active' ? 'Bật' : 'Tắt'}
                         </span>
                         <span
-                          className={`relative block h-5 w-9 rounded-full transition-colors ${
+                          className={`relative block h-6 w-11 rounded-full transition-colors duration-200 ease-out motion-reduce:transition-none ${
                             link.status === 'active' ? 'bg-primary' : 'bg-slate-300'
                           }`}
                         >
                           <span
-                            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                              link.status === 'active' ? 'translate-x-[18px]' : 'translate-x-0.5'
+                            className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-out motion-reduce:transition-none ${
+                              link.status === 'active' ? 'translate-x-5' : 'translate-x-0'
                             }`}
                           />
                         </span>
@@ -811,9 +841,7 @@ export function WebsiteSettingsPage() {
         {tab !== 'social' && canUpdate && (
           <div className="sticky bottom-0 z-10 mt-4 border-t border-border bg-panel px-5 py-3 shadow-[0_-8px_18px_rgb(15_23_42_/_0.04)]">
             <div className="flex items-center justify-between gap-4">
-              <p className="text-xs text-muted-foreground">
-                {saveMsg || 'Thay đổi sẽ được lưu khi bạn nhấn Lưu.'}
-              </p>
+              <p className="text-xs text-muted-foreground">Lưu thông tin của mục đang chỉnh sửa.</p>
               <Button type="submit" disabled={saving}>
                 <Save size={14} className="mr-1.5" />
                 {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
@@ -832,6 +860,7 @@ export function WebsiteSettingsPage() {
         onConfirm={() => deleteLinkId && handleDeleteLink(deleteLinkId)}
         onClose={() => setDeleteLinkId(null)}
       />
+      <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
     </section>
   );
 }

@@ -23,7 +23,7 @@ export type BannerStatus = (typeof BANNER_STATUSES)[number];
 export type BannerDeletedScope = (typeof BANNER_DELETED_SCOPES)[number];
 export type BannerDisplayMode = (typeof BANNER_DISPLAY_MODES)[number];
 export type BannerContentPosition = (typeof BANNER_CONTENT_POSITIONS)[number];
-export type CtaButtonStyle = (typeof BANNER_CTA_STYLES)[number];
+type CtaButtonStyle = (typeof BANNER_CTA_STYLES)[number];
 export type BannerTitleSize = (typeof BANNER_TITLE_SIZES)[number];
 
 export interface CtaButton {

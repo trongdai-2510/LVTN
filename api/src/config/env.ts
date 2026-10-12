@@ -1,14 +1,16 @@
 import { existsSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 
 import { config as loadDotEnv } from 'dotenv';
 
-export type NodeEnv = 'development' | 'test' | 'production';
+type NodeEnv = 'development' | 'test' | 'production';
 
 export interface EnvConfig {
   port: number;
   nodeEnv: NodeEnv;
   corsOrigins: string[];
+  trustedProxies: string[];
   database: {
     host: string;
     port: number;
@@ -75,6 +77,25 @@ function parseCorsOrigins(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+export function parseTrustedProxies(value: string | undefined): string[] {
+  if (!value?.trim()) return [];
+
+  return value.split(',').map((entry) => {
+    const proxy = entry.trim();
+    const [address, prefix, extra] = proxy.split('/');
+    const family = isIP(address);
+    const maxPrefix = family === 4 ? 32 : 128;
+    const prefixNumber = prefix === undefined ? undefined : Number(prefix);
+    if (
+      !family || extra !== undefined ||
+      (prefix !== undefined && (!/^\d+$/.test(prefix) || prefixNumber === undefined || !Number.isInteger(prefixNumber) || prefixNumber < 1 || prefixNumber > maxPrefix))
+    ) {
+      throw new Error(`TRUSTED_PROXY_CIDRS contains an invalid proxy address: ${proxy}`);
+    }
+    return proxy;
+  });
+}
+
 const INSECURE_JWT_SECRETS = new Set(['change-me', '', 'secret', 'changeme']);
 const INSECURE_DB_PASSWORDS = new Set(['postgres', 'songthanh_secret', '']);
 const INSECURE_ADMIN_PASSWORDS = new Set(['ChangeMe123!', '']);
@@ -130,6 +151,7 @@ export function getEnv(): EnvConfig {
     port: parseInteger(process.env.PORT, 4000),
     nodeEnv: parseNodeEnv(process.env.NODE_ENV),
     corsOrigins: parseCorsOrigins(process.env.CORS_ORIGINS),
+    trustedProxies: parseTrustedProxies(process.env.TRUSTED_PROXY_CIDRS),
     database: {
       host: process.env.DATABASE_HOST ?? '127.0.0.1',
       port: parseInteger(process.env.DATABASE_PORT, 5432),

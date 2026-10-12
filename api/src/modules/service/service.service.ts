@@ -7,7 +7,7 @@ import { extractPublicFileIdsFromHtml } from '../../common/files/file-usage-sync
 import { createPaginationMeta, getPaginationParams } from '../../common/pagination/pagination';
 import { resolveAvailableSlug } from '../../common/text/slugify-text';
 import { LogicUserReferenceRepository } from '../../common/users/logic-user-reference.repository';
-import { reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
+import { isVisibilityOnlyUnpublish, reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
 import { ProductGroupService } from '../product-group/product-group.service';
 import { CreateServiceDto, ServiceListQueryDto, UpdateServiceDto } from './service.dto';
 import {
@@ -91,7 +91,7 @@ export class SongThanhServiceService {
     const existing = await this.serviceRepository.findById(id);
     if (!existing) throw this.notFound('Service was not found.');
     if (existing.deleted_at) throw this.conflict('Service is archived.');
-    const mutation = await this.normalizeUpdateInput(id, input);
+    const mutation = await this.normalizeUpdateInput(id, input, currentUser?.roles.includes('super_admin') ?? false);
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
     await this.serviceRepository.update(id, mutation, actorId);
@@ -145,19 +145,19 @@ export class SongThanhServiceService {
     if (relation?.deleted_at) throw this.conflict('Association is archived. Use restore route instead of attach.');
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
-    await this.serviceRepository.attachProductGroup(id, groupId, actorId);
+    await this.serviceRepository.attachProductGroup(id, groupId, actorId, !currentUser?.roles.includes('super_admin'));
     return this.getServiceDetail(id);
   }
 
-  async detachProductGroup(serviceId: string, productGroupId: string) {
+  async detachProductGroup(serviceId: string, productGroupId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('service_id', serviceId);
     const groupId = assertUuid('product_group_id', productGroupId);
-    const detached = await this.serviceRepository.detachProductGroup(id, groupId);
+    const detached = await this.serviceRepository.detachProductGroup(id, groupId, !currentUser?.roles.includes('super_admin'));
     if (!detached) throw this.notFound('Active service product group association was not found.');
     return this.getServiceDetail(id);
   }
 
-  async restoreProductGroup(serviceId: string, productGroupId: string) {
+  async restoreProductGroup(serviceId: string, productGroupId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('service_id', serviceId);
     const groupId = assertUuid('product_group_id', productGroupId);
     await this.assertServiceUsableForBusiness(id);
@@ -165,7 +165,7 @@ export class SongThanhServiceService {
     const relation = await this.serviceRepository.findRelation(id, groupId);
     if (!relation) throw this.notFound('Deleted service product group association was not found.');
     if (!relation.deleted_at) throw this.conflict('Product group is already attached to service.');
-    const restored = await this.serviceRepository.restoreProductGroup(id, groupId);
+    const restored = await this.serviceRepository.restoreProductGroup(id, groupId, !currentUser?.roles.includes('super_admin'));
     if (!restored) throw this.notFound('Deleted service product group association was not found.');
     return this.getServiceDetail(id);
   }
@@ -222,7 +222,7 @@ export class SongThanhServiceService {
     return mutation;
   }
 
-  private async normalizeUpdateInput(id: string, input: UpdateServiceDto): Promise<ServiceMutationInput> {
+  private async normalizeUpdateInput(id: string, input: UpdateServiceDto, actorIsSuperAdmin: boolean): Promise<ServiceMutationInput> {
     const current = await this.serviceRepository.findById(id);
     if (!current) throw this.notFound('Service was not found.');
     const mutation: ServiceMutationInput = {};
@@ -245,6 +245,7 @@ export class SongThanhServiceService {
     if (typeof input.seo_title !== 'undefined') mutation.seo_title = normalizeNullableText(input.seo_title, 255) ?? null;
     if (typeof input.seo_description !== 'undefined') mutation.seo_description = normalizeNullableText(input.seo_description, 512) ?? null;
     if (typeof input.seo_og_image_file_id !== 'undefined') mutation.seo_og_image_file_id = normalizeNullableUuid('seo_og_image_file_id', input.seo_og_image_file_id) ?? null;
+    if (isVisibilityOnlyUnpublish(input)) return mutation;
     reopenPublishedContentAfterMajorEdit(current, mutation, [
       'title',
       'slug',
@@ -256,7 +257,7 @@ export class SongThanhServiceService {
       'typical_duration',
       'icon_key',
       'image_file_id'
-    ]);
+    ], actorIsSuperAdmin);
     const next = { ...current, ...mutation };
     await this.assertReferencesUsable(next);
     await this.assertPublishReadiness(next);

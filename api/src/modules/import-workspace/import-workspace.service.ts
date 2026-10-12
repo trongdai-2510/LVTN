@@ -40,7 +40,8 @@ import {
   normalizePriceModeFilter,
   normalizeRequiredText,
   normalizeSearch,
-  slugify
+  slugify,
+  validationError
 } from './import-workspace.guardrails';
 import {
   isManagedImportWorkbookPath,
@@ -77,6 +78,7 @@ import {
 
 interface IntakeWorkbookSourceInput {
   sourceWorkbookPath: string;
+  sheetName: string | null;
   batchName: string | null;
   notes: string | null;
   rowRanges: NormalizedRowRange[];
@@ -431,6 +433,7 @@ export class ImportWorkspaceService {
     const rowRanges = normalizeRowRanges(input.row_ranges);
     return this.createImportBatchPreviewFromWorkbookSource({
       sourceWorkbookPath: input.source_workbook_path,
+      sheetName: normalizeOptionalText('sheet_name', input.sheet_name, 255),
       batchName: normalizeOptionalText('batch_name', input.batch_name, 255),
       notes: normalizeOptionalText('notes', input.notes, 10_000),
       rowRanges,
@@ -446,7 +449,7 @@ export class ImportWorkspaceService {
     if (input.source_kind && input.source_kind !== 'uploaded_workbook') {
       throw new AppError({
         code: ErrorCodes.VALIDATION_ERROR,
-        message: 'source_kind chá»‰ há»— trá»£ uploaded_workbook cho luá»“ng táº£i file.',
+        message: 'source_kind chỉ hỗ trợ uploaded_workbook cho luồng tải file.',
         statusCode: HttpStatus.BAD_REQUEST
       });
     }
@@ -460,6 +463,7 @@ export class ImportWorkspaceService {
     try {
       return await this.createImportBatchPreviewFromWorkbookSource({
         sourceWorkbookPath: storedWorkbook.storedPath,
+        sheetName: normalizeOptionalText('sheet_name', input.sheet_name, 255),
         batchName: normalizeOptionalText('batch_name', input.batch_name, 255),
         notes: normalizeOptionalText('notes', input.notes, 10_000),
         rowRanges,
@@ -481,7 +485,7 @@ export class ImportWorkspaceService {
     if (batch.status === 'applied') {
       throw conflictError(
         'IMPORT_BATCH_ALREADY_APPLIED',
-        'LĂ´ nháº­p Ä‘Ă£ Ă¡p dá»¥ng khĂ´ng thá»ƒ táº¡o láº¡i dá»¯ liá»‡u táº¡m.'
+        'Lô nhập đã áp dụng không thể tạo lại dữ liệu tạm.'
       );
     }
 
@@ -489,7 +493,7 @@ export class ImportWorkspaceService {
     if (Number(stats.raw_data_count ?? 0) > 0) {
       throw conflictError(
         'IMPORT_STAGING_ALREADY_CREATED',
-        'LĂ´ nháº­p nĂ y Ä‘Ă£ cĂ³ dá»¯ liá»‡u táº¡m. HĂ£y xĂ³a lĂ´ hiá»‡n táº¡i vĂ  táº£i láº¡i náº¿u cáº§n Ä‘á»•i mapping.'
+        'Lô nhập này đã có dữ liệu tạm. Hãy xóa lô hiện tại và tải lại nếu cần đổi mapping.'
       );
     }
 
@@ -613,11 +617,11 @@ export class ImportWorkspaceService {
   }
 
   private async createImportBatchPreviewFromWorkbookSource(input: IntakeWorkbookSourceInput) {
-    const workbook = await readWorkbookFixture(input.sourceWorkbookPath, input.rowRanges);
+    const workbook = await readWorkbookFixture(input.sourceWorkbookPath, input.rowRanges, input.sheetName);
     if (workbook.rows.length === 0) {
       throw new AppError({
         code: ErrorCodes.VALIDATION_ERROR,
-        message: 'Workbook khĂ´ng cĂ³ dĂ²ng dá»¯ liá»‡u nĂ o trong pháº¡m vi Ä‘Ă£ chá»n.',
+        message: 'Workbook không có dòng dữ liệu nào trong phạm vi đã chọn.',
         statusCode: HttpStatus.BAD_REQUEST
       });
     }
@@ -638,6 +642,7 @@ export class ImportWorkspaceService {
         batch_name: input.batchName,
         source_file_name: sourceFileName,
         source_file_id: sourceFile.id,
+        source_sheet_name: workbook.sheet_name,
         total_rows: workbook.rows.length,
         notes: input.notes,
         selected_row_ranges: workbook.row_ranges_applied,
@@ -682,14 +687,25 @@ export class ImportWorkspaceService {
     const id = assertUuid('import_batch_id', importBatchId);
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
-    await this.getBatchOrThrow(id);
-    const pending = await this.importWorkspaceRepository.listPendingProductGroups({
-      importBatchId: id,
-      filters: { q: null, status: 'all', deleted_scope: 'active', has_conflict: null },
-      limit: 10000,
-      offset: 0
-    });
     return this.importWorkspaceRepository.transaction(async (trx) => {
+      const lockedBatch =
+        await this.importWorkspaceRepository.findBatchByIdForUpdate(id, trx);
+      if (!lockedBatch) throw this.notFound();
+      this.assertBatchEditableForReview(lockedBatch);
+      const pending = await this.importWorkspaceRepository.listPendingProductGroups(
+        {
+          importBatchId: id,
+          filters: {
+            q: null,
+            status: 'all',
+            deleted_scope: 'active',
+            has_conflict: null
+          },
+          limit: 10000,
+          offset: 0
+        },
+        trx
+      );
       const taxonomy = await this.ensureTaxonomyBaselineForPendingGroups(
         pending.items,
         actorId,
@@ -839,10 +855,32 @@ export class ImportWorkspaceService {
     if (!['keep_existing', 'overwrite', 'merge', 'manual_edit', 'skip'].includes(decision)) {
       throw new AppError({ code: ErrorCodes.VALIDATION_ERROR, message: 'decision is invalid.', statusCode: HttpStatus.BAD_REQUEST });
     }
+    const existingConflict =
+      await this.importWorkspaceRepository.findConflictById(id);
+    if (!existingConflict || existingConflict.deleted_at) {
+      throw new AppError({
+        code: ErrorCodes.NOT_FOUND,
+        message: 'Import conflict was not found.',
+        statusCode: HttpStatus.NOT_FOUND
+      });
+    }
     return this.importWorkspaceRepository.transaction(async (trx) => {
+      const lockedBatch =
+        await this.importWorkspaceRepository.findBatchByIdForUpdate(
+          existingConflict.import_batch_id,
+          trx
+        );
+      if (!lockedBatch) throw this.notFound();
+      this.assertBatchEditableForReview(lockedBatch);
       const conflict =
         await this.importWorkspaceRepository.findConflictByIdForUpdate(id, trx);
-      if (!conflict || conflict.deleted_at) throw new AppError({ code: ErrorCodes.NOT_FOUND, message: 'Import conflict was not found.', statusCode: HttpStatus.NOT_FOUND });
+      if (
+        !conflict ||
+        conflict.deleted_at ||
+        conflict.import_batch_id !== lockedBatch.id
+      ) {
+        throw new AppError({ code: ErrorCodes.NOT_FOUND, message: 'Import conflict was not found.', statusCode: HttpStatus.NOT_FOUND });
+      }
       if (conflict.status !== 'open') throw conflictError('IMPORT_CONFLICT_ALREADY_RESOLVED', 'Import conflict is not open.');
       if (conflict.conflict_type === 'invalid_public_price' && decision !== 'manual_edit' && decision !== 'skip') {
         throw conflictError('IMPORT_UNSAFE_PRICE_RESOLUTION', 'invalid_public_price requires manual_edit or skip.');
@@ -984,7 +1022,7 @@ export class ImportWorkspaceService {
     const id = assertUuid('import_batch_id', importBatchId);
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
-    const batch = await this.getBatchOrThrow(id);
+    await this.getBatchOrThrow(id);
     const readiness = await this.getImportBatchReadiness(id);
     if (!readiness.passes_current_apply_checks) {
       throw conflictError(
@@ -1412,6 +1450,12 @@ export class ImportWorkspaceService {
     }
 
     const record = columnMapping as Record<string, unknown>;
+    const hasExplicitSelection =
+      Object.prototype.hasOwnProperty.call(record, 'spec_columns') ||
+      Object.prototype.hasOwnProperty.call(record, 'attribute_columns');
+    if (!hasExplicitSelection) {
+      return getImportedVariantSpecSourceHeaders();
+    }
     const seenNormalized = new Set<string>();
     const orderedHeaders: string[] = [];
 
@@ -1427,9 +1471,7 @@ export class ImportWorkspaceService {
       orderedHeaders.push(header);
     }
 
-    return orderedHeaders.length > 0
-      ? orderedHeaders
-      : getImportedVariantSpecSourceHeaders();
+    return orderedHeaders;
   }
 
   private readImportedVariantHeaderArray(value: unknown): string[] {
@@ -1744,12 +1786,12 @@ export class ImportWorkspaceService {
     if (!sourceFile?.stored_path) {
       throw conflictError(
         'IMPORT_SOURCE_WORKBOOK_MISSING',
-        'KhĂ´ng Ä‘á»c láº¡i Ä‘Æ°á»£c workbook nguá»“n cá»§a lĂ´ nháº­p.'
+        'Không đọc lại được workbook nguồn của lô nhập.'
       );
     }
 
     const rowRanges = normalizeRowRanges(batch.selected_row_ranges ?? []);
-    return readWorkbookFixture(sourceFile.stored_path, rowRanges);
+    return readWorkbookFixture(sourceFile.stored_path, rowRanges, batch.source_sheet_name);
   }
 
   private async stageWorkbookIntoBatch(
@@ -1759,6 +1801,7 @@ export class ImportWorkspaceService {
     trx: Knex.Transaction
   ) {
     const pendingGroupIdsByExternalCode = new Map<string, string>();
+    const officialGroupIdsByExternalCode = new Map<string, string>();
     const pendingGroupDataByExternalCode = new Map<
       string,
       {
@@ -1773,19 +1816,21 @@ export class ImportWorkspaceService {
     let createdPendingVariants = 0;
     let createdConflicts = 0;
 
-    for (const rawRow of workbook.rows) {
-      const derivedRow = buildDerivedImportRow(rawRow, columnMapping);
+    const preparedRows = workbook.rows.map((rawRow) => ({
+      rawRow,
+      derivedRow: buildDerivedImportRow(rawRow, columnMapping)
+    }));
+    await this.importWorkspaceRepository.insertRawDataRows(
+      preparedRows.map(({ derivedRow }) => ({
+        import_batch_id: batch.id,
+        row_number: derivedRow.source_row_number,
+        external_code: derivedRow.variant_external_code,
+        raw_content: derivedRow.raw_content
+      })),
+      trx
+    );
 
-      await this.importWorkspaceRepository.insertRawData(
-        {
-          import_batch_id: batch.id,
-          row_number: derivedRow.source_row_number,
-          external_code: derivedRow.variant_external_code,
-          raw_content: derivedRow.raw_content
-        },
-        trx
-      );
-
+    for (const { rawRow, derivedRow } of preparedRows) {
       let pendingProductGroupId = pendingGroupIdsByExternalCode.get(
         derivedRow.group_external_code
       );
@@ -1816,6 +1861,12 @@ export class ImportWorkspaceService {
           derivedRow.group_external_code,
           pendingProductGroupId
         );
+        if (latestGroupMapping?.official_id) {
+          officialGroupIdsByExternalCode.set(
+            derivedRow.group_external_code,
+            latestGroupMapping.official_id
+          );
+        }
         pendingGroupDataByExternalCode.set(derivedRow.group_external_code, {
           product_name: derivedRow.product_name,
           main_category_name: derivedRow.category_main_name!,
@@ -1876,10 +1927,10 @@ export class ImportWorkspaceService {
           derivedRow.variant_external_code,
           trx
         );
-      const existingOfficialVariant =
+      const identityMatches =
         latestVariantMapping?.official_id != null
-          ? null
-          : await this.importWorkspaceRepository.findOfficialVariantByIdentity(
+          ? []
+          : await this.importWorkspaceRepository.findOfficialVariantsByIdentity(
               {
                 external_code: derivedRow.variant_external_code,
                 sku: derivedRow.sku,
@@ -1887,6 +1938,44 @@ export class ImportWorkspaceService {
               },
               trx
             );
+      if (identityMatches.length > 1) {
+        throw validationError(
+          `Dòng ${derivedRow.source_row_number}: Mã sản phẩm, SKU hoặc mã liên kết đang khớp với nhiều mặt hàng khác nhau. Hãy kiểm tra lại các cột nhận diện trước khi nhập.`,
+          {
+            row_number: derivedRow.source_row_number,
+            field: 'variant_external_code_column'
+          }
+        );
+      }
+      const existingOfficialVariant = identityMatches[0] ?? null;
+      const hasExplicitVariantIdentity = [
+        columnMapping.variant_external_code_column,
+        columnMapping.sku_column,
+        columnMapping.model_code_column
+      ].some((column) => column && rawRow.cells[column]?.trim());
+      const officialGroupId = officialGroupIdsByExternalCode.get(
+        derivedRow.group_external_code
+      );
+      const legacyNameMatches =
+        !latestVariantMapping?.official_id &&
+        !existingOfficialVariant &&
+        !hasExplicitVariantIdentity &&
+        officialGroupId
+          ? await this.importWorkspaceRepository.findOfficialVariantsByGroupAndName(
+              officialGroupId,
+              derivedRow.variant_name,
+              trx
+            )
+          : [];
+      if (legacyNameMatches.length > 1) {
+        throw validationError(
+          `Dòng ${derivedRow.source_row_number}: có nhiều mặt hàng tên "${derivedRow.variant_name}" trong nhóm "${derivedRow.product_name}". Hãy ghép cột Mã sản phẩm, SKU hoặc mã liên kết riêng để nhận đúng dữ liệu cũ.`,
+          {
+            row_number: derivedRow.source_row_number,
+            field: 'variant_external_code_column'
+          }
+        );
+      }
 
       const pendingVariantId = await this.importWorkspaceRepository.createPendingVariant(
         {
@@ -1899,7 +1988,10 @@ export class ImportWorkspaceService {
           public_price_mode: derivedRow.public_price_mode,
           public_price_amount: derivedRow.public_price_amount,
           mapped_official_id:
-            latestVariantMapping?.official_id ?? existingOfficialVariant?.id ?? null
+            latestVariantMapping?.official_id ??
+            existingOfficialVariant?.id ??
+            legacyNameMatches[0]?.id ??
+            null
         },
         trx
       );
@@ -2992,7 +3084,14 @@ export class ImportWorkspaceService {
           }
         : null,
       confirmed_mapping: confirmedMapping,
-      ...previewSummary
+      ...previewSummary,
+      embedded_image_count: workbook.embedded_image_count,
+      warnings: [
+        ...(workbook.embedded_image_count > 0
+          ? [`File Excel có ${workbook.embedded_image_count} ảnh nhúng; ảnh hiện chưa ghi vào sản phẩm khi nhập. Sau khi đối chiếu dữ liệu, thêm ảnh trong hồ sơ sản phẩm.`]
+          : []),
+        ...previewSummary.warnings
+      ]
     };
   }
 
@@ -3092,7 +3191,7 @@ export class ImportWorkspaceService {
     );
 
     return {
-      sheet_name: null,
+      sheet_name: batch.source_sheet_name ?? null,
       total_data_row_count: Number(batch.total_rows ?? 0),
       selected_row_count: Number(batch.total_rows ?? sampleRows.length),
       detected_columns: headers,

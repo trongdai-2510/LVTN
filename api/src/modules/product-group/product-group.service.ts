@@ -1,15 +1,18 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 
+import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
 import { createPaginationMeta, getPaginationParams } from '../../common/pagination/pagination';
 import { resolveAvailableSlug } from '../../common/text/slugify-text';
 import { normalizeOptionalLocalDate } from '../../common/validation/date-filter';
+import { isVisibilityOnlyUnpublish, reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
 import {
   BulkUpdateProductGroupsDto,
   CreateProductGroupDto,
   CreateProductHighlightSpecDto,
   ProductGroupListQueryDto,
+  ProductGroupVersionDto,
   ProductHighlightSpecQueryDto,
   ProductHighlightSpecSuggestionsQueryDto,
   ReorderProductHighlightSpecsDto,
@@ -18,6 +21,11 @@ import {
   UpdateProductHighlightSpecDto
 } from './product-group.dto';
 import {
+  PRODUCT_GROUP_NAME_MAX_LENGTH,
+  PRODUCT_GROUP_SEO_DESCRIPTION_MAX_LENGTH,
+  PRODUCT_GROUP_SEO_TITLE_MAX_LENGTH,
+  PRODUCT_GROUP_SLUG_MAX_LENGTH,
+  PRODUCT_HIGHLIGHT_LABEL_MAX_LENGTH,
   assertUuid,
   normalizeDeletedScope,
   normalizeNullableText,
@@ -102,7 +110,8 @@ export class ProductGroupService {
         total: result.total
       }),
       summary: {
-        view_count: result.total_view_count
+        view_count: result.total_view_count,
+        search_match_mode: result.search_match_mode
       },
       filters: {
         q: query.q?.trim() ? query.q.trim() : null,
@@ -142,7 +151,7 @@ export class ProductGroupService {
     return this.getProductGroupDetail(created.id);
   }
 
-  async updateProductGroup(productGroupId: string, input: UpdateProductGroupDto) {
+  async updateProductGroup(productGroupId: string, input: UpdateProductGroupDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_group_id', productGroupId);
     const existing = await this.productGroupRepository.findById(id);
     if (!existing) {
@@ -151,8 +160,13 @@ export class ProductGroupService {
     if (existing.deleted_at) {
       throw this.conflict('Product group is archived.');
     }
-    const mutation = await this.normalizeUpdateInput(id, input, existing);
-    await this.productGroupRepository.update(id, mutation);
+    const mutation = await this.normalizeUpdateInput(id, input, existing, currentUser?.roles.includes('super_admin') ?? false);
+    const outcome = await this.productGroupRepository.update(
+      id,
+      mutation,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getProductGroupDetail(id);
   }
 
@@ -162,9 +176,11 @@ export class ProductGroupService {
     const results: ProductGroupBulkResult[] = [];
     let updatedCount = 0;
 
-    for (const rawId of input.ids) {
-      const id = assertUuid('product_group_id', rawId);
-      const current = await this.productGroupRepository.findById(id);
+    const ids = input.ids.map((rawId) => assertUuid('product_group_id', rawId));
+    const currentById = await this.productGroupRepository.findByIds(ids);
+
+    for (const id of ids) {
+      const current = currentById.get(id);
 
       if (!current) {
         results.push({
@@ -197,7 +213,8 @@ export class ProductGroupService {
         const effectiveMutation = this.compactMutation(current, normalizedMutation);
 
         if (!dryRun && Object.keys(effectiveMutation).length > 0) {
-          await this.productGroupRepository.update(id, effectiveMutation);
+          const outcome = await this.productGroupRepository.update(id, effectiveMutation);
+          this.assertWriteOutcome(outcome);
         }
 
         updatedCount += 1;
@@ -236,7 +253,7 @@ export class ProductGroupService {
     };
   }
 
-  async archiveProductGroup(productGroupId: string) {
+  async archiveProductGroup(productGroupId: string, input: ProductGroupVersionDto) {
     const id = assertUuid('product_group_id', productGroupId);
     const existing = await this.productGroupRepository.findById(id);
     if (!existing) {
@@ -245,21 +262,15 @@ export class ProductGroupService {
     if (existing.deleted_at) {
       throw this.conflict('Product group is already archived.');
     }
-    const counts = await this.productGroupRepository.dependencyCounts(id);
-    const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
-    if (total > 0) {
-      throw new AppError({
-        code: 'PRODUCT_GROUP_ARCHIVE_BLOCKED',
-        message: 'Product group cannot be archived because active related data still exists.',
-        statusCode: HttpStatus.CONFLICT,
-        details: { ...counts }
-      });
-    }
-    await this.productGroupRepository.archive(id);
+    const outcome = await this.productGroupRepository.archive(
+      id,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getProductGroupDetail(id);
   }
 
-  async restoreProductGroup(productGroupId: string) {
+  async restoreProductGroup(productGroupId: string, input: ProductGroupVersionDto) {
     const id = assertUuid('product_group_id', productGroupId);
     const existing = await this.productGroupRepository.findById(id);
     if (!existing) {
@@ -274,7 +285,11 @@ export class ProductGroupService {
       thumbnail_file_id: existing.thumbnail_file_id,
       seo_og_image_file_id: existing.seo_og_image_file_id
     });
-    await this.productGroupRepository.restore(id);
+    const outcome = await this.productGroupRepository.restore(
+      id,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getProductGroupDetail(id);
   }
 
@@ -283,6 +298,37 @@ export class ProductGroupService {
     await this.assertProductGroupExists(id);
     const productVariantId = await this.normalizeHighlightVariantId(id, query.variant_id ?? null, 'variant_id');
     return this.highlightSpecListResponse(id, productVariantId);
+  }
+
+  private assertWriteOutcome(
+    outcome: Awaited<ReturnType<ProductGroupRepository['update']>>
+  ): void {
+    if (outcome.status === 'updated') return;
+    if (outcome.status === 'not_found') {
+      throw this.notFound('Product group was not found.');
+    }
+    if (outcome.status === 'stale') {
+      throw new AppError({
+        code: 'PRODUCT_GROUP_VERSION_CONFLICT',
+        message:
+          'Nhóm sản phẩm đã được thay đổi bởi một phiên quản trị khác. Hãy tải lại dữ liệu mới trước khi lưu tiếp.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { current_updated_at: outcome.current_updated_at }
+      });
+    }
+    if (outcome.status === 'blocked') {
+      throw new AppError({
+        code: 'PRODUCT_GROUP_ARCHIVE_BLOCKED',
+        message: 'Product group cannot be archived because active related data still exists.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { ...outcome.dependency_counts }
+      });
+    }
+    throw this.conflict(
+      outcome.status === 'archived'
+        ? 'Product group is archived.'
+        : 'Product group is not archived.'
+    );
   }
 
   async listProductHighlightSpecSuggestions(
@@ -333,11 +379,11 @@ export class ProductGroupService {
     };
   }
 
-  async createProductHighlightSpec(productGroupId: string, input: CreateProductHighlightSpecDto) {
+  async createProductHighlightSpec(productGroupId: string, input: CreateProductHighlightSpecDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_group_id', productGroupId);
     await this.assertProductGroupEditable(id);
     const mutation = await this.normalizeCreateHighlightSpecInput(id, input);
-    const created = await this.productGroupRepository.createHighlightSpec(mutation);
+    const created = await this.productGroupRepository.createHighlightSpec(mutation, !currentUser?.roles.includes('super_admin'));
     return {
       highlight_spec: created,
       ...(await this.highlightSpecListResponse(id, created.product_variant_id))
@@ -347,14 +393,15 @@ export class ProductGroupService {
   async updateProductHighlightSpec(
     productGroupId: string,
     highlightSpecId: string,
-    input: UpdateProductHighlightSpecDto
+    input: UpdateProductHighlightSpecDto,
+    currentUser: CurrentUserContext | null
   ) {
     const id = assertUuid('product_group_id', productGroupId);
     const specId = assertUuid('highlight_spec_id', highlightSpecId);
     await this.assertProductGroupEditable(id);
     const current = await this.assertActiveHighlightSpec(id, specId);
     const patch = this.normalizeHighlightSpecPatch(input);
-    await this.productGroupRepository.updateHighlightSpec(id, specId, patch);
+    await this.productGroupRepository.updateHighlightSpec(id, specId, patch, !currentUser?.roles.includes('super_admin'));
     const updated = await this.productGroupRepository.findHighlightSpecById(id, specId);
     return {
       highlight_spec: updated ?? current,
@@ -362,16 +409,16 @@ export class ProductGroupService {
     };
   }
 
-  async archiveProductHighlightSpec(productGroupId: string, highlightSpecId: string) {
+  async archiveProductHighlightSpec(productGroupId: string, highlightSpecId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_group_id', productGroupId);
     const specId = assertUuid('highlight_spec_id', highlightSpecId);
     await this.assertProductGroupEditable(id);
     const current = await this.assertActiveHighlightSpec(id, specId);
-    await this.productGroupRepository.archiveHighlightSpec(id, specId);
+    await this.productGroupRepository.archiveHighlightSpec(id, specId, !currentUser?.roles.includes('super_admin'));
     return this.highlightSpecListResponse(id, current.product_variant_id);
   }
 
-  async reorderProductHighlightSpecs(productGroupId: string, input: ReorderProductHighlightSpecsDto) {
+  async reorderProductHighlightSpecs(productGroupId: string, input: ReorderProductHighlightSpecsDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_group_id', productGroupId);
     await this.assertProductGroupEditable(id);
     const seen = new Set<string>();
@@ -386,16 +433,15 @@ export class ProductGroupService {
       return { id: highlightSpecId, sort_order: item.sort_order };
     });
 
-    const currentSpecs: ProductHighlightSpecRecord[] = [];
-    for (const item of items) {
-      currentSpecs.push(await this.assertActiveHighlightSpec(id, item.id));
-    }
+    const currentSpecs: ProductHighlightSpecRecord[] = await Promise.all(
+      items.map((item) => this.assertActiveHighlightSpec(id, item.id))
+    );
     const targetVariantId = currentSpecs[0]?.product_variant_id ?? null;
     if (currentSpecs.some((item) => item.product_variant_id !== targetVariantId)) {
       throw this.validationError('Highlight specs in one reorder payload must belong to the same display scope.');
     }
 
-    await this.productGroupRepository.reorderHighlightSpecs(id, items);
+    await this.productGroupRepository.reorderHighlightSpecs(id, items, !currentUser?.roles.includes('super_admin'));
     return this.highlightSpecListResponse(id, targetVariantId);
   }
 
@@ -453,8 +499,13 @@ export class ProductGroupService {
     }
 
     let sourceId = normalizeNullableUuid('source_id', input.source_id) ?? null;
-    let displayLabel = normalizeNullableText(input.display_label) ?? null;
-    let displayValue = normalizeNullableText(input.display_value) ?? null;
+    let displayLabel =
+      normalizeNullableText(
+        'display_label',
+        input.display_label,
+        PRODUCT_HIGHLIGHT_LABEL_MAX_LENGTH
+      ) ?? null;
+    let displayValue = normalizeNullableText('display_value', input.display_value) ?? null;
     let source: ProductHighlightSpecSourceCandidate | null = null;
 
     if (sourceType === 'manual') {
@@ -514,7 +565,11 @@ export class ProductGroupService {
       product_variant_id: productVariantId,
       source_type: sourceType,
       source_id: sourceId,
-      display_label: normalizeRequiredText('display_label', displayLabel),
+      display_label: normalizeRequiredText(
+        'display_label',
+        displayLabel,
+        PRODUCT_HIGHLIGHT_LABEL_MAX_LENGTH
+      ),
       display_value: normalizeRequiredText('display_value', displayValue),
       sort_order:
         typeof input.sort_order === 'number'
@@ -526,7 +581,11 @@ export class ProductGroupService {
   private normalizeHighlightSpecPatch(input: UpdateProductHighlightSpecDto): ProductHighlightSpecPatchInput {
     const patch: ProductHighlightSpecPatchInput = {};
     if (typeof input.display_label !== 'undefined') {
-      patch.display_label = normalizeRequiredText('display_label', input.display_label);
+      patch.display_label = normalizeRequiredText(
+        'display_label',
+        input.display_label,
+        PRODUCT_HIGHLIGHT_LABEL_MAX_LENGTH
+      );
     }
     if (typeof input.display_value !== 'undefined') {
       patch.display_value = normalizeRequiredText('display_value', input.display_value);
@@ -618,12 +677,14 @@ export class ProductGroupService {
   }
 
   private async normalizeCreateInput(input: CreateProductGroupDto) {
-    const name = normalizeRequiredText('name', input.name);
+    const name = normalizeRequiredText('name', input.name, PRODUCT_GROUP_NAME_MAX_LENGTH);
     const slug =
       typeof input.slug === 'string' && input.slug.trim() !== ''
         ? normalizeSlug(input.slug)
-        : await resolveAvailableSlug(name, (candidate) =>
-            this.productGroupRepository.slugExists(candidate)
+        : await resolveAvailableSlug(
+            name,
+            (candidate) => this.productGroupRepository.slugExists(candidate),
+            PRODUCT_GROUP_SLUG_MAX_LENGTH
           );
 
     const mutation = {
@@ -631,13 +692,24 @@ export class ProductGroupService {
       slug,
       category_id: assertUuid('category_id', input.category_id),
       brand_id: normalizeNullableUuid('brand_id', input.brand_id) ?? null,
-      short_description: normalizeNullableText(input.short_description) ?? null,
-      detailed_description: normalizeNullableText(input.detailed_description) ?? null,
+      short_description: normalizeNullableText('short_description', input.short_description) ?? null,
+      detailed_description:
+        normalizeNullableText('detailed_description', input.detailed_description) ?? null,
       thumbnail_file_id: normalizeNullableUuid('thumbnail_file_id', input.thumbnail_file_id) ?? null,
       review_status: normalizeReviewStatus(input.review_status) ?? 'draft',
       publish_status: normalizePublishStatus(input.publish_status) ?? 'unpublished',
-      seo_title: normalizeNullableText(input.seo_title) ?? null,
-      seo_description: normalizeNullableText(input.seo_description) ?? null,
+      seo_title:
+        normalizeNullableText(
+          'seo_title',
+          input.seo_title,
+          PRODUCT_GROUP_SEO_TITLE_MAX_LENGTH
+        ) ?? null,
+      seo_description:
+        normalizeNullableText(
+          'seo_description',
+          input.seo_description,
+          PRODUCT_GROUP_SEO_DESCRIPTION_MAX_LENGTH
+        ) ?? null,
       seo_og_image_file_id: normalizeNullableUuid('seo_og_image_file_id', input.seo_og_image_file_id) ?? null,
       status: normalizeStatus(input.status) ?? 'active',
       sort_order: input.sort_order ?? 0
@@ -653,31 +725,61 @@ export class ProductGroupService {
   private async normalizeUpdateInput(
     id: string,
     input: Pick<UpdateProductGroupDto, 'name' | 'slug' | 'category_id' | 'brand_id' | 'short_description' | 'detailed_description' | 'thumbnail_file_id' | 'review_status' | 'publish_status' | 'seo_title' | 'seo_description' | 'seo_og_image_file_id' | 'status' | 'sort_order'>,
-    currentRecord?: ProductGroupRecord
+    currentRecord?: ProductGroupRecord,
+    actorIsSuperAdmin = false
   ): Promise<ProductGroupMutationInput> {
     const current = currentRecord ?? (await this.productGroupRepository.findById(id));
     if (!current) {
       throw this.notFound('Product group was not found.');
     }
     const mutation: ProductGroupMutationInput = {};
-    if (typeof input.name !== 'undefined') mutation.name = normalizeRequiredText('name', input.name);
+    if (typeof input.name !== 'undefined') {
+      mutation.name = normalizeRequiredText('name', input.name, PRODUCT_GROUP_NAME_MAX_LENGTH);
+    }
     if (typeof input.slug !== 'undefined') {
       mutation.slug = normalizeSlug(input.slug);
       await this.assertSlugAvailable(mutation.slug, id);
     }
     if (typeof input.category_id !== 'undefined') mutation.category_id = assertUuid('category_id', input.category_id);
     if (typeof input.brand_id !== 'undefined') mutation.brand_id = normalizeNullableUuid('brand_id', input.brand_id) ?? null;
-    if (typeof input.short_description !== 'undefined') mutation.short_description = normalizeNullableText(input.short_description) ?? null;
-    if (typeof input.detailed_description !== 'undefined') mutation.detailed_description = normalizeNullableText(input.detailed_description) ?? null;
+    if (typeof input.short_description !== 'undefined') {
+      mutation.short_description =
+        normalizeNullableText('short_description', input.short_description) ?? null;
+    }
+    if (typeof input.detailed_description !== 'undefined') {
+      mutation.detailed_description =
+        normalizeNullableText('detailed_description', input.detailed_description) ?? null;
+    }
     if (typeof input.thumbnail_file_id !== 'undefined') mutation.thumbnail_file_id = normalizeNullableUuid('thumbnail_file_id', input.thumbnail_file_id) ?? null;
     if (typeof input.review_status !== 'undefined') mutation.review_status = normalizeReviewStatus(input.review_status);
     if (typeof input.publish_status !== 'undefined') mutation.publish_status = normalizePublishStatus(input.publish_status);
-    if (typeof input.seo_title !== 'undefined') mutation.seo_title = normalizeNullableText(input.seo_title) ?? null;
-    if (typeof input.seo_description !== 'undefined') mutation.seo_description = normalizeNullableText(input.seo_description) ?? null;
+    if (typeof input.seo_title !== 'undefined') {
+      mutation.seo_title =
+        normalizeNullableText(
+          'seo_title',
+          input.seo_title,
+          PRODUCT_GROUP_SEO_TITLE_MAX_LENGTH
+        ) ?? null;
+    }
+    if (typeof input.seo_description !== 'undefined') {
+      mutation.seo_description =
+        normalizeNullableText(
+          'seo_description',
+          input.seo_description,
+          PRODUCT_GROUP_SEO_DESCRIPTION_MAX_LENGTH
+        ) ?? null;
+    }
     if (typeof input.seo_og_image_file_id !== 'undefined') mutation.seo_og_image_file_id = normalizeNullableUuid('seo_og_image_file_id', input.seo_og_image_file_id) ?? null;
     if (typeof input.status !== 'undefined') mutation.status = normalizeStatus(input.status);
     if (typeof input.sort_order !== 'undefined') mutation.sort_order = input.sort_order;
 
+    if (isVisibilityOnlyUnpublish(input)) return mutation;
+
+    reopenPublishedContentAfterMajorEdit(current, mutation, [
+      'name', 'slug', 'category_id', 'brand_id', 'short_description',
+      'detailed_description', 'thumbnail_file_id', 'seo_title',
+      'seo_description', 'seo_og_image_file_id', 'status', 'sort_order'
+    ], actorIsSuperAdmin);
     const next = { ...current, ...mutation };
     await this.assertReferencesUsable(next);
     const allowLegacyMissingShortDescription =
@@ -968,7 +1070,7 @@ export class ProductGroupService {
     return { items: images };
   }
 
-  async replaceProductImages(productGroupId: string, input: ReplaceProductGalleryDto) {
+  async replaceProductImages(productGroupId: string, input: ReplaceProductGalleryDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_group_id', productGroupId);
     const exists = await this.productGroupRepository.findById(id);
     if (!exists) throw this.notFound('Product group was not found.');
@@ -1003,19 +1105,20 @@ export class ProductGroupService {
         }
       );
     }
-    const normalizedImages: ReplaceProductGalleryDto['images'] = [];
-    for (const item of deduped) {
-      normalizedImages.push({
+    const normalizedImages: ReplaceProductGalleryDto['images'] = deduped.map((item) => ({
         ...item,
-        product_variant_id: await this.normalizeHighlightVariantId(
-          id,
-          item.product_variant_id ?? null,
-          'product_variant_id'
-        )
-      });
+        product_variant_id: normalizeNullableUuid('product_variant_id', item.product_variant_id) ?? null
+      }));
+    const variantIds = Array.from(
+      new Set(normalizedImages.flatMap((item) => item.product_variant_id ? [item.product_variant_id] : []))
+    );
+    const activeVariantIds = await this.productGroupRepository.productVariantIdsBelongToGroup(id, variantIds);
+    const invalidVariantId = variantIds.find((variantId) => !activeVariantIds.has(variantId));
+    if (invalidVariantId) {
+      throw this.notFound('Product variant was not found for this product group.');
     }
 
-    const images = await this.productGroupRepository.replaceProductImages(id, normalizedImages);
+    const images = await this.productGroupRepository.replaceProductImages(id, normalizedImages, !currentUser?.roles.includes('super_admin'));
     return { items: images };
   }
 

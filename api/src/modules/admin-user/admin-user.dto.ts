@@ -1,12 +1,15 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  ArrayMaxSize,
+  ArrayMinSize,
   IsEmail,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  ValidateIf,
   Max,
   MaxLength,
   Min,
@@ -60,6 +63,8 @@ export class CreateAdminUserDto {
   temporary_password?: string;
 
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1)
   @IsUUID(undefined, { each: true })
   role_ids!: string[];
 
@@ -69,24 +74,26 @@ export class CreateAdminUserDto {
 }
 
 export class UpdateAdminUserDto {
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @MinLength(1)
   display_name?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsEmail()
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value
   )
   email?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(1)
   @IsUUID(undefined, { each: true })
   role_ids?: string[];
 
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsIn(ADMIN_USER_ALLOWED_STATUSES)
   status?: 'active' | 'inactive' | 'locked';
 }
@@ -97,7 +104,7 @@ export class UpdateAdminUserStatusDto {
 }
 
 export class ResetAdminUserPasswordDto {
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @MinLength(8)
   @MaxLength(128)

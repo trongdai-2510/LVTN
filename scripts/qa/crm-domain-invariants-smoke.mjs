@@ -1,10 +1,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..', '..');
+const requireFromApi = createRequire(path.join(ROOT, 'api', 'package.json'));
+const { Client: PostgresClient } = requireFromApi('pg');
 const API_BASE_URL = (
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -16,11 +19,12 @@ const QA_CLIENT_IP = '192.0.2.70';
 const RUN_ID = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'crm-domain-invariants-qa-last-run.md'
 );
 const MAX_LOGIC_USER_ID = 2_147_483_647;
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
 const results = [];
 const context = {
@@ -58,6 +62,71 @@ await runCase('CRM-AUTH', 'Super-admin can authenticate for CRM invariant tests'
   context.currentUserId = String(session?.user?.id || '');
   assert(context.accessToken && context.currentUserId, 'login session is incomplete');
   return { user_id: context.currentUserId };
+});
+
+await runCase('CRM-QUERY-AND-CUSTOMER-BOUNDS', 'CRM list and customer fields enforce database-safe boundaries', async () => {
+  const oversizedQuery = encodeURIComponent('q'.repeat(256));
+  const listBounds = await Promise.all([
+    adminRequest(`/song-thanh/contacts?q=${oversizedQuery}`),
+    adminRequest(`/song-thanh/quotes?q=${oversizedQuery}`),
+    adminRequest(`/song-thanh/customers?q=${oversizedQuery}`),
+    adminRequest(`/song-thanh/contacts?page=${POSTGRES_INTEGER_MAX + 1}`),
+    adminRequest(`/song-thanh/quotes?page=${POSTGRES_INTEGER_MAX + 1}`),
+    adminRequest(`/song-thanh/customers?page=${POSTGRES_INTEGER_MAX + 1}`)
+  ]);
+  listBounds.forEach((response, index) => {
+    assert(response.status === 400, `list boundary ${index + 1} returned ${response.status}`);
+  });
+
+  const exactEmail = `${'a'.repeat(64)}@${'b'.repeat(55)}.example`;
+  assert(exactEmail.length === 128, 'exact-boundary email fixture is not 128 characters');
+  const exact = await adminRequest('/song-thanh/customers', {
+    method: 'POST',
+    body: {
+      full_name: 'N'.repeat(128),
+      phone: '0'.repeat(32),
+      email: exactEmail,
+      company_name: 'C'.repeat(255)
+    }
+  });
+  assert(exact.status === 201, responseError(exact));
+  const exactCustomerId = String(unwrap(exact.body)?.customer?.id || '');
+  assert(exactCustomerId, 'exact-boundary customer id is missing');
+  context.customerIds.push(exactCustomerId);
+
+  const base = {
+    full_name: `CRM boundary ${RUN_ID}`,
+    phone: '0900000000',
+    email: `crm.boundary.${RUN_ID}@example.com`,
+    company_name: 'CRM QA'
+  };
+  const oversizedFields = await Promise.all([
+    adminRequest('/song-thanh/customers', {
+      method: 'POST',
+      body: { ...base, full_name: 'N'.repeat(129) }
+    }),
+    adminRequest('/song-thanh/customers', {
+      method: 'POST',
+      body: { ...base, phone: '0'.repeat(33) }
+    }),
+    adminRequest('/song-thanh/customers', {
+      method: 'POST',
+      body: { ...base, email: `${'e'.repeat(129)}@example.com` }
+    }),
+    adminRequest('/song-thanh/customers', {
+      method: 'POST',
+      body: { ...base, company_name: 'C'.repeat(256) }
+    })
+  ]);
+  oversizedFields.forEach((response, index) => {
+    assert(response.status === 400, `customer field boundary ${index + 1} returned ${response.status}`);
+  });
+
+  return {
+    list_rejections: listBounds.map((response) => response.status),
+    exact_customer_id: exactCustomerId,
+    field_rejections: oversizedFields.map((response) => response.status)
+  };
 });
 
 await runCase('CRM-LOGIC-USER-BRIDGE', 'Active UUID admin users expose stable INTEGER assignee ids', async () => {
@@ -170,6 +239,51 @@ await runCase('CRM-CUSTOMER-IDENTITY-BOUNDARY', 'Same name plus contact value re
   return { customer_ids: customerIds };
 });
 
+await runCase('CRM-PUBLIC-CUSTOMER-CONCURRENCY', 'Concurrent identical public submissions create one customer profile', async () => {
+  const sharedName = `CRM Concurrent ${RUN_ID}`;
+  const sharedPhone = `08${RUN_ID.slice(-8)}`;
+  const sharedEmail = `crm.concurrent.${RUN_ID}@example.com`;
+  const responses = await Promise.all(
+    Array.from({ length: 4 }, (_, index) =>
+      request('/public/contact-requests', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': '192.0.2.71' },
+        body: {
+          full_name: index % 2 === 0 ? sharedName : `  ${sharedName}  `,
+          phone: sharedPhone,
+          email: index % 2 === 0 ? sharedEmail : sharedEmail.toUpperCase(),
+          company_name: 'CRM concurrent QA',
+          message: `Concurrent identity request ${index + 1}`,
+          source_page: `/qa/crm/concurrent/${index + 1}`
+        }
+      })
+    )
+  );
+  responses.forEach((response, index) => {
+    assert(response.status === 201, `concurrent submission ${index + 1}: ${responseError(response)}`);
+  });
+  const ids = responses.map((response) =>
+    String(unwrap(response.body)?.contact_request?.id || '')
+  );
+  assert(ids.every(Boolean), 'a concurrent contact id is missing');
+  context.contactIds.push(...ids);
+
+  const details = await Promise.all(
+    ids.map((id) => adminRequest(`/song-thanh/contacts/${id}`))
+  );
+  details.forEach((response) => assert(response.ok, responseError(response)));
+  const customerIds = details.map((response) =>
+    String(unwrap(response.body)?.contact?.customer_id || '')
+  );
+  assert(customerIds.every(Boolean), 'a concurrent contact has no customer_id');
+  assert(
+    new Set(customerIds).size === 1,
+    `concurrent submissions created ${new Set(customerIds).size} customer profiles`
+  );
+  context.customerIds.push(customerIds[0]);
+  return { contact_ids: ids, customer_id: customerIds[0] };
+});
+
 await runCase('CRM-PUBLIC-QUOTE-FIXTURE', 'A quote reuses the matching customer across source kinds', async () => {
   const response = await request('/public/quote-requests', {
     method: 'POST',
@@ -272,6 +386,11 @@ await runCase('CRM-CONTACT-NOTE-ACTOR', 'Contact notes capture the current admin
     { method: 'POST', body: { note_text: '   ' } }
   );
   assert(blank.status === 400, `blank note returned ${blank.status}`);
+  const oversized = await adminRequest(
+    `/song-thanh/contacts/${context.primaryContactId}/internal-notes`,
+    { method: 'POST', body: { note_text: 'N'.repeat(10_001) } }
+  );
+  assert(oversized.status === 400, `oversized contact note returned ${oversized.status}`);
 
   const noteText = `CRM contact note ${RUN_ID}`;
   const response = await adminRequest(
@@ -293,6 +412,60 @@ await runCase('CRM-CONTACT-NOTE-ACTOR', 'Contact notes capture the current admin
     added_by: note.added_by,
     added_by_label: note.added_by_label
   };
+});
+
+await runCase('CRM-CONTACT-ARCHIVE-NOTE-RACE', 'A note queued behind archive cannot be inserted after archival', async () => {
+  const database = createDatabaseClient();
+  await database.connect();
+  let transactionOpen = false;
+  const noteText = `CRM blocked race note ${RUN_ID}`;
+  try {
+    await database.query('BEGIN');
+    transactionOpen = true;
+    await database.query(
+      'SELECT id FROM contact_request WHERE id = $1 FOR UPDATE',
+      [context.primaryContactId]
+    );
+
+    let settled = false;
+    const pendingNote = adminRequest(
+      `/song-thanh/contacts/${context.primaryContactId}/internal-notes`,
+      { method: 'POST', body: { note_text: noteText } }
+    ).finally(() => {
+      settled = true;
+    });
+    await delay(350);
+    const waitedForLock = !settled;
+
+    await database.query(
+      'UPDATE contact_request SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [context.primaryContactId]
+    );
+    await database.query('COMMIT');
+    transactionOpen = false;
+
+    const response = await pendingNote;
+    const detail = await adminRequest(
+      `/song-thanh/contacts/${context.primaryContactId}`
+    );
+    assert(detail.ok, responseError(detail));
+    const noteWasInserted = (unwrap(detail.body)?.internal_notes || []).some(
+      (note) => note.note_text === noteText
+    );
+    const restored = await adminRequest(
+      `/song-thanh/contacts/${context.primaryContactId}/restore`,
+      { method: 'POST', body: {} }
+    );
+    assert(restored.ok, responseError(restored));
+
+    assert(waitedForLock, 'contact note did not wait for the held row lock');
+    assertError(response, 409, 'CONTACT_CONFLICT');
+    assert(!noteWasInserted, 'contact note was inserted after archive won the race');
+    return { waited_for_lock: waitedForLock, response: errorEvidence(response) };
+  } finally {
+    if (transactionOpen) await database.query('ROLLBACK').catch(() => undefined);
+    await database.end();
+  }
 });
 
 await runCase('CRM-CONTACT-DATE-BOUNDARIES', 'Contact date filters validate calendar days and include the full local day', async () => {
@@ -387,6 +560,12 @@ await runCase('CRM-QUOTE-ASSIGNEE-NOTE', 'Quote assignment and notes retain the 
     'quote assignee label is missing'
   );
 
+  const oversized = await adminRequest(
+    `/song-thanh/quotes/${context.quoteId}/internal-notes`,
+    { method: 'POST', body: { note_text: 'N'.repeat(10_001) } }
+  );
+  assert(oversized.status === 400, `oversized quote note returned ${oversized.status}`);
+
   const noteText = `CRM quote note ${RUN_ID}`;
   const noted = await adminRequest(
     `/song-thanh/quotes/${context.quoteId}/internal-notes`,
@@ -406,6 +585,62 @@ await runCase('CRM-QUOTE-ASSIGNEE-NOTE', 'Quote assignment and notes retain the 
     note_id: note.id,
     note_added_by: note.added_by
   };
+});
+
+await runCase('CRM-QUOTE-ARCHIVE-STATUS-RACE', 'A status update queued behind archive cannot mutate an archived quote', async () => {
+  const before = await adminRequest(`/song-thanh/quotes/${context.quoteId}`);
+  assert(before.ok, responseError(before));
+  const originalStatus = unwrap(before.body)?.quote?.status;
+  const database = createDatabaseClient();
+  await database.connect();
+  let transactionOpen = false;
+  try {
+    await database.query('BEGIN');
+    transactionOpen = true;
+    await database.query(
+      'SELECT id FROM quote_request WHERE id = $1 FOR UPDATE',
+      [context.quoteId]
+    );
+
+    let settled = false;
+    const pendingStatus = adminRequest(
+      `/song-thanh/quotes/${context.quoteId}/status`,
+      { method: 'PUT', body: { status: 'in_progress' } }
+    ).finally(() => {
+      settled = true;
+    });
+    await delay(350);
+    const waitedForLock = !settled;
+
+    await database.query(
+      'UPDATE quote_request SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [context.quoteId]
+    );
+    await database.query('COMMIT');
+    transactionOpen = false;
+
+    const response = await pendingStatus;
+    const detail = await adminRequest(`/song-thanh/quotes/${context.quoteId}`);
+    assert(detail.ok, responseError(detail));
+    const storedStatus = unwrap(detail.body)?.quote?.status;
+    const restored = await adminRequest(
+      `/song-thanh/quotes/${context.quoteId}/restore`,
+      { method: 'POST', body: {} }
+    );
+    assert(restored.ok, responseError(restored));
+
+    assert(waitedForLock, 'quote status update did not wait for the held row lock');
+    assertError(response, 409, 'QUOTE_CONFLICT');
+    assert(storedStatus === originalStatus, 'quote status changed after archive won the race');
+    return {
+      waited_for_lock: waitedForLock,
+      response: errorEvidence(response),
+      stored_status: storedStatus
+    };
+  } finally {
+    if (transactionOpen) await database.query('ROLLBACK').catch(() => undefined);
+    await database.end();
+  }
 });
 
 await runCase('CRM-QUOTE-ASSIGNEE-BOUNDS', 'Unknown, fractional, and overflowing quote assignee ids are rejected', async () => {
@@ -460,6 +695,93 @@ await runCase('CRM-QUOTE-STATUS-FILTER', 'Quote status updates and combined assi
     'combined quote filters excluded the matching quote'
   );
   return { invalid_status: invalid.status, stored_status: 'in_progress' };
+});
+
+await runCase('CRM-CUSTOMER-DELETE-SOURCE-RACE', 'Permanent deletion rechecks sources committed while waiting for the customer lock', async () => {
+  const created = await adminRequest('/song-thanh/customers', {
+    method: 'POST',
+    body: {
+      full_name: `CRM delete race ${RUN_ID}`,
+      phone: `07${RUN_ID.slice(-8)}`,
+      email: `crm.delete.race.${RUN_ID}@example.com`,
+      company_name: 'CRM race QA'
+    }
+  });
+  assert(created.status === 201, responseError(created));
+  const customerId = String(unwrap(created.body)?.customer?.id || '');
+  assert(customerId, 'delete-race customer id is missing');
+  context.customerIds.push(customerId);
+  const archived = await adminRequest(`/song-thanh/customers/${customerId}/archive`, {
+    method: 'POST',
+    body: {}
+  });
+  assert(archived.ok, responseError(archived));
+
+  const database = createDatabaseClient();
+  await database.connect();
+  let transactionOpen = false;
+  try {
+    await database.query('BEGIN');
+    transactionOpen = true;
+    await database.query(
+      'SELECT id FROM customer_profile WHERE id = $1 FOR UPDATE',
+      [customerId]
+    );
+
+    let settled = false;
+    const pendingDelete = adminRequest(
+      `/song-thanh/customers/${customerId}/permanent`,
+      { method: 'DELETE' }
+    ).finally(() => {
+      settled = true;
+    });
+    await delay(350);
+    const waitedForLock = !settled;
+
+    const inserted = await database.query(
+      `INSERT INTO contact_request
+        (full_name, phone, email, company_name, message, source_page, customer_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [
+        `CRM delete race ${RUN_ID}`,
+        `07${RUN_ID.slice(-8)}`,
+        `crm.delete.race.${RUN_ID}@example.com`,
+        'CRM race QA',
+        'Source committed while permanent delete is waiting',
+        '/qa/crm/customer-delete-race',
+        customerId
+      ]
+    );
+    const contactId = String(inserted.rows[0]?.id || '');
+    assert(contactId, 'delete-race contact id is missing');
+    context.contactIds.push(contactId);
+    await database.query('COMMIT');
+    transactionOpen = false;
+
+    const response = await pendingDelete;
+    const contactDetail = await adminRequest(`/song-thanh/contacts/${contactId}`);
+    assert(contactDetail.ok, responseError(contactDetail));
+    const linkedCustomerId = String(
+      unwrap(contactDetail.body)?.contact?.customer_id || ''
+    );
+
+    assert(waitedForLock, 'permanent delete did not wait for the held customer lock');
+    assertError(response, 409, 'CUSTOMER_PERMANENT_DELETE_BLOCKED');
+    assert(
+      Number(errorDetails(response)?.contacts || 0) === 1,
+      'delete guard did not count the source committed during the race'
+    );
+    assert(linkedCustomerId === customerId, 'the racing contact lost its customer link');
+    return {
+      waited_for_lock: waitedForLock,
+      response: errorEvidence(response),
+      contact_id: contactId
+    };
+  } finally {
+    if (transactionOpen) await database.query('ROLLBACK').catch(() => undefined);
+    await database.end();
+  }
 });
 
 await runCase('CRM-CUSTOMER-DELETE-GUARD', 'Customer permanent deletion is blocked while active source records exist', async () => {
@@ -549,6 +871,20 @@ async function archiveAndDelete(domain, id) {
   });
   assert(deleted.ok, responseError(deleted));
   return true;
+}
+
+function createDatabaseClient() {
+  return new PostgresClient({
+    host: process.env.DATABASE_HOST || '127.0.0.1',
+    port: Number(process.env.DATABASE_PORT || 5432),
+    database: process.env.DATABASE_NAME,
+    user: process.env.DATABASE_USER || 'postgres',
+    password: process.env.DATABASE_PASSWORD || 'postgres'
+  });
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function runCase(id, title, action) {

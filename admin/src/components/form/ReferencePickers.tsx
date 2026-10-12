@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, FileText, Link2, Search, X } from '@/components/icons';
 
-import { Pagination } from '@/components/data-table/Pagination';
+import {
+  ReferenceChooserOption,
+  ReferenceChooserPager,
+  type ReferenceOptionView,
+  type ReferenceVisualKind
+} from '@/components/form/ReferenceChooser';
 import { Button } from '@/components/ui/Button';
 import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
 import { Input } from '@/components/ui/Input';
@@ -31,25 +36,50 @@ type RelationKind = 'category' | 'brand' | 'productGroup';
 
 const relationConfig: Record<
   RelationKind,
-  { endpoint: string; title: string; empty: string; chooseLabel: string }
+  {
+    endpoint: string;
+    title: string;
+    empty: string;
+    chooseLabel: string;
+    searchLabel: string;
+    searchPlaceholder: string;
+    description: string;
+    visualKind: ReferenceVisualKind;
+    imageField: string;
+  }
 > = {
   category: {
     endpoint: endpoints.songThanh.productCategories,
     title: 'Chọn danh mục sản phẩm',
     empty: 'Chưa có danh mục phù hợp.',
-    chooseLabel: 'Chọn danh mục'
+    chooseLabel: 'Chọn danh mục',
+    searchLabel: 'Tìm danh mục sản phẩm',
+    searchPlaceholder: 'Nhập tên danh mục hoặc cấp danh mục...',
+    description: 'Chọn đúng nhánh danh mục để dữ liệu được phân loại chính xác.',
+    visualKind: 'category',
+    imageField: 'icon_file_id'
   },
   brand: {
     endpoint: endpoints.songThanh.brands,
     title: 'Chọn thương hiệu',
     empty: 'Chưa có thương hiệu phù hợp.',
-    chooseLabel: 'Chọn thương hiệu'
+    chooseLabel: 'Chọn thương hiệu',
+    searchLabel: 'Tìm thương hiệu',
+    searchPlaceholder: 'Nhập tên thương hiệu...',
+    description: 'Tìm theo tên và chọn thương hiệu cần liên kết.',
+    visualKind: 'brand',
+    imageField: 'logo_file_id'
   },
   productGroup: {
     endpoint: endpoints.songThanh.productGroups,
     title: 'Chọn nhóm sản phẩm',
     empty: 'Chưa có nhóm sản phẩm phù hợp.',
-    chooseLabel: 'Chọn nhóm sản phẩm'
+    chooseLabel: 'Chọn nhóm sản phẩm',
+    searchLabel: 'Tìm nhóm sản phẩm',
+    searchPlaceholder: 'Nhập tên sản phẩm, thương hiệu hoặc danh mục...',
+    description: 'Đối chiếu tên, hình ảnh, thương hiệu và danh mục trước khi gắn.',
+    visualKind: 'productGroup',
+    imageField: 'thumbnail_file_id'
   }
 };
 
@@ -153,17 +183,25 @@ export function FileReferencePicker({
       <ReferenceChooserModal
         open={open}
         title={chooseLabel}
+        description={
+          prefersImageSelection(fieldLabel, preferredGroup)
+            ? 'Tìm và chọn ảnh phù hợp từ Kho tệp.'
+            : 'Tìm và chọn đúng tệp cần sử dụng.'
+        }
+        searchLabel={prefersImageSelection(fieldLabel, preferredGroup) ? 'Tìm ảnh' : 'Tìm tệp'}
+        searchPlaceholder={
+          prefersImageSelection(fieldLabel, preferredGroup)
+            ? 'Nhập tên ảnh...'
+            : 'Nhập tên tệp hoặc định dạng...'
+        }
+        actionLabel="Chọn"
         endpoint={endpoints.songThanh.files}
         emptyText="Không có tệp phù hợp."
         usageGroup={usageGroup}
         allowedMimePrefix={allowedMimePrefix}
         usageGroupOptions={fileUsageGroupOptions(true)}
         onUsageGroupChange={setUsageGroup}
-        renderItem={(item) => ({
-          title: fileTitle(item),
-          subtitle: filePickerSubtitle(item),
-          meta: formatValue(item.id)
-        })}
+        renderItem={fileOptionView}
         onClose={() => setOpen(false)}
         onSelect={(item) => {
           onChange(String(item.id ?? ''));
@@ -192,90 +230,6 @@ export function FileReferencePicker({
   );
 }
 
-function RelationPicker({
-  kind,
-  value,
-  onChange,
-  readOnly,
-  allowEmpty = true,
-  inputId,
-  describedBy,
-  invalid = false,
-  dataField
-}: {
-  kind: RelationKind;
-  value: string;
-  onChange: (value: string) => void;
-  readOnly?: boolean;
-  allowEmpty?: boolean;
-  inputId?: string;
-  describedBy?: string;
-  invalid?: boolean;
-  dataField?: string;
-}) {
-  const config = relationConfig[kind];
-  const [open, setOpen] = useState(false);
-  const [current, setCurrent] = useState<RecordMap | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    async function loadCurrent() {
-      if (!value) {
-        setCurrent(null);
-        return;
-      }
-      try {
-        const result = await apiClient.get<unknown>(byId(config.endpoint, value));
-        if (active) setCurrent(extractReferenceRecord(result));
-      } catch {
-        if (active) setCurrent(null);
-      }
-    }
-    void loadCurrent();
-    return () => {
-      active = false;
-    };
-  }, [config.endpoint, value]);
-
-  return (
-    <ReferenceBox
-      icon={<Link2 className="h-4 w-4" />}
-      title={
-        current ? relationTitle(current) : value ? 'Bản ghi tham chiếu' : 'Chưa chọn'
-      }
-      subtitle={
-        current ? relationSubtitle(current) : 'Chọn từ danh sách hiện có.'
-      }
-      value={value}
-      readOnly={readOnly}
-      controlId={inputId}
-      describedBy={describedBy}
-      invalid={invalid}
-      dataField={dataField}
-      onClear={allowEmpty ? () => onChange('') : undefined}
-      onOpen={() => setOpen(true)}
-      openLabel={config.chooseLabel}
-    >
-      <ReferenceChooserModal
-        open={open}
-        title={config.title}
-        endpoint={config.endpoint}
-        emptyText={config.empty}
-        renderItem={(item) => ({
-          title: relationTitle(item),
-          subtitle: relationSubtitle(item),
-          meta: formatValue(item.id)
-        })}
-        onClose={() => setOpen(false)}
-        onSelect={(item) => {
-          onChange(String(item.id ?? ''));
-          setCurrent(item);
-          setOpen(false);
-        }}
-      />
-    </ReferenceBox>
-  );
-}
 
 export function RelationActionPicker({
   kind,
@@ -287,7 +241,8 @@ export function RelationActionPicker({
   describedBy,
   invalid = false,
   dataField,
-  className
+  className,
+  unavailableItems
 }: {
   kind: RelationKind;
   onSelect: (value: string, item: Record<string, unknown>) => void | Promise<void>;
@@ -299,6 +254,7 @@ export function RelationActionPicker({
   invalid?: boolean;
   dataField?: string;
   className?: string;
+  unavailableItems?: Record<string, string>;
 }) {
   const config = relationConfig[kind];
   const [open, setOpen] = useState(false);
@@ -341,13 +297,14 @@ export function RelationActionPicker({
       <ReferenceChooserModal
         open={open}
         title={config.title}
+        description={config.description}
+        searchLabel={config.searchLabel}
+        searchPlaceholder={config.searchPlaceholder}
+        actionLabel={kind === 'productGroup' ? 'Gắn' : 'Chọn'}
+        unavailableItems={unavailableItems}
         endpoint={config.endpoint}
         emptyText={config.empty}
-        renderItem={(item) => ({
-          title: relationTitle(item),
-          subtitle: relationSubtitle(item),
-          meta: formatValue(item.id)
-        })}
+        renderItem={(item) => relationOptionView(kind, item)}
         onClose={() => setOpen(false)}
         onSelect={handleSelect}
       />
@@ -355,60 +312,6 @@ export function RelationActionPicker({
   );
 }
 
-function RelationFilterSelect({
-  kind,
-  value,
-  onChange,
-  placeholder,
-  className
-}: {
-  kind: RelationKind;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  className?: string;
-}) {
-  const config = relationConfig[kind];
-  const [items, setItems] = useState<RecordMap[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({ page: '1', page_size: '100' });
-        const result = await apiClient.get<unknown>(
-          `${config.endpoint}?${params.toString()}`
-        );
-        if (active) setItems(extractItems(result));
-      } catch {
-        if (active) setItems([]);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [config.endpoint]);
-
-  return (
-    <Select
-      className={cn('min-w-[190px]', className)}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">{loading ? 'Đang tải...' : placeholder}</option>
-      {items.map((item) => (
-        <option key={String(item.id)} value={String(item.id ?? '')}>
-          {relationTitle(item)}
-        </option>
-      ))}
-    </Select>
-  );
-}
 
 function ReferenceBox({
   icon,
@@ -514,9 +417,14 @@ function ReferenceBox({
 function ReferenceChooserModal({
   open,
   title,
+  description,
+  searchLabel,
+  searchPlaceholder,
+  actionLabel,
   endpoint,
   emptyText,
   renderItem,
+  unavailableItems,
   usageGroup,
   allowedMimePrefix,
   usageGroupOptions,
@@ -526,13 +434,14 @@ function ReferenceChooserModal({
 }: {
   open: boolean;
   title: string;
+  description: string;
+  searchLabel: string;
+  searchPlaceholder: string;
+  actionLabel: string;
   endpoint: string;
   emptyText: string;
-  renderItem: (item: RecordMap) => {
-    title: string;
-    subtitle: string;
-    meta: string;
-  };
+  renderItem: (item: RecordMap) => ReferenceOptionView;
+  unavailableItems?: Record<string, string>;
   usageGroup?: FileUsageGroupFilter;
   allowedMimePrefix?: string;
   usageGroupOptions?: Array<{ value: string; label: string }>;
@@ -541,10 +450,24 @@ function ReferenceChooserModal({
   onSelect: (item: RecordMap) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setDebouncedQuery('');
+    setPage(1);
+  }, [endpoint, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const timeout = window.setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => window.clearTimeout(timeout);
+  }, [open, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -554,7 +477,7 @@ function ReferenceChooserModal({
       setError(null);
       try {
         const params = new URLSearchParams({ page: String(page), page_size: '12' });
-        const searchQuery = query.trim();
+        const searchQuery = debouncedQuery;
         if (searchQuery) {
           params.set('q', searchQuery);
         } else if (
@@ -586,7 +509,7 @@ function ReferenceChooserModal({
     return () => {
       active = false;
     };
-  }, [allowedMimePrefix, endpoint, open, page, query, usageGroup]);
+  }, [allowedMimePrefix, debouncedQuery, endpoint, open, page, usageGroup]);
 
   const items = useMemo(() => {
     const extracted = extractItems(data);
@@ -596,85 +519,107 @@ function ReferenceChooserModal({
   const pagination = extractPagination(data, items.length);
 
   return (
-    <Modal open={open} title={title} onClose={onClose}>
-      <div className="space-y-4">
-        {usageGroupOptions && onUsageGroupChange ? (
-          <label className="block min-w-[180px]">
-            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              Khu tệp
-            </span>
-            <Select
-              value={usageGroup ?? 'all'}
-              onChange={(event) => {
-                onUsageGroupChange(event.target.value as FileUsageGroupFilter);
-                setPage(1);
-              }}
-            >
-              {usageGroupOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-          </label>
-        ) : null}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            value={query}
-            placeholder="Tìm theo tên, mã hoặc đường dẫn..."
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setPage(1);
-            }}
-          />
-        </div>
-        {loading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <Skeleton key={index} className="h-16 w-full" />
-            ))}
-          </div>
-        ) : error ? (
-          <ErrorMessagePanel
-            error={error}
-            context={endpoint === endpoints.songThanh.files ? 'file-load' : 'load'}
-            compact
-          />
-        ) : items.length === 0 ? (
-          <div className="rounded-sm border border-dashed border-border bg-muted px-3 py-8 text-center text-sm text-muted-foreground">
-            {emptyText}
-          </div>
-        ) : (
-          <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
-            {items.map((item) => {
-              const rendered = renderItem(item);
-              return (
-                <button
-                  key={String(item.id)}
-                  type="button"
-                  className={cn(
-                    'block w-full rounded-sm border border-border bg-panel px-3 py-2 text-left transition-colors hover:border-primary hover:bg-muted',
-                    'focus:outline-none focus:ring-2 focus:ring-primary/30'
-                  )}
-                  onClick={() => onSelect(item)}
+    <Modal
+      open={open}
+      title={title}
+      onClose={onClose}
+      panelClassName="max-w-[min(860px,calc(100vw-24px))]"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
+    >
+      <div data-reference-chooser="true" className="flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-border bg-slate-50 px-4 py-3.5 sm:px-5">
+          <p className="text-[13px] leading-5 text-slate-600">{description}</p>
+          <div
+            className={cn(
+              'mt-3 grid gap-2.5',
+              usageGroupOptions && onUsageGroupChange
+                ? 'sm:grid-cols-[minmax(0,1fr)_13rem]'
+                : 'grid-cols-1'
+            )}
+          >
+            <label className="relative block">
+              <span className="sr-only">{searchLabel}</span>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <Input
+                type="search"
+                aria-label={searchLabel}
+                className="pl-9"
+                value={query}
+                placeholder={searchPlaceholder}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+              />
+            </label>
+            {usageGroupOptions && onUsageGroupChange ? (
+              <label className="block">
+                <span className="sr-only">Khu tệp</span>
+                <Select
+                  aria-label="Khu tệp"
+                  value={usageGroup ?? 'all'}
+                  onChange={(event) => {
+                    onUsageGroupChange(event.target.value as FileUsageGroupFilter);
+                    setPage(1);
+                  }}
                 >
-                  <div className="text-sm font-medium text-text">
-                    {rendered.title}
-                  </div>
-                  <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-                    {rendered.subtitle}
-                  </div>
-                  <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
-                    {rendered.meta}
-                  </div>
-                </button>
-              );
-            })}
+                  {usageGroupOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            ) : null}
           </div>
-        )}
-        <Pagination
+        </div>
+
+        <div
+          data-reference-results="true"
+          className="min-h-[220px] flex-1 overflow-y-auto px-3 py-3 sm:px-5"
+        >
+          <div className="mb-2.5 flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold text-text">
+              {pagination.total.toLocaleString('vi-VN')} kết quả
+            </span>
+            {loading ? <span className="text-xs text-muted-foreground">Đang tìm...</span> : null}
+          </div>
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <Skeleton key={index} className="h-[82px] w-full rounded-md" />
+              ))}
+            </div>
+          ) : error ? (
+            <ErrorMessagePanel
+              error={error}
+              context={endpoint === endpoints.songThanh.files ? 'file-load' : 'load'}
+              compact
+            />
+          ) : items.length === 0 ? (
+            <div className="flex min-h-[220px] items-center justify-center rounded-md border border-dashed border-border bg-slate-50 px-4 text-center text-sm text-muted-foreground">
+              {query.trim() ? `Không tìm thấy kết quả cho “${query.trim()}”.` : emptyText}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {items.map((item) => {
+                const rendered = renderItem(item);
+                const unavailableLabel = unavailableItems?.[rendered.id];
+                return (
+                  <ReferenceChooserOption
+                    key={rendered.id}
+                    item={rendered}
+                    actionLabel={actionLabel}
+                    unavailableLabel={unavailableLabel}
+                    onSelect={() => onSelect(item)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <ReferenceChooserPager
           page={pagination.page}
           pageSize={pagination.page_size}
           total={pagination.total}
@@ -725,15 +670,90 @@ function filePickerSubtitle(file: RecordMap) {
   return parts.join(' · ') || fileSubtitle(file);
 }
 
+function fileOptionView(file: RecordMap): ReferenceOptionView {
+  const mimeType = String(file.mime_type ?? '');
+  const size = Number(file.size_bytes ?? file.file_size ?? file.size ?? 0);
+  return {
+    id: String(file.id ?? ''),
+    title: fileTitle(file),
+    subtitle: filePickerSubtitle(file),
+    details: Number.isFinite(size) && size > 0 ? [formatFileSize(size)] : [],
+    imageFileId: mimeType.startsWith('image/') ? String(file.id ?? '') : null,
+    visualKind: 'file'
+  };
+}
+
+function relationOptionView(kind: RelationKind, item: RecordMap): ReferenceOptionView {
+  const config = relationConfig[kind];
+  const details: string[] = [];
+  let subtitle = '';
+
+  if (kind === 'productGroup') {
+    const categoryPath = uniqueText([
+      item.category_level_1_name,
+      item.category_level_2_name,
+      item.category_name
+    ]).join(' › ');
+    subtitle = uniqueText([item.brand_name, categoryPath]).join(' · ');
+    const variantCount = finiteCount(item.variant_count);
+    const documentCount = finiteCount(item.document_count);
+    if (variantCount !== null) details.push(`${variantCount} biến thể`);
+    if (documentCount !== null) details.push(`${documentCount} tài liệu`);
+  } else if (kind === 'category') {
+    subtitle = uniqueText([
+      item.parent_name,
+      item.category_level_1_name,
+      item.description
+    ]).join(' · ');
+  } else {
+    subtitle = uniqueText([
+      item.country_name,
+      item.country,
+      item.short_description,
+      item.description
+    ]).join(' · ');
+  }
+
+  return {
+    id: String(item.id ?? ''),
+    title: relationTitle(item),
+    subtitle: subtitle || 'Chưa có thông tin phân loại',
+    details,
+    imageFileId: String(item[config.imageField] ?? '') || null,
+    status: relationStatus(item),
+    visualKind: config.visualKind
+  };
+}
+
 function relationTitle(item: RecordMap) {
   return formatValue(
     item.name ?? item.title ?? item.document_name ?? item.variant_name ?? item.id
   );
 }
 
-function relationSubtitle(item: RecordMap) {
-  const parts = [item.slug, item.sku, item.status].filter(Boolean).map(formatValue);
-  return parts.join(' · ') || 'Bản ghi liên kết';
+
+function relationStatus(item: RecordMap) {
+  if (item.deleted_at) return 'Đã lưu trữ';
+  const value = item.publish_status ?? item.review_status ?? item.status;
+  return value ? formatValue(value) : undefined;
+}
+
+function uniqueText(values: unknown[]) {
+  const seen = new Set<string>();
+  return values
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => value && !seen.has(value) && seen.add(value));
+}
+
+function finiteCount(value: unknown) {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} MB`;
 }
 
 function prefersImageSelection(

@@ -93,6 +93,14 @@ export class AdminUserRepository {
       .first();
   }
 
+  lockUser(trx: Knex.Transaction, userId: string): Promise<AdminUserRow | undefined> {
+    return trx<AdminUserRow>('admin_user')
+      .where({ id: userId })
+      .whereNull('deleted_at')
+      .forUpdate()
+      .first();
+  }
+
   findByEmail(email: string, exceptId?: string): Promise<AdminUserRow | undefined> {
     return this.knexService
       .db('admin_user')
@@ -105,7 +113,7 @@ export class AdminUserRepository {
       .first();
   }
 
-  async listRolesForUsers(userIds: readonly string[]): Promise<
+  async listRolesForUsers(userIds: readonly string[], trx?: Knex.Transaction): Promise<
     Array<{
       admin_user_id: string;
       admin_role_id: string;
@@ -118,8 +126,7 @@ export class AdminUserRepository {
       return [];
     }
 
-    return this.knexService
-      .db('admin_user_role as user_role')
+    return (trx ?? this.knexService.db)('admin_user_role as user_role')
       .join('admin_role as role', 'role.id', 'user_role.admin_role_id')
       .select(
         'user_role.admin_user_id',
@@ -141,12 +148,18 @@ export class AdminUserRepository {
       status: 'active' | 'inactive';
       description: string | null;
       user_count: number;
+      permission_count: number;
     }>
   > {
     const rows = await this.knexService
       .db('admin_role as role')
       .leftJoin('admin_user_role as user_role', 'user_role.admin_role_id', 'role.id')
       .leftJoin('admin_user as user', 'user.id', 'user_role.admin_user_id')
+      .leftJoin(
+        'admin_role_permission as role_permission',
+        'role_permission.admin_role_id',
+        'role.id'
+      )
       .select(
         'role.id',
         'role.code',
@@ -160,6 +173,12 @@ export class AdminUserRepository {
           ['user.deleted_at', 'user.id', 'user_count']
         )
       )
+      .select(
+        this.knexService.db.raw('count(distinct ??) as ??', [
+          'role_permission.admin_permission_id',
+          'permission_count'
+        ])
+      )
       .whereNull('role.deleted_at')
       .where('role.status', 'active')
       .groupBy('role.id')
@@ -167,7 +186,8 @@ export class AdminUserRepository {
 
     return rows.map((row) => ({
       ...row,
-      user_count: Number(row.user_count ?? 0)
+      user_count: Number(row.user_count ?? 0),
+      permission_count: Number(row.permission_count ?? 0)
     }));
   }
 
@@ -181,6 +201,34 @@ export class AdminUserRepository {
       .whereIn('id', [...roleIds])
       .whereNull('deleted_at')
       .orderBy('name', 'asc');
+  }
+
+  lockRoles(trx: Knex.Transaction, roleIds: readonly string[]): Promise<AdminRoleRow[]> {
+    if (roleIds.length === 0) return Promise.resolve([]);
+    return trx<AdminRoleRow>('admin_role')
+      .whereIn('id', [...roleIds])
+      .orderBy('id', 'asc')
+      .forUpdate();
+  }
+
+  async listRolePermissions(roleIds: readonly string[], trx?: Knex.Transaction): Promise<Array<{ role_id: string; code: string }>> {
+    if (roleIds.length === 0) return [];
+    return (trx ?? this.knexService.db)('admin_role_permission as assignment')
+      .join('admin_permission as permission', 'permission.id', 'assignment.admin_permission_id')
+      .select('assignment.admin_role_id as role_id', 'permission.code')
+      .whereIn('assignment.admin_role_id', [...roleIds]);
+  }
+
+  async listEffectivePermissions(userId: string, trx?: Knex.Transaction): Promise<string[]> {
+    const rows = await (trx ?? this.knexService.db)('admin_user_role as assignment')
+      .join('admin_role as role', 'role.id', 'assignment.admin_role_id')
+      .join('admin_role_permission as grant', 'grant.admin_role_id', 'role.id')
+      .join('admin_permission as permission', 'permission.id', 'grant.admin_permission_id')
+      .distinct<{ code: string }[]>('permission.code')
+      .where('assignment.admin_user_id', userId)
+      .where('role.status', 'active')
+      .whereNull('role.deleted_at');
+    return rows.map((row) => row.code);
   }
 
   createUser(
@@ -232,17 +280,16 @@ export class AdminUserRepository {
     );
   }
 
-  revokeAllRefreshSessions(userId: string): Promise<number> {
-    return this.knexService
-      .db('admin_refresh_session')
+  revokeAllRefreshSessions(userId: string, trx?: Knex.Transaction): Promise<number> {
+    const db = trx ?? this.knexService.db;
+    return db('admin_refresh_session')
       .where({ admin_user_id: userId })
       .whereNull('revoked_at')
-      .update({ revoked_at: this.knexService.db.fn.now() });
+      .update({ revoked_at: db.fn.now() });
   }
 
-  countActiveSuperAdmins(): Promise<{ total: number }> {
-    return this.knexService
-      .db('admin_user as user')
+  countActiveSuperAdmins(trx?: Knex.Transaction): Promise<{ total: number }> {
+    return (trx ?? this.knexService.db)('admin_user as user')
       .join('admin_user_role as user_role', 'user_role.admin_user_id', 'user.id')
       .join('admin_role as role', 'role.id', 'user_role.admin_role_id')
       .whereNull('user.deleted_at')

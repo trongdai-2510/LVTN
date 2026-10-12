@@ -17,7 +17,6 @@ Repository này được phát triển thành sản phẩm cho luận văn tốt
 - `admin/`: giao diện quản trị độc lập.
 - `api/`: backend API hiện hành.
 - `database/`: schema, migration và dữ liệu nền.
-- `cms/`: mã Strapi cũ, chỉ dùng tham khảo khi cần truy vết logic chưa port.
 
 ## Nguyên tắc làm việc
 
@@ -27,4 +26,5 @@ Repository này được phát triển thành sản phẩm cho luận văn tốt
 - Giữ tách biệt trạng thái duyệt nội bộ và trạng thái hiển thị công khai nếu code hiện tại đang dùng hai trạng thái này.
 - Mọi tài liệu mới phải mô tả đúng code/runtime hiện tại và chỉ được xem là nguồn sự thật sau khi người dùng xác nhận.
 - Bảo toàn các thay đổi đang có trong worktree; không reset hoặc ghi đè thay đổi không thuộc task.
+- File mã nguồn tạo mới phải dùng tên ASCII ngắn, liền chữ và có ý nghĩa; ưu tiên `PascalCase` cho component/class và `camelCase` cho module/hàm. Không dùng dấu tiếng Việt, tên trang trí, nhãn kiểu nội dung do AI tạo hoặc dấu gạch nối trong tên file mới. Không đổi tên route/framework hiện có chỉ để áp dụng quy tắc này.
 

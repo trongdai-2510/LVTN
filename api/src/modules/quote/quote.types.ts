@@ -10,7 +10,7 @@ export const QUOTE_DELETED_SCOPES = ['active', 'deleted', 'all'] as const;
 
 export type QuoteStatus = (typeof QUOTE_ALLOWED_STATUSES)[number];
 export type QuoteDeletedScope = (typeof QUOTE_DELETED_SCOPES)[number];
-export type QuoteStatusFilter = QuoteStatus | 'all';
+type QuoteStatusFilter = QuoteStatus | 'all';
 
 export interface QuoteRecord {
   id: string;
@@ -21,6 +21,9 @@ export interface QuoteRecord {
   email: string | null;
   address: string | null;
   message: string | null;
+  project_name: string | null;
+  project_context: string | null;
+  project_requirements: Array<{ label: string; value: string }>;
   status: QuoteStatus;
   assigned_to: number | null;
   created_at: Date;
@@ -45,13 +48,26 @@ export interface QuoteItem {
   product_variant_status: string | null;
   product_variant_deleted_at: Date | null;
   quantity: number | null;
+  quantity_raw: string | null;
+  quantity_unit: string | null;
+  quantity_state: 'confirmed' | 'unspecified';
+  public_price_amount_at_request: number | null;
   notes: string | null;
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
 }
 
-export type QuoteListItem = Omit<QuoteRecord, 'address' | 'message' | 'ip_address' | 'user_agent'> & {
+export type QuoteListItem = Omit<
+  QuoteRecord,
+  | 'address'
+  | 'message'
+  | 'project_name'
+  | 'project_context'
+  | 'project_requirements'
+  | 'ip_address'
+  | 'user_agent'
+> & {
   assigned_to_label: string | null;
   item_count: number;
   first_item: QuoteItem | null;

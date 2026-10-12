@@ -80,43 +80,80 @@ export class AuthRepository {
         .orderBy('permission.code', 'asc')
     ]);
 
-    return {
-      roles: roleRows.map((row) => row.code),
-      permissions: permissionRows.map((row) => row.code)
-    };
+    const roles = roleRows.map((row) => row.code);
+    const permissions = roles.includes('super_admin')
+      ? (await this.knexService.db('admin_permission')
+          .select<{ code: string }[]>('code')
+          .orderBy('code', 'asc')).map((row) => row.code)
+      : permissionRows.map((row) => row.code);
+
+    return { roles, permissions };
   }
 
-  updateLastLogin(userId: string): Promise<number> {
-    return this.knexService
-      .db('admin_user')
-      .where({ id: userId })
-      .update({
-        last_login_at: this.knexService.db.fn.now(),
-        updated_at: this.knexService.db.fn.now()
-      });
-  }
-
-  updatePasswordHash(userId: string, passwordHash: string): Promise<number> {
-    return this.knexService
-      .db('admin_user')
-      .where({ id: userId })
-      .update({
-        password_hash: passwordHash,
-        updated_at: this.knexService.db.fn.now()
-      });
-  }
-
-  createRefreshSession(params: {
+  finalizeLogin(params: {
     id: string;
     userId: string;
+    expectedPasswordHash: string;
     tokenHash: string;
     expiresAt: Date;
-  }): Promise<string[]> {
-    return this.knexService.db('admin_refresh_session').insert({
-      id: params.id,
-      admin_user_id: params.userId,
-      token_hash: params.tokenHash,
-      expires_at: params.expiresAt
+  }): Promise<
+    | { status: 'created'; user: AdminUserRow }
+    | { status: 'invalid' }
+    | { status: 'disabled' }
+  > {
+    return this.knexService.db.transaction(async (trx) => {
+      const user = await trx<AdminUserRow>('admin_user')
+        .where({ id: params.userId })
+        .whereNull('deleted_at')
+        .forUpdate()
+        .first();
+      if (!user || user.password_hash !== params.expectedPasswordHash) {
+        return { status: 'invalid' } as const;
+      }
+      if (user.status !== 'active') {
+        return { status: 'disabled' } as const;
+      }
+      await trx('admin_refresh_session').insert({
+        id: params.id,
+        admin_user_id: params.userId,
+        token_hash: params.tokenHash,
+        expires_at: params.expiresAt
+      });
+      await trx('admin_user')
+        .where({ id: params.userId })
+        .update({ last_login_at: trx.fn.now() });
+      return { status: 'created', user } as const;
+    });
+  }
+
+  changePasswordAndRevokeSessions(params: {
+    userId: string;
+    expectedPasswordHash: string;
+    passwordHash: string;
+  }): Promise<'changed' | 'stale' | 'disabled'> {
+    return this.knexService.db.transaction(async (trx) => {
+      const user = await trx<AdminUserRow>('admin_user')
+        .where({ id: params.userId })
+        .whereNull('deleted_at')
+        .forUpdate()
+        .first();
+      if (!user || user.status !== 'active') {
+        return 'disabled';
+      }
+      if (user.password_hash !== params.expectedPasswordHash) {
+        return 'stale';
+      }
+      await trx('admin_user')
+        .where({ id: params.userId })
+        .update({
+          password_hash: params.passwordHash,
+          updated_at: trx.fn.now()
+        });
+      await trx('admin_refresh_session')
+        .where({ admin_user_id: params.userId })
+        .whereNull('revoked_at')
+        .update({ revoked_at: trx.fn.now() });
+      return 'changed';
     });
   }
 
@@ -136,12 +173,30 @@ export class AuthRepository {
     nextExpiresAt: Date;
   }): Promise<RefreshRotationResult> {
     return this.knexService.db.transaction(async (trx) => {
+      // Lock the account before its sessions, matching password/status changes.
+      // The first read only discovers the account; the locked re-read below is authoritative.
+      const candidate = await trx<RefreshSessionRow>('admin_refresh_session')
+        .where({ token_hash: params.currentTokenHash })
+        .first();
+      if (!candidate) {
+        return { status: 'invalid' } as const;
+      }
+
+      const user = await trx<AdminUserRow>('admin_user')
+        .where({ id: candidate.admin_user_id })
+        .whereNull('deleted_at')
+        .forUpdate()
+        .first();
+      if (!user) {
+        return { status: 'invalid' } as const;
+      }
+
       const session = await trx<RefreshSessionRow>('admin_refresh_session')
         .where({ token_hash: params.currentTokenHash })
         .forUpdate()
         .first();
 
-      if (!session) {
+      if (!session || session.admin_user_id !== user.id) {
         return { status: 'invalid' } as const;
       }
 
@@ -155,19 +210,6 @@ export class AuthRepository {
           .whereNull('revoked_at')
           .update({ revoked_at: trx.fn.now() });
         return { status: 'expired' } as const;
-      }
-
-      const user = await trx<AdminUserRow>('admin_user')
-        .where({ id: session.admin_user_id })
-        .whereNull('deleted_at')
-        .first();
-
-      if (!user) {
-        await trx('admin_refresh_session')
-          .where({ id: session.id })
-          .whereNull('revoked_at')
-          .update({ revoked_at: trx.fn.now() });
-        return { status: 'invalid' } as const;
       }
 
       if (user.status !== 'active') {
@@ -206,11 +248,4 @@ export class AuthRepository {
       .update({ revoked_at: this.knexService.db.fn.now() });
   }
 
-  revokeAllRefreshSessionsForUser(userId: string): Promise<number> {
-    return this.knexService
-      .db('admin_refresh_session')
-      .where({ admin_user_id: userId })
-      .whereNull('revoked_at')
-      .update({ revoked_at: this.knexService.db.fn.now() });
-  }
 }

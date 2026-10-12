@@ -8,6 +8,12 @@ const API_BASE_URL =
 
 type Listener = (state: AuthState) => void;
 
+export class AuthRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 const emptyState: AuthState = {
   hydrated: false,
   accessToken: null,
@@ -59,7 +65,7 @@ async function postEnvelope<T>(path: string, body?: unknown): Promise<T> {
   });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
-    throw new Error(payload?.error?.message || 'Không thể kết nối hệ thống.');
+    throw new AuthRequestError(payload?.error?.message || 'Không thể kết nối hệ thống.', response.status);
   }
   return payload.data as T;
 }
@@ -70,7 +76,7 @@ async function getEnvelope<T>(path: string, accessToken: string): Promise<T> {
   });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
-    throw new Error(payload?.error?.message || 'Không thể kết nối hệ thống.');
+    throw new AuthRequestError(payload?.error?.message || 'Không thể kết nối hệ thống.', response.status);
   }
   return payload.data as T;
 }
@@ -124,7 +130,7 @@ class AuthStore {
       refreshToken: data.refresh_token,
       user: data.user,
       permissions: data.permissions,
-      roles: []
+      roles: data.roles
     });
     return data;
   }

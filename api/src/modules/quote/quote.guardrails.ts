@@ -25,6 +25,9 @@ export function normalizeOptionalSearch(value: unknown): string | null {
   if (typeof value === 'undefined' || value === null) return null;
   if (typeof value !== 'string') throw validationError('q must be a string.', { field: 'q' });
   const normalized = value.trim();
+  if (normalized.length > 255) {
+    throw validationError('q must not exceed 255 characters.', { field: 'q' });
+  }
   return normalized === '' ? null : normalized;
 }
 
@@ -64,7 +67,7 @@ export function normalizeNullableAssignee(value: unknown): number | null {
   return normalizePositiveInteger('assigned_to', value);
 }
 
-export function normalizePositiveInteger(fieldName: string, value: unknown): number {
+function normalizePositiveInteger(fieldName: string, value: unknown): number {
   const parsed =
     typeof value === 'number'
       ? value
@@ -94,11 +97,16 @@ export function normalizeNoteText(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw validationError('note_text must be a non-blank string.', { field: 'note_text' });
   }
-
-  return value.trim();
+  const normalized = value.trim();
+  if (normalized.length > 10_000) {
+    throw validationError('note_text must not exceed 10000 characters.', {
+      field: 'note_text'
+    });
+  }
+  return normalized;
 }
 
-export function validationError(message: string, details?: Record<string, unknown>): AppError {
+function validationError(message: string, details?: Record<string, unknown>): AppError {
   return new AppError({
     code: ErrorCodes.VALIDATION_ERROR,
     message,

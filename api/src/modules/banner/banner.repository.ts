@@ -28,6 +28,20 @@ interface ListFilters {
   deleted_scope: BannerDeletedScope;
 }
 
+const LEGACY_POSITION_BY_PATH: Record<string, string> = {
+  '/': 'hero',
+  '/san-pham': 'san-pham',
+  '/san-pham/danh-sach': 'san-pham-danh-sach',
+  '/gioi-thieu': 'gioi-thieu',
+  '/ho-so-nang-luc': 'ho-so-nang-luc',
+  '/dich-vu': 'dich-vu',
+  '/du-an': 'du-an',
+  '/tin-tuc': 'tin-tuc',
+  '/doi-tac-thuong-hieu': 'doi-tac-thuong-hieu',
+  '/lien-he': 'lien-he',
+  '/chinh-sach-van-chuyen': 'chinh-sach-van-chuyen'
+};
+
 @Injectable()
 export class BannerRepository {
   constructor(private readonly knexService: KnexService) {}
@@ -178,7 +192,9 @@ export class BannerRepository {
   private applyListFilters(query: Knex.QueryBuilder, alias: string, filters: ListFilters): Knex.QueryBuilder {
     if (filters.deleted_scope === 'active') query.whereNull(`${alias}.deleted_at`);
     else if (filters.deleted_scope === 'deleted') query.whereNotNull(`${alias}.deleted_at`);
-    if (filters.position) query.where(`${alias}.position`, filters.position);
+    if (filters.position) {
+      query.whereIn(`${alias}.position`, [filters.position, LEGACY_POSITION_BY_PATH[filters.position]].filter((value): value is string => Boolean(value)));
+    }
     if (filters.link_type !== 'all') query.where(`${alias}.link_type`, filters.link_type);
     if (filters.status !== 'all') query.where(`${alias}.status`, filters.status);
     if (filters.q) {

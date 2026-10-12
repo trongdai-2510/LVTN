@@ -1,6 +1,8 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 
 import { AuthGuard } from '../../common/auth/auth.guard';
+import { CurrentUser } from '../../common/auth/current-user.decorator';
+import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
 import { RequirePermissions } from '../../common/permissions/permission.decorator';
 import { PermissionGuard } from '../../common/permissions/permission.guard';
 import { WorkflowApprovalGuard } from '../../common/workflow/workflow-approval.guard';
@@ -9,6 +11,7 @@ import {
   CreateProductVariantDto,
   CreateVariantAttributeDto,
   ProductVariantListQueryDto,
+  ProductVariantVersionDto,
   UpdateProductVariantDto,
   UpdateVariantAttributeDto
 } from './product-variant.dto';
@@ -45,8 +48,8 @@ export class ProductVariantController {
 
   @Put(':id')
   @RequirePermissions('product_variant.update')
-  updateProductVariant(@Param('id') id: string, @Body() body: UpdateProductVariantDto) {
-    return this.productVariantService.updateProductVariant(id, body);
+  updateProductVariant(@Param('id') id: string, @Body() body: UpdateProductVariantDto, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.productVariantService.updateProductVariant(id, body, currentUser);
   }
 
   @Post('bulk-status')
@@ -59,9 +62,10 @@ export class ProductVariantController {
   @RequirePermissions('product_variant.update')
   createVariantAttribute(
     @Param('id') id: string,
-    @Body() body: CreateVariantAttributeDto
+    @Body() body: CreateVariantAttributeDto,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.productVariantService.createVariantAttribute(id, body);
+    return this.productVariantService.createVariantAttribute(id, body, currentUser);
   }
 
   @Put(':id/attributes/:attributeId')
@@ -69,9 +73,10 @@ export class ProductVariantController {
   updateVariantAttribute(
     @Param('id') id: string,
     @Param('attributeId') attributeId: string,
-    @Body() body: UpdateVariantAttributeDto
+    @Body() body: UpdateVariantAttributeDto,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.productVariantService.updateVariantAttribute(id, attributeId, body);
+    return this.productVariantService.updateVariantAttribute(id, attributeId, body, currentUser);
   }
 
   @Post(':id/attributes/:attributeId/archive')
@@ -79,22 +84,23 @@ export class ProductVariantController {
   @RequirePermissions('product_variant.update')
   archiveVariantAttribute(
     @Param('id') id: string,
-    @Param('attributeId') attributeId: string
+    @Param('attributeId') attributeId: string,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.productVariantService.archiveVariantAttribute(id, attributeId);
+    return this.productVariantService.archiveVariantAttribute(id, attributeId, currentUser);
   }
 
   @Post(':id/archive')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('product_variant.archive')
-  archiveProductVariant(@Param('id') id: string) {
-    return this.productVariantService.archiveProductVariant(id);
+  archiveProductVariant(@Param('id') id: string, @Body() body: ProductVariantVersionDto) {
+    return this.productVariantService.archiveProductVariant(id, body);
   }
 
   @Post(':id/restore')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('product_variant.restore')
-  restoreProductVariant(@Param('id') id: string) {
-    return this.productVariantService.restoreProductVariant(id);
+  restoreProductVariant(@Param('id') id: string, @Body() body: ProductVariantVersionDto) {
+    return this.productVariantService.restoreProductVariant(id, body);
   }
 }

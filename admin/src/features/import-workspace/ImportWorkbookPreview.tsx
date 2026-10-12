@@ -2,63 +2,35 @@
 
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
-import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
+import { cn } from '@/lib/cn';
 import { formatValue } from '@/lib/formatters';
 
 type RecordMap = Record<string, unknown>;
-
-const SPEC_COLUMN_EXPLANATIONS: Record<
-  string,
-  { meaning: string; status: string }
-> = {
-  'thong so': {
-    meaning: 'Thông số sản phẩm/biến thể',
-    status: 'Giữ ở dữ liệu tạm'
-  },
-  'loai mau': {
-    meaning: 'Thuộc tính biến thể',
-    status: 'Giữ ở dữ liệu tạm'
-  },
-  'kieu hinh dang': {
-    meaning: 'Thuộc tính biến thể',
-    status: 'Giữ ở dữ liệu tạm'
-  },
-  'kich thuoc': {
-    meaning: 'Thuộc tính biến thể',
-    status: 'Giữ ở dữ liệu tạm'
-  },
-  'so oc': {
-    meaning: 'Số ổ cắm',
-    status: 'Giữ ở dữ liệu tạm'
-  },
-  'so ct': {
-    meaning: 'Số công tắc',
-    status: 'Giữ ở dữ liệu tạm'
-  }
-};
 
 const ROLE_LABELS: Record<string, string> = {
   category_main_column: 'Danh mục chính',
   category_sub_column: 'Danh mục con',
   product_group_column: 'Nhóm sản phẩm',
-  product_variant_column: 'Biến thể sản phẩm',
+  product_variant_column: 'Biến thể / SKU',
   brand_column: 'Thương hiệu',
   short_description_column: 'Mô tả ngắn',
-  group_external_code_column: 'Mã nhóm ngoài',
-  variant_external_code_column: 'Mã biến thể ngoài',
+  group_external_code_column: 'Mã nhóm chung',
+  variant_external_code_column: 'Mã liên kết riêng',
   sku_column: 'SKU',
-  model_code_column: 'Mã model',
+  model_code_column: 'Mã sản phẩm',
   public_price_column: 'Giá công khai'
 };
 
 export function ImportWorkbookPreview({
   preview,
-  title = 'Bản xem trước workbook',
-  subtitle = 'Workbook đã được đọc sơ bộ. Bạn có thể kiểm tra cột, mẫu dữ liệu và hướng hiểu hiện tại của hệ thống trước khi tạo dữ liệu tạm.'
+  title = 'Bản xem trước tệp',
+  subtitle = 'Kiểm tra các cột và mẫu dữ liệu trước khi tạo dữ liệu tạm.',
+  condensed = false
 }: {
   preview: RecordMap | null;
   title?: string;
   subtitle?: string;
+  condensed?: boolean;
 }) {
   if (!preview || Object.keys(preview).length === 0) {
     return null;
@@ -66,20 +38,20 @@ export function ImportWorkbookPreview({
 
   if (preview.preview_status === 'unavailable') {
     return (
-      <Card className="overflow-hidden" data-import-preview="true">
+      <Card
+        className="overflow-hidden border-slate-200"
+        data-import-preview="true"
+        data-import-preview-unavailable="true"
+      >
         <div className="border-b border-border bg-muted px-4 py-3">
           <h2 className="text-sm font-semibold text-text">{title}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Lô nhập đã được tạo nhưng hệ thống chưa dựng lại được bản xem trước
-            workbook.
-          </p>
         </div>
-        <div className="p-4">
-          <ErrorMessagePanel
-            error={new Error(String(preview.preview_error || 'Preview unavailable.'))}
-            context="import-upload"
-            compact
-          />
+        <div className="p-4 text-sm">
+          <p className="font-semibold text-text">Không có bản xem trước của tệp</p>
+          <p className="mt-1 text-muted-foreground">
+            Lô nhập vẫn còn nguyên dữ liệu. Mở nhóm sản phẩm tạm hoặc biến thể tạm để
+            xem những gì đã được đọc từ tệp nguồn.
+          </p>
         </div>
       </Card>
     );
@@ -90,33 +62,13 @@ export function ImportWorkbookPreview({
   const proposedMapping = getRecordArray(preview.proposed_mapping);
   const unresolvedColumns = getRecordArray(preview.unresolved_columns);
   const warnings = Array.from(new Set(getStringArray(preview.warnings)));
+  const embeddedImageCount = Math.max(0, Number(preview.embedded_image_count) || 0);
   const confirmedMapping = asRecord(preview.confirmed_mapping);
   const mappingDefaults = asRecord(preview.mapping_defaults);
   const currentMapping =
     Object.keys(confirmedMapping).length > 0 ? confirmedMapping : mappingDefaults;
 
   const mappingRows = buildMappingRows(currentMapping);
-  const specColumns = proposedMapping
-    .map((column) => {
-      const sourceColumn = String(column.source_column || '').trim();
-      const info = SPEC_COLUMN_EXPLANATIONS[normalizeHeader(sourceColumn)];
-      if (!info) return null;
-      return {
-        sourceColumn,
-        meaning: info.meaning,
-        status: info.status
-      };
-    })
-    .filter(
-      (
-        row
-      ): row is {
-        sourceColumn: string;
-        meaning: string;
-        status: string;
-      } => Boolean(row)
-    );
-
   const noteGroups = buildNoteGroups(unresolvedColumns, warnings);
 
   return (
@@ -136,14 +88,39 @@ export function ImportWorkbookPreview({
       </div>
 
       <div className="space-y-4 p-4">
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className={cn('grid grid-cols-2 gap-3', embeddedImageCount > 0 ? 'md:grid-cols-5' : 'md:grid-cols-4')}>
           <PreviewMetric label="Sheet" value={preview.sheet_name || 'Sheet1'} />
           <PreviewMetric label="Tổng dòng dữ liệu" value={preview.total_data_row_count} />
           <PreviewMetric label="Dòng đã chọn" value={preview.selected_row_count} />
           <PreviewMetric label="Số cột" value={detectedColumns.length} />
+          {embeddedImageCount > 0 ? <PreviewMetric label="Ảnh nhúng chưa nhập" value={embeddedImageCount} /> : null}
         </div>
 
-        {mappingRows.length > 0 ? (
+        {noteGroups.length > 0 ? (
+          <section
+            className={cn(
+              'rounded-sm border px-4 py-3 text-sm',
+              embeddedImageCount > 0
+                ? 'border-amber-200 bg-amber-50 text-amber-900'
+                : 'border-blue-200 bg-blue-50 text-blue-800'
+            )}
+            role="status"
+          >
+            <h3 className="font-semibold">{embeddedImageCount > 0 ? 'Kiểm tra trước khi nhập' : 'Lưu ý khi nhập'}</h3>
+            <div className="mt-2 space-y-2">
+              {noteGroups.map((group) => (
+                <div key={group.title}>
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.06em]">{group.title}</h4>
+                  <ul className="mt-1 list-inside list-disc space-y-1">
+                    {group.items.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {!condensed && mappingRows.length > 0 ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-text">
               Cột đang được dùng cho từng đích dữ liệu
@@ -166,7 +143,7 @@ export function ImportWorkbookPreview({
           </section>
         ) : null}
 
-        {detectedColumns.length > 0 ? (
+        {!condensed && detectedColumns.length > 0 ? (
           <section className="space-y-2">
             <h3 className="text-sm font-semibold text-text">Cột phát hiện</h3>
             <div className="flex flex-wrap gap-2">
@@ -197,7 +174,7 @@ export function ImportWorkbookPreview({
                       <Badge tone="default">{Object.keys(cells).length} cột</Badge>
                     </div>
                     <div className="grid gap-2 md:grid-cols-2">
-                      {Object.entries(cells).map(([key, value]) => (
+                      {Object.entries(cells).slice(0, condensed ? 16 : undefined).map(([key, value]) => (
                         <div
                           key={key}
                           className="rounded-sm border border-border bg-muted px-2 py-2"
@@ -211,6 +188,11 @@ export function ImportWorkbookPreview({
                         </div>
                       ))}
                     </div>
+                    {condensed && Object.keys(cells).length > 16 ? (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Còn {Object.keys(cells).length - 16} cột. Tìm tên cột ở khu vực ghép cột để xem giá trị mẫu.
+                      </p>
+                    ) : null}
                   </div>
                 );
               })}
@@ -218,7 +200,7 @@ export function ImportWorkbookPreview({
           </section>
         ) : null}
 
-        {proposedMapping.length > 0 ? (
+        {!condensed && proposedMapping.length > 0 ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-text">
               Hệ thống đang hiểu các cột này như thế nào
@@ -263,82 +245,6 @@ export function ImportWorkbookPreview({
           </section>
         ) : null}
 
-        {specColumns.length > 0 ? (
-          <section
-            className="space-y-3 rounded-sm border border-border bg-panel p-4"
-            data-import-spec-note="true"
-          >
-            <div>
-              <h3 className="text-sm font-semibold text-text">
-                Cột thông số chưa áp dụng chính thức
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Các cột này đã được đọc từ file và sẽ được giữ trong dữ liệu tạm.
-                Hiện hệ thống chưa ghi chúng vào thông số chính thức của sản phẩm.
-              </p>
-            </div>
-
-            <details data-import-spec-columns-details="true">
-              <summary className="cursor-pointer list-none text-sm font-medium text-primary">
-                Xem cách hiểu từng cột thông số
-              </summary>
-              <div className="mt-3 overflow-x-auto rounded-sm border border-border">
-                <table className="min-w-full divide-y divide-border text-sm">
-                  <thead className="bg-muted">
-                    <tr>
-                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                        Cột trong Excel
-                      </th>
-                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                        Hệ thống hiểu là
-                      </th>
-                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                        Trạng thái
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border bg-white">
-                    {specColumns.map((column) => (
-                      <tr key={column.sourceColumn}>
-                        <td className="px-3 py-2.5 text-text">{column.sourceColumn}</td>
-                        <td className="px-3 py-2.5 text-text">{column.meaning}</td>
-                        <td className="px-3 py-2.5">
-                          <Badge tone="warning">{column.status}</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-
-            <p className="text-sm text-muted-foreground">
-              Bạn vẫn có thể duyệt và áp dụng danh mục, nhóm sản phẩm, biến thể.
-              Phần thông số chi tiết sẽ cần luồng thông số riêng nếu muốn ghi vào
-              dữ liệu chính thức.
-            </p>
-          </section>
-        ) : null}
-
-        {noteGroups.length > 0 ? (
-          <section className="rounded-sm border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-            <h3 className="font-semibold text-blue-900">Lưu ý hiện tại</h3>
-            <div className="mt-3 space-y-3">
-              {noteGroups.map((group) => (
-                <div key={group.title}>
-                  <h4 className="text-xs font-semibold uppercase tracking-[0.06em] text-blue-900">
-                    {group.title}
-                  </h4>
-                  <ul className="mt-1 space-y-1">
-                    {group.items.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
       </div>
     </Card>
   );

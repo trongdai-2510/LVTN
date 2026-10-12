@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Knex } from 'knex';
 
+import { AppError } from '../../common/errors/app-error';
+import { ErrorCodes } from '../../common/errors/error-codes';
 import {
   extractPublicFileIdsFromHtml,
   syncManagedFileUsage,
@@ -8,6 +10,7 @@ import {
   type FileUsageDatabase
 } from '../../common/files/file-usage-sync';
 import { KnexService } from '../../db/knex.service';
+import { lockUsableProductGroupForChildMutation } from '../product-group/productGroupTransactionGuard';
 import {
   FILE_METADATA_TABLE,
   FILE_USAGE_TABLE,
@@ -348,29 +351,61 @@ export class ServiceRepository {
   async attachProductGroup(
     serviceId: string,
     productGroupId: string,
-    actorId: number
+    actorId: number,
+    reopenReview = false
   ): Promise<void> {
-    await this.knexService.db(SERVICE_PRODUCT_GROUP_TABLE).insert({
-      service_id: serviceId,
-      product_group_id: productGroupId,
-      created_by: actorId
+    await this.knexService.db.transaction(async (trx) => {
+      const service = await this.lockEditableService(trx, serviceId);
+      await lockUsableProductGroupForChildMutation(trx, productGroupId);
+      await trx(SERVICE_PRODUCT_GROUP_TABLE).insert({
+        service_id: serviceId,
+        product_group_id: productGroupId,
+        created_by: actorId
+      });
+      await this.reopenServiceReview(trx, service, reopenReview);
     });
   }
 
-  async detachProductGroup(serviceId: string, productGroupId: string): Promise<boolean> {
-    const updated = await this.knexService.db(SERVICE_PRODUCT_GROUP_TABLE)
-      .where({ service_id: serviceId, product_group_id: productGroupId })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now() });
-    return updated > 0;
+  async detachProductGroup(serviceId: string, productGroupId: string, reopenReview = false): Promise<boolean> {
+    return this.knexService.db.transaction(async (trx) => {
+      const service = await this.lockEditableService(trx, serviceId);
+      const count = await trx(SERVICE_PRODUCT_GROUP_TABLE)
+        .where({ service_id: serviceId, product_group_id: productGroupId })
+        .whereNull('deleted_at').update({ deleted_at: trx.fn.now() });
+      if (count) await this.reopenServiceReview(trx, service, reopenReview);
+      return count > 0;
+    });
   }
 
-  async restoreProductGroup(serviceId: string, productGroupId: string): Promise<boolean> {
-    const updated = await this.knexService.db(SERVICE_PRODUCT_GROUP_TABLE)
-      .where({ service_id: serviceId, product_group_id: productGroupId })
-      .whereNotNull('deleted_at')
-      .update({ deleted_at: null });
-    return updated > 0;
+  async restoreProductGroup(serviceId: string, productGroupId: string, reopenReview = false): Promise<boolean> {
+    return this.knexService.db.transaction(async (trx) => {
+      const service = await this.lockEditableService(trx, serviceId);
+      await lockUsableProductGroupForChildMutation(trx, productGroupId);
+      const count = await trx(SERVICE_PRODUCT_GROUP_TABLE)
+        .where({ service_id: serviceId, product_group_id: productGroupId })
+        .whereNotNull('deleted_at')
+        .update({ deleted_at: null });
+      if (count) await this.reopenServiceReview(trx, service, reopenReview);
+      return count > 0;
+    });
+  }
+
+  private async lockEditableService(trx: Knex.Transaction, id: string): Promise<ServiceRecord> {
+    const service = await trx<ServiceRecord>(SERVICE_TABLE).where({ id }).forUpdate().first();
+    if (!service || service.deleted_at) throw new AppError({
+      code: ErrorCodes.NOT_FOUND,
+      message: 'Service was not found.',
+      statusCode: HttpStatus.NOT_FOUND
+    });
+    return service;
+  }
+
+  private async reopenServiceReview(trx: Knex.Transaction, service: ServiceRecord, requested: boolean): Promise<void> {
+    if (!requested || service.review_status !== 'approved' || service.publish_status !== 'published') return;
+    await trx(SERVICE_TABLE).where({ id: service.id }).update({
+      review_status: 'pending_review', publish_status: 'unpublished', approved_by: null,
+      updated_at: trx.fn.now()
+    });
   }
 
   private async syncFileUsage(

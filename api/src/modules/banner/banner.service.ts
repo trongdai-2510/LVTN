@@ -63,7 +63,7 @@ export class BannerService {
     const linkType = normalizeLinkType(input.link_type) as BannerLinkType;
     const imageMobileFileId = assertOptionalUuid('image_mobile_file_id', input.image_mobile_file_id);
     const mutation = {
-      position: normalizeRequiredText('position', input.position, 32),
+      position: normalizeRequiredText('position', input.position, 512),
       title: normalizeRequiredText('title', input.title, 255),
       description: normalizeNullableTextWithMax('description', input.description, 500) ?? null,
       display_mode: normalizeDisplayMode(input.display_mode) ?? 'content_overlay',
@@ -94,7 +94,7 @@ export class BannerService {
     if (!existing) throw this.notFound('Banner was not found.');
     if (existing.deleted_at) throw this.conflict('Banner is archived.');
     const mutation: BannerMutationInput = {};
-    if (typeof input.position !== 'undefined') mutation.position = normalizeRequiredText('position', input.position, 32);
+    if (typeof input.position !== 'undefined') mutation.position = normalizeRequiredText('position', input.position, 512);
     if (typeof input.title !== 'undefined') mutation.title = normalizeRequiredText('title', input.title, 255);
     if (typeof input.description !== 'undefined') mutation.description = normalizeNullableTextWithMax('description', input.description, 500);
     if (typeof input.display_mode !== 'undefined') mutation.display_mode = normalizeDisplayMode(input.display_mode);

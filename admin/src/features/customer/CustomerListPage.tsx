@@ -1,15 +1,19 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Building2,
   Download,
   FileText,
   MessageSquare,
+  MoreHorizontal,
   Plus,
   Search
 } from '@/components/icons';
 
+import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
 import { Pagination } from '@/components/data-table/Pagination';
 import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -26,11 +30,13 @@ import { extractItems, extractPagination } from '@/features/shared/extract';
 import { apiClient } from '@/lib/api-client';
 import { formatDate, formatValue } from '@/lib/formatters';
 import { PERMISSIONS } from '@/lib/permissions';
-
-type CustomerRecord = Record<string, unknown>;
-
-const CUSTOMER_EXPORT_PAGE_SIZE = 100;
-const CUSTOMER_EXPORT_MAX_PAGES = 80;
+import { downloadExportFile } from '@/lib/exportFile';
+import {
+  buildCustomerListParams,
+  customerExportRows,
+  fetchCustomersForExport,
+  localDateStamp
+} from './customerData';
 
 export function CustomerListPage({
   endpoint,
@@ -41,18 +47,30 @@ export function CustomerListPage({
   detailPath: string;
   createPath: string;
 }) {
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams.get('q') ?? '';
   const [authState, setAuthState] = useState<AuthState>(() => authStore.getState());
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionError, setActionError] = useState('');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(routeQuery);
   const [sourceKind, setSourceKind] = useState('all');
   const [deletedScope, setDeletedScope] = useState('active');
   const [page, setPage] = useState(1);
   const [actionId, setActionId] = useState('');
+  const [pendingLifecycle, setPendingLifecycle] = useState<{
+    id: string;
+    kind: 'archive' | 'restore';
+    name: string;
+  } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
+
+  useEffect(() => {
+    setQuery(routeQuery);
+    setPage(1);
+  }, [routeQuery]);
 
   useEffect(() => {
     setAuthState(authStore.hydrate());
@@ -114,6 +132,7 @@ export function CustomerListPage({
       setActionError(err instanceof Error ? err.message : 'Không cập nhật được trạng thái lưu trữ.');
     } finally {
       setActionId('');
+      setPendingLifecycle(null);
     }
   }
 
@@ -132,10 +151,16 @@ export function CustomerListPage({
         throw new Error('Không có hồ sơ khách hàng phù hợp để xuất.');
       }
 
-      downloadExcelFile({
-        filename: `song-thanh-khach-hang-${localDateStamp()}.xls`,
+      await downloadExportFile({
+        filename: `song-thanh-khach-hang-${localDateStamp()}.xlsx`,
         title: 'Xuất danh sách khách hàng Song Thanh',
-        rows: customerExportRows(customers)
+        format: 'xlsx',
+        tables: [
+          {
+            title: 'Khách hàng',
+            rows: customerExportRows(customers)
+          }
+        ]
       });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Không xuất được dữ liệu khách hàng.');
@@ -189,6 +214,7 @@ export function CustomerListPage({
                   className="pl-9"
                   placeholder="Tìm theo tên khách, công ty, số điện thoại, email..."
                   value={query}
+                  maxLength={255}
                   onChange={(event) => {
                     setQuery(event.target.value);
                     setPage(1);
@@ -263,12 +289,12 @@ export function CustomerListPage({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <a
+                          <Link
                             href={`${detailPath}/${encodeURIComponent(id)}`}
-                            className="truncate text-base font-semibold text-text hover:text-primary"
+                            className="inline-flex min-h-11 min-w-0 max-w-full items-center break-words text-base font-semibold leading-6 text-text hover:text-primary md:min-h-0"
                           >
                             {formatValue(item.full_name)}
-                          </a>
+                          </Link>
                           <Badge tone={archived ? 'archived' : 'active'}>
                             {archived ? 'Đã lưu trữ' : 'Đang hoạt động'}
                           </Badge>
@@ -314,40 +340,61 @@ export function CustomerListPage({
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-start justify-start gap-2 lg:justify-end">
+                    <div className="flex items-start justify-start gap-2 lg:justify-end">
                       <LinkButton href={`${detailPath}/${encodeURIComponent(id)}`} variant="secondary" size="sm">
                         Xem
                       </LinkButton>
-                      {canUpdate ? (
-                        <LinkButton
-                          href={`${detailPath}/${encodeURIComponent(id)}?mode=edit`}
-                          variant="secondary"
-                          size="sm"
-                        >
-                          Sửa
-                        </LinkButton>
-                      ) : null}
-                      {!archived && canArchive ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => applyLifecycleAction(id, 'archive')}
-                        >
-                          {busy ? 'Đang lưu...' : 'Lưu trữ'}
-                        </Button>
-                      ) : null}
-                      {archived && canRestore ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => applyLifecycleAction(id, 'restore')}
-                        >
-                          {busy ? 'Đang lưu...' : 'Khôi phục'}
-                        </Button>
+                      {canUpdate || (!archived && canArchive) || (archived && canRestore) ? (
+                        <details className="group/actions relative" data-customer-actions="true">
+                          <summary
+                            aria-label={`Mở thao tác cho ${formatValue(item.full_name)}`}
+                            className="inline-flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center rounded-md border border-border bg-panel text-muted-foreground transition-colors hover:bg-muted hover:text-text lg:min-h-9 lg:min-w-9 [&::-webkit-details-marker]:hidden"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </summary>
+                          <div className="absolute right-0 top-full z-20 mt-1 min-w-40 overflow-hidden rounded-md border border-border bg-panel py-1 shadow-lg">
+                            {canUpdate ? (
+                              <Link
+                                href={`${detailPath}/${encodeURIComponent(id)}?mode=edit`}
+                                className="flex min-h-11 items-center px-3 text-sm text-text hover:bg-muted"
+                              >
+                                Sửa hồ sơ
+                              </Link>
+                            ) : null}
+                            {!archived && canArchive ? (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                className="flex min-h-11 w-full items-center px-3 text-left text-sm text-red-700 hover:bg-red-50 disabled:opacity-60"
+                                onClick={() =>
+                                  setPendingLifecycle({
+                                    id,
+                                    kind: 'archive',
+                                    name: formatValue(item.full_name)
+                                  })
+                                }
+                              >
+                                {busy ? 'Đang lưu...' : 'Lưu trữ hồ sơ'}
+                              </button>
+                            ) : null}
+                            {archived && canRestore ? (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                className="flex min-h-11 w-full items-center px-3 text-left text-sm text-text hover:bg-muted disabled:opacity-60"
+                                onClick={() =>
+                                  setPendingLifecycle({
+                                    id,
+                                    kind: 'restore',
+                                    name: formatValue(item.full_name)
+                                  })
+                                }
+                              >
+                                {busy ? 'Đang lưu...' : 'Khôi phục hồ sơ'}
+                              </button>
+                            ) : null}
+                          </div>
+                        </details>
                       ) : null}
                     </div>
                   </article>
@@ -363,6 +410,30 @@ export function CustomerListPage({
           </>
         )}
       </Card>
+      <ConfirmDialog
+        open={pendingLifecycle !== null}
+        title={pendingLifecycle?.kind === 'restore' ? 'Khôi phục hồ sơ khách hàng?' : 'Lưu trữ hồ sơ khách hàng?'}
+        description={
+          pendingLifecycle?.kind === 'restore'
+            ? `Hồ sơ “${pendingLifecycle?.name ?? ''}” sẽ xuất hiện lại trong danh sách đang hoạt động.`
+            : `Hồ sơ “${pendingLifecycle?.name ?? ''}” sẽ được ẩn khỏi danh sách mặc định nhưng không bị xóa khỏi hệ thống.`
+        }
+        confirmLabel={
+          pendingLifecycle && actionId === pendingLifecycle.id
+            ? 'Đang xử lý...'
+            : pendingLifecycle?.kind === 'restore'
+              ? 'Khôi phục'
+              : 'Lưu trữ'
+        }
+        tone={pendingLifecycle?.kind === 'restore' ? 'primary' : 'danger'}
+        pending={Boolean(pendingLifecycle && actionId === pendingLifecycle.id)}
+        onConfirm={() => {
+          if (pendingLifecycle) {
+            void applyLifecycleAction(pendingLifecycle.id, pendingLifecycle.kind);
+          }
+        }}
+        onClose={() => setPendingLifecycle(null)}
+      />
     </section>
   );
 }
@@ -398,181 +469,6 @@ function CustomerListSkeleton() {
       ))}
     </div>
   );
-}
-
-function buildCustomerListParams({
-  page,
-  pageSize,
-  query,
-  sourceKind,
-  deletedScope
-}: {
-  page: number;
-  pageSize: number;
-  query: string;
-  sourceKind: string;
-  deletedScope: string;
-}) {
-  const params = new URLSearchParams();
-  params.set('page', String(page));
-  params.set('page_size', String(pageSize));
-  params.set('source_kind', sourceKind);
-  params.set('deleted_scope', deletedScope);
-  if (query.trim()) {
-    params.set('q', query.trim());
-  }
-  return params;
-}
-
-async function fetchCustomersForExport(
-  endpoint: string,
-  filters: {
-    query: string;
-    sourceKind: string;
-    deletedScope: string;
-  }
-) {
-  const items: CustomerRecord[] = [];
-  let page = 1;
-  let pageCount = 1;
-
-  do {
-    const params = buildCustomerListParams({
-      page,
-      pageSize: CUSTOMER_EXPORT_PAGE_SIZE,
-      query: filters.query,
-      sourceKind: filters.sourceKind,
-      deletedScope: filters.deletedScope
-    });
-    const result = await apiClient.get<unknown>(`${endpoint}?${params.toString()}`);
-    const pageItems = extractItems(result);
-    items.push(...pageItems);
-
-    const pagination = extractPagination(result, items.length);
-    const rawPagination =
-      result && typeof result === 'object'
-        ? (result as { pagination?: { page_count?: number } }).pagination
-        : null;
-    pageCount = Math.max(
-      1,
-      Number(rawPagination?.page_count) ||
-        Math.ceil(
-          Number(pagination.total || items.length) /
-            Math.max(1, Number(pagination.page_size || CUSTOMER_EXPORT_PAGE_SIZE))
-        )
-    );
-    page += 1;
-  } while (page <= pageCount && page <= CUSTOMER_EXPORT_MAX_PAGES);
-
-  return uniqueRecordsById(items);
-}
-
-function customerExportRows(items: CustomerRecord[]) {
-  return items.map((item) => ({
-    ID: recordText(item, 'id'),
-    'Họ và tên': recordText(item, 'full_name'),
-    'Công ty': recordText(item, 'company_name'),
-    'Số điện thoại': recordText(item, 'phone'),
-    Email: recordText(item, 'email'),
-    'Số liên hệ': recordNumber(item, 'contact_count'),
-    'Số báo giá': recordNumber(item, 'quote_count'),
-    'Nguồn gần nhất': formatValue(item.last_interaction_kind),
-    'Tương tác gần nhất': formatDate(item.last_interaction_at),
-    'Trạng thái hồ sơ': item.deleted_at ? 'Đã lưu trữ' : 'Đang hoạt động',
-    'Tạo lúc': formatDate(item.created_at),
-    'Cập nhật lúc': formatDate(item.updated_at)
-  }));
-}
-
-function recordText(row: CustomerRecord, key: string) {
-  const value = row[key];
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return formatValue(value);
-}
-
-function recordNumber(row: CustomerRecord, key: string) {
-  const value = row[key];
-  const numberValue = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(numberValue) ? numberValue : 0;
-}
-
-function uniqueRecordsById(items: CustomerRecord[]) {
-  const seen = new Set<string>();
-
-  return items.filter((item) => {
-    const id = recordText(item, 'id');
-    if (!id) return true;
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-}
-
-function localDateStamp(date = new Date()) {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-}
-
-function downloadExcelFile({
-  filename,
-  title,
-  rows
-}: {
-  filename: string;
-  title: string;
-  rows: Array<Record<string, string | number>>;
-}) {
-  const headers = Object.keys(rows[0] ?? {});
-  const headerHtml = headers.map((header) => `<th>${escapeExcelHtml(header)}</th>`).join('');
-  const bodyHtml = rows
-    .map(
-      (row) =>
-        `<tr>${headers
-          .map((header) => `<td>${escapeExcelHtml(row[header])}</td>`)
-          .join('')}</tr>`
-    )
-    .join('');
-  const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <style>
-    body { font-family: Arial, sans-serif; }
-    h1 { font-size: 18px; }
-    table { border-collapse: collapse; margin-top: 16px; }
-    th, td { border: 1px solid #c8ceda; padding: 6px 8px; mso-number-format:"\\@"; }
-    th { background: #e8eef8; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <h1>${escapeExcelHtml(title)}</h1>
-  <table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>
-</body>
-</html>`;
-  const blob = new Blob(['\ufeff', html], {
-    type: 'application/vnd.ms-excel;charset=utf-8'
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename.endsWith('.xls') ? filename : `${filename}.xls`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function escapeExcelHtml(value: unknown) {
-  const text = value == null ? '' : String(value);
-  const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
-  return safeText
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function initials(value: unknown) {

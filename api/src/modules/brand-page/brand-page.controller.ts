@@ -1,6 +1,8 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 
 import { AuthGuard } from '../../common/auth/auth.guard';
+import { CurrentUser } from '../../common/auth/current-user.decorator';
+import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
 import { RequirePermissions } from '../../common/permissions/permission.decorator';
 import { PermissionGuard } from '../../common/permissions/permission.guard';
 import { WorkflowApprovalGuard } from '../../common/workflow/workflow-approval.guard';
@@ -32,8 +34,8 @@ export class BrandPageController {
 
   @Put(':id')
   @RequirePermissions('page_content.update')
-  updateBrandPage(@Param('id') id: string, @Body() body: UpdateBrandPageDto) {
-    return this.brandPageService.updateBrandPage(id, body);
+  updateBrandPage(@Param('id') id: string, @Body() body: UpdateBrandPageDto, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.brandPageService.updateBrandPage(id, body, currentUser);
   }
 
   @Post(':id/archive')

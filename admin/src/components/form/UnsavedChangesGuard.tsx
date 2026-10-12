@@ -5,6 +5,18 @@ import { useEffect, useRef, useState } from 'react';
 
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
 
+const ADMIN_BASE_PATH = '/admin';
+
+function routerHrefFromBrowserUrl(url: URL) {
+  let pathname = url.pathname;
+  if (pathname === ADMIN_BASE_PATH) {
+    pathname = '/';
+  } else if (pathname.startsWith(`${ADMIN_BASE_PATH}/`)) {
+    pathname = pathname.slice(ADMIN_BASE_PATH.length);
+  }
+  return `${pathname}${url.search}${url.hash}`;
+}
+
 export function UnsavedChangesGuard({
   when,
   title = 'Rời trang khi chưa lưu?',
@@ -84,7 +96,7 @@ export function UnsavedChangesGuard({
 
     const nextUrl = new URL(href);
     if (nextUrl.origin === window.location.origin) {
-      router.push(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+      router.push(routerHrefFromBrowserUrl(nextUrl));
       return;
     }
 

@@ -239,6 +239,6 @@ export function normalizeCtaButtons(value: unknown): CtaButton[] | null | undefi
   });
 }
 
-export function validationError(message: string, details?: Record<string, unknown>): AppError {
+function validationError(message: string, details?: Record<string, unknown>): AppError {
   return new AppError({ code: ErrorCodes.VALIDATION_ERROR, message, statusCode: HttpStatus.BAD_REQUEST, details: details ?? null });
 }

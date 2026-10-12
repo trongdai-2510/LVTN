@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
+import { POSTGRES_INTEGER_MAX } from '../../common/validation/databaseLimits';
 import { CONTACT_ALLOWED_STATUSES, CONTACT_DELETED_SCOPES } from './contact.types';
 
 const MAX_LOGIC_USER_ID = 2_147_483_647;
@@ -8,6 +9,7 @@ const MAX_LOGIC_USER_ID = 2_147_483_647;
 export class ContactListQueryDto {
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   q?: string;
 
   @IsOptional()
@@ -37,6 +39,7 @@ export class ContactListQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(POSTGRES_INTEGER_MAX)
   page?: number;
 
   @IsOptional()
@@ -64,9 +67,11 @@ export class ContactAssigneeDto {
 export class ContactInternalNoteDto {
   @IsOptional()
   @IsString()
+  @MaxLength(10_000)
   note_text?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10_000)
   note?: string;
 }

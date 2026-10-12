@@ -110,18 +110,12 @@ export function TiktokBrand(props: Props) {
 export function ZaloBrand(props: Props) {
   const { width, height, ...rest } = baseProps(props);
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width={width} height={height} {...rest}>
-      <path
-        fill="#2962FF"
-        d="M15 36V6.827l-1.211-.811C8.64 8.083 5 13.112 5 19v10c0 7.732 6.268 14 14 14h10c4.722 0 8.883-2.348 11.417-5.931V36H15z"
-      />
-      <path
-        fill="#2962FF"
-        d="M29 5H19c-1.845 0-3.601.366-5.214 1.014C10.453 9.25 8 14.528 8 19.5c0 8.547 7.187 15.5 16.054 15.5 8.867 0 16.054-6.953 16.054-15.5 0-1.293-.165-2.548-.474-3.741A14 14 0 0 1 43 19v10c0 7.732-6.268 14-14 14H19c-7.732 0-14-6.268-14-14V19c0-7.732 6.268-14 14-14h10z"
-      />
-      <path
-        fill="#fff"
-        d="M18.5 17h5v2h-5zm-2 8h9v2h-9zm12-2.5v-5h2v5zm-9 0v-5h2v5zm14 0v-5h2v5z"
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="174 174 420 420" width={width} height={height} {...rest}>
+      <image
+        width="768"
+        height="768"
+        href="/admin/assets/social/zalo-logo.png"
+        preserveAspectRatio="xMidYMid meet"
       />
     </svg>
   );

@@ -59,21 +59,20 @@ export function buildDerivedImportRow(
       'STPG',
       buildIdentitySeed([categoryMainName, categorySubName, productName])
     );
+  const explicitSku = getCell(rawRow.cells, mapping.sku_column);
+  const variantIdentity = explicitSku
+    ? ['sku', explicitSku]
+    : modelCode
+      ? ['model', modelCode]
+      : ['name', variantName];
   const variantExternalCode =
     getCell(rawRow.cells, mapping.variant_external_code_column) ??
     deterministicCode(
       'STPV',
-      buildIdentitySeed([
-        categoryMainName,
-        categorySubName,
-        productName,
-        variantName,
-        modelCode ?? '',
-        `row-${rawRow.source_row_number}`
-      ])
+      buildIdentitySeed([groupExternalCode, ...variantIdentity])
     );
   const sku =
-    getCell(rawRow.cells, mapping.sku_column) ??
+    explicitSku ??
     deterministicCode('STSKU', variantExternalCode);
   const parsedPrice = parsePublicPrice(getCell(rawRow.cells, mapping.public_price_column));
 

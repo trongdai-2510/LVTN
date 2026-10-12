@@ -8,8 +8,8 @@ const runtimeDirectory =
   path.join(workspaceRoot, 'tmp', 'qa-runtime');
 const reportPath = path.join(
   workspaceRoot,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'runtime-log-qa-last-run.md'
 );
 

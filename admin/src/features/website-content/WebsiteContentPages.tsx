@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArchiveRestore,
@@ -9,14 +9,9 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
-  CheckCircle2,
-  ChevronDown,
-  Clock3,
-  CloudUpload,
   CornerDownRight,
   Eye,
   ExternalLink,
-  Facebook,
   FileImage,
   FileText,
   FolderTree,
@@ -25,24 +20,15 @@ import {
   GripVertical,
   Home,
   Image as ImageIcon,
-  Instagram,
-  Linkedin,
   List,
   Link2,
-  Mail,
-  MapPin,
   Navigation,
   Pencil,
-  Phone,
   Plus,
-  Save,
   Search,
   Settings,
-  Share2,
   Trash2,
-  TriangleAlert,
-  X,
-  Youtube
+  X
 } from '@/components/icons';
 
 import { Badge } from '@/components/ui/Badge';
@@ -50,7 +36,6 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -58,6 +43,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Textarea } from '@/components/ui/Textarea';
 import { Pagination } from '@/components/data-table/Pagination';
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
+import { ActionResultDialog, type ActionResultDialogState } from '@/components/feedback/ActionResultDialog';
 import { Field } from '@/components/form/Field';
 import { FormActions } from '@/components/form/FormActions';
 import { ReadOnlyBanner } from '@/components/form/ReadOnlyBanner';
@@ -81,8 +67,22 @@ import {
   type PageContentTemplate
 } from '@/features/website-content/page-content-studio/pageContentTemplates';
 import { FileDetailDrawer } from '@/features/website-content/FileDetailDrawer';
+import { bannerPositionLabel as getBannerPositionLabel } from '@/features/website-content/bannerPositions';
+import { BannerPagePicker } from '@/features/website-content/BannerPagePicker';
 import { FileLibraryZones } from '@/features/website-content/FileLibraryZones';
 import { FileUploadModal } from '@/features/website-content/FileUploadModal';
+import {
+  CONTENT_CONFIGS,
+  type ContentKind
+} from '@/features/website-content/contentConfig';
+import {
+  appendContentFilters,
+  contentCreateLabel,
+  contentListFiltersFromSearchParams,
+  hasContentFilters,
+  parseContentListPage,
+  type ContentListFilters
+} from '@/features/website-content/contentFilters';
 import { extractItems, extractPagination, extractRecord } from '@/features/shared/extract';
 import { apiClient } from '@/lib/api-client';
 import { byId, endpoints } from '@/lib/api-endpoints';
@@ -90,25 +90,15 @@ import { cn } from '@/lib/cn';
 import {
   deriveFileUsageGroup,
   fileUsageGroupLabel,
-  fileUsageGroupHint,
   type FileUsageGroup,
   type FileUsageGroupFilter
 } from '@/lib/file-workflow';
 import { formatDate, formatValue } from '@/lib/formatters';
+import { scrollToFirstError } from '@/lib/form-focus';
 import type { AdminErrorContext } from '@/lib/admin-error-messages';
 import { PERMISSIONS } from '@/lib/permissions';
 
 type RecordMap = Record<string, unknown>;
-type ContentKind = 'page-content' | 'banner' | 'redirect';
-type ContentListFilters = {
-  status: string;
-  review_status: string;
-  publish_status: string;
-  content_type: string;
-  redirect_type: string;
-  position: string;
-  deleted_scope: 'active' | 'deleted' | 'all';
-};
 type FormErrors = Record<string, string>;
 type FieldOption = string | { value: string; label: string };
 type FieldSpec = {
@@ -124,18 +114,6 @@ type FieldSpec = {
   autoComplete?: string;
   control?: 'map-embed';
 };
-type SocialLinkForm = {
-  platform: string;
-  label: string;
-  url: string;
-  sort_order: string;
-  status: string;
-};
-type SocialLinkAction = {
-  id: string;
-  action: 'archive' | 'restore';
-};
-type SocialLinkFilter = 'all' | 'active' | 'archived';
 type RecordAction = 'archive' | 'restore';
 type MenuPositionKey = 'header' | 'footer_quick' | 'footer_support' | 'footer_legal';
 type MenuLinkType = 'internal' | 'external' | 'anchor' | 'group';
@@ -162,42 +140,6 @@ type SectionSpec = {
   fields: FieldSpec[];
   collapsible?: boolean;
 };
-
-const contentMeta = {
-  'page-content': {
-    title: 'Trang nội dung',
-    subtitle: 'Bài viết, trang giới thiệu, dịch vụ — toàn bộ nội dung tĩnh của website.',
-    endpoint: endpoints.songThanh.pageContents,
-    detailPath: '/page-contents',
-    read: PERMISSIONS.pageContentRead,
-    create: PERMISSIONS.pageContentCreate,
-    update: PERMISSIONS.pageContentUpdate,
-    archive: PERMISSIONS.pageContentArchive,
-    restore: PERMISSIONS.pageContentRestore
-  },
-  banner: {
-    title: 'Banner',
-    subtitle: 'Ảnh quảng cáo và banner trên website — tiêu đề, hình ảnh, liên kết, lịch đăng.',
-    endpoint: endpoints.songThanh.banners,
-    detailPath: '/banners',
-    read: PERMISSIONS.bannerRead,
-    create: PERMISSIONS.bannerCreate,
-    update: PERMISSIONS.bannerUpdate,
-    archive: PERMISSIONS.bannerArchive,
-    restore: PERMISSIONS.bannerRestore
-  },
-  redirect: {
-    title: 'Chuyển hướng URL',
-    subtitle: 'Khi đường dẫn cũ thay đổi, tạo chuyển hướng để khách truy cập không gặp lỗi.',
-    endpoint: endpoints.songThanh.redirects,
-    detailPath: '/redirects',
-    read: PERMISSIONS.redirectRead,
-    create: PERMISSIONS.redirectCreate,
-    update: PERMISSIONS.redirectUpdate,
-    archive: PERMISSIONS.redirectArchive,
-    restore: PERMISSIONS.redirectRestore
-  }
-} satisfies Record<ContentKind, Record<string, string>>;
 
 function useAuth() {
   const [authState, setAuthState] = useState<AuthState>(() => authStore.getState());
@@ -253,6 +195,11 @@ export function MenuWorkspacePage() {
     deletedScope !== 'active';
   const canCreate = auth.permissions.includes(PERMISSIONS.menuCreate);
   const sortedItems = useMemo(() => sortMenuRecords(items), [items]);
+  const menuSections = [
+    { title: 'Đầu trang', items: sortedItems.filter((item) => String(item.position ?? '') === 'header') },
+    { title: 'Chân trang', items: sortedItems.filter((item) => String(item.position ?? '').startsWith('footer_')) },
+    { title: 'Khác', items: sortedItems.filter((item) => !['header', 'footer_quick', 'footer_support', 'footer_legal'].includes(String(item.position ?? ''))) }
+  ].filter((section) => section.items.length > 0);
 
   function clearFilters() {
     setQuery('');
@@ -265,8 +212,8 @@ export function MenuWorkspacePage() {
   return (
     <ContentListShell
       eyebrow="Cấu hình điều hướng"
-      title="Menu điều hướng"
-      subtitle="Quản lý menu điều hướng."
+      title="Menu website"
+      subtitle="Đầu trang và chân trang được quản lý riêng."
       query={query}
       onQuery={(value) => {
         setQuery(value);
@@ -335,8 +282,10 @@ export function MenuWorkspacePage() {
           </Card>
         ) : (
           <div className="space-y-4">
-            <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-4">
-              {sortedItems.map((item) => {
+            {menuSections.map((section) => <section key={section.title} aria-label={section.title}>
+              <h2 className="mb-3 text-sm font-semibold text-text">{section.title}</h2>
+              <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+              {section.items.map((item) => {
                 const position = String(item.position ?? '');
                 const meta = menuPositionMeta(position);
                 const archived = Boolean(item.deleted_at);
@@ -378,7 +327,8 @@ export function MenuWorkspacePage() {
                   </Link>
                 );
               })}
-            </div>
+              </div>
+            </section>)}
             <Pagination page={pagination.page} pageSize={pagination.page_size} total={pagination.total} onPageChange={setPage} />
           </div>
         )}
@@ -396,14 +346,13 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [errorContext, setErrorContext] = useState<'module-load' | 'module-save' | 'module-action'>('module-load');
-  const [message, setMessage] = useState('');
+  const [resultDialog, setResultDialog] = useState<ActionResultDialogState | null>(null);
   const [form, setForm] = useState({ name: '', position: '', status: '' });
   const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
   const [itemForm, setItemForm] = useState<MenuItemForm>(emptyMenuItemForm());
   const [itemFieldErrors, setItemFieldErrors] = useState<FormErrors>({});
   const [itemSaving, setItemSaving] = useState(false);
   const [itemReordering, setItemReordering] = useState(false);
-  const [itemMessage, setItemMessage] = useState('');
   const [selectedItemId, setSelectedItemId] = useState('');
   const [itemPanelOpen, setItemPanelOpen] = useState(false);
   const [itemDeletedScope] = useState<'active' | 'deleted' | 'all'>('active');
@@ -419,6 +368,28 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
   const canArchiveItem = auth.permissions.includes(PERMISSIONS.menuItemArchive);
   const canRestoreItem = auth.permissions.includes(PERMISSIONS.menuItemRestore);
   const canSave = isCreate ? canCreate : canUpdate;
+
+  function showSavedResult(title: string, nextMenuId?: string, stayOnPage = false) {
+    const nextDetailHref = nextMenuId ? `/menu/${nextMenuId}` : '';
+    const returnAction = {
+      label: 'Về danh sách menu',
+      onSelect: () => router.push('/menu')
+    };
+    const stayAction = {
+      label: 'Tiếp tục chỉnh sửa',
+      onSelect: () => {
+        if (nextDetailHref) router.replace(nextDetailHref);
+      }
+    };
+    setResultDialog({
+      tone: 'success',
+      title,
+      description: 'Thao tác đã hoàn tất.',
+      primaryAction: stayOnPage ? stayAction : returnAction,
+      secondaryAction: stayOnPage ? returnAction : stayAction,
+      afterClose: nextDetailHref ? () => router.replace(nextDetailHref) : undefined
+    });
+  }
 
   const load = useCallback(async () => {
     if (isCreate) {
@@ -525,8 +496,12 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
     setSelectedItemId('');
     setItemForm(emptyMenuItemForm(parentId, nextSortOrderForParent(parentId, activeItems)));
     setItemFieldErrors({});
-    setItemMessage('');
     setItemPanelOpen(true);
+  }
+
+  function beginCreateFooterGroup() {
+    beginCreateItem();
+    setItemForm((current) => ({ ...current, link_type: 'group' }));
   }
 
   function closeItemPanel() {
@@ -542,12 +517,10 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
     const nextFieldErrors = validateMenuForm(form);
     if (Object.keys(nextFieldErrors).length > 0) {
       setFieldErrors(nextFieldErrors);
-      setMessage('');
       return;
     }
     setSaving(true);
     setError(null);
-    setMessage('');
     try {
       const payload = {
         name: form.name.trim(),
@@ -561,10 +534,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
       setData(result);
       setForm({ name: String(nextMenu.name ?? ''), position: String(nextMenu.position ?? ''), status: String(nextMenu.status ?? '') });
       setFieldErrors({});
-      setMessage(isCreate ?'Đã tạo menu.' : 'Đã lưu cấu hình menu.');
-      if (isCreate && nextMenu.id) {
-        router.replace(`/menu/${String(nextMenu.id)}`);
-      }
+      showSavedResult(isCreate ? 'Đã tạo menu' : 'Đã lưu menu', isCreate ? String(nextMenu.id ?? '') : undefined);
     } catch (err) {
       setError(err);
     } finally {
@@ -579,13 +549,11 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
     const nextItemErrors = validateMenuItemForm(itemForm, selectedItemId);
     if (Object.keys(nextItemErrors).length > 0) {
       setItemFieldErrors(nextItemErrors);
-      setItemMessage('');
       return;
     }
 
     setItemSaving(true);
     setError(null);
-    setItemMessage('');
     setErrorContext('module-save');
     try {
       const payload = normalizeMenuItemPayload(itemForm);
@@ -605,7 +573,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
         setItemPanelOpen(false);
         setItemForm(emptyMenuItemForm());
       }
-      setItemMessage(selectedItemId ? 'Đã lưu mục menu.' : 'Đã thêm mục menu.');
+      showSavedResult(selectedItemId ? 'Đã lưu mục menu' : 'Đã thêm mục menu', undefined, true);
     } catch (err) {
       setError(err);
     } finally {
@@ -636,7 +604,6 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
     setItemReordering(true);
     setError(null);
     setErrorContext('module-action');
-    setItemMessage('');
     try {
       const result = await apiClient.post<RecordMap>(`${byId(endpoints.songThanh.menus, id)}/items/reorder`, {
         items: activeItems.map((entry) => ({
@@ -646,7 +613,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
         }))
       });
       setData(result);
-      setItemMessage('Đã sắp xếp menu.');
+      showSavedResult('Đã sắp xếp menu', undefined, true);
     } catch (err) {
       setError(err);
     } finally {
@@ -664,11 +631,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
         `${byId(endpoints.songThanh.menus, id)}/${pendingMenuAction}`
       );
       setData(result);
-      setMessage(
-        pendingMenuAction === 'archive'
-          ? 'Đã lưu trữ menu.'
-          : 'Đã khôi phục menu.'
-      );
+      showSavedResult(pendingMenuAction === 'archive' ? 'Đã lưu trữ menu' : 'Đã khôi phục menu');
       setFieldErrors({});
     } catch (err) {
       setError(err);
@@ -688,11 +651,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
         `${byId(endpoints.songThanh.menuItems, pendingItemAction.id)}/${pendingItemAction.action}`
       );
       setData(result);
-      setItemMessage(
-        pendingItemAction.action === 'archive'
-          ? 'Đã lưu trữ mục menu.'
-          : 'Đã khôi phục mục menu.'
-      );
+      showSavedResult(pendingItemAction.action === 'archive' ? 'Đã lưu trữ mục menu' : 'Đã khôi phục mục menu', undefined, true);
       if (pendingItemAction.id === selectedItemId) {
         setSelectedItemId('');
         setItemForm(emptyMenuItemForm());
@@ -718,7 +677,6 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
         subtitle={isCreate ? 'Chọn khu vực hiển thị rồi tạo menu.' : menuPositionLabel(form.position)}
       />
       {error ? <ErrorState error={error} context={errorContext} /> : null}
-      {message ? <Notice>{message}</Notice> : null}
       <Card className="overflow-hidden">
         <div className="flex items-center gap-2 border-b border-border bg-muted px-4 py-3">
           <Settings className="h-4 w-4 text-muted-foreground" />
@@ -733,7 +691,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
               onChange={(event) => updateMenuField('name', event.target.value)}
             />
           </Field>
-          <Field label="Vị trí" required error={fieldErrors.position}>
+          <Field label="Khu vực trên website" required error={fieldErrors.position}>
             <Select
               className={fieldErrors.position ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : ''}
               value={form.position}
@@ -800,16 +758,18 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
                 </div>
               </div>
               {canCreateItem && !menuArchived ? (
-                <Button type="button" size="sm" onClick={() => beginCreateItem()}>
-                  <Plus className="h-4 w-4" /> Thêm mục
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  {form.position === 'footer_quick' || form.position === 'footer_support' ? (
+                    <Button type="button" size="sm" variant="secondary" onClick={beginCreateFooterGroup}>
+                      <Plus className="h-4 w-4" /> Thêm nhóm chân trang
+                    </Button>
+                  ) : null}
+                  <Button type="button" size="sm" onClick={() => beginCreateItem()}>
+                    <Plus className="h-4 w-4" /> Thêm liên kết
+                  </Button>
+                </div>
               ) : null}
             </div>
-            {itemMessage ? (
-              <div className="border-b border-border bg-blue-50/70 px-4 py-2 text-xs text-blue-800">
-                {itemMessage}
-              </div>
-            ) : null}
             <div className="space-y-2 p-4">
               {treeItems.length === 0 ? (
                 <div className="rounded-sm border border-dashed border-border bg-muted/30 px-3 py-10 text-center text-sm text-muted-foreground">
@@ -875,7 +835,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
               </div>
               {itemPanelOpen ? (
                 <form onSubmit={saveMenuItem} className="space-y-3 p-4">
-                  <Field label="Tên hiển thị" required error={itemFieldErrors.title}>
+                  <Field label={currentLinkType === 'group' ? 'Tên nhóm hiển thị' : 'Tên liên kết hiển thị'} required error={itemFieldErrors.title}>
                     <Input
                       className={itemFieldErrors.title ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : ''}
                       value={itemForm.title}
@@ -988,6 +948,7 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
           </div>
         </div>
       ) : null}
+      <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
       <ConfirmDialog
         open={pendingMenuAction !== null}
         title={pendingMenuAction === 'restore' ? 'Khôi phục menu?' : 'Lưu trữ menu?'}
@@ -1021,14 +982,16 @@ export function MenuDetailWorkspacePage({ id }: { id: string }) {
 
   function editMenuItemFromTree(item: RecordMap) {
     setSelectedItemId(String(item.id ?? ''));
-    setItemMessage('');
     setItemPanelOpen(true);
   }
 }
 
 export function WebsiteContentListPage({ kind }: { kind: ContentKind }) {
-  const meta = contentMeta[kind];
+  const meta = CONTENT_CONFIGS[kind];
   const auth = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const canCreate = auth.permissions.includes(meta.create);
 
   if (meta.detailPath === '/page-contents') {
@@ -1046,17 +1009,13 @@ export function WebsiteContentListPage({ kind }: { kind: ContentKind }) {
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState<ContentListFilters>({
-    status: '',
-    review_status: '',
-    publish_status: '',
-    content_type: '',
-    redirect_type: '',
-    position: '',
-    deleted_scope: 'active'
-  });
-  const [page, setPage] = useState(1);
+  const searchParamKey = searchParams.toString();
+  const query = searchParams.get('q') ?? '';
+  const filters = useMemo(
+    () => contentListFiltersFromSearchParams(new URLSearchParams(searchParamKey)),
+    [searchParamKey]
+  );
+  const page = parseContentListPage(searchParams.get('page'));
 
   useEffect(() => {
     let active = true;
@@ -1086,22 +1045,36 @@ export function WebsiteContentListPage({ kind }: { kind: ContentKind }) {
   const hasActiveFilters = query.trim().length > 0 || hasContentFilters(kind, filters);
 
   function updateFilter(key: keyof ContentListFilters, value: string) {
-    setFilters((current) => ({ ...current, [key]: value }));
-    setPage(1);
+    updateListUrl((next) => {
+      if (!value || (key === 'deleted_scope' && value === 'active')) next.delete(key);
+      else next.set(key, value);
+      next.delete('page');
+    });
   }
 
   function clearFilters() {
-    setQuery('');
-    setFilters({
-      status: '',
-      review_status: '',
-      publish_status: '',
-      content_type: '',
-      redirect_type: '',
-      position: '',
-      deleted_scope: 'active'
+    updateListUrl((next) => {
+      for (const key of [
+        'q',
+        'status',
+        'review_status',
+        'publish_status',
+        'content_type',
+        'redirect_type',
+        'position',
+        'deleted_scope',
+        'page'
+      ]) {
+        next.delete(key);
+      }
     });
-    setPage(1);
+  }
+
+  function updateListUrl(mutate: (next: URLSearchParams) => void) {
+    const next = new URLSearchParams(searchParams.toString());
+    mutate(next);
+    const href = next.size > 0 ? `${pathname}?${next.toString()}` : pathname;
+    router.replace(href, { scroll: false });
   }
 
   return (
@@ -1110,9 +1083,13 @@ export function WebsiteContentListPage({ kind }: { kind: ContentKind }) {
         title={meta.title}
         subtitle={meta.subtitle}
       query={query}
+      queryPlaceholder={kind === 'banner' ? 'Tìm tên banner hoặc đường dẫn trang...' : undefined}
       onQuery={(value) => {
-        setQuery(value);
-        setPage(1);
+        updateListUrl((next) => {
+          if (value) next.set('q', value);
+          else next.delete('q');
+          next.delete('page');
+        });
       }}
       hasActiveFilters={hasActiveFilters}
       onClear={clearFilters}
@@ -1131,7 +1108,17 @@ export function WebsiteContentListPage({ kind }: { kind: ContentKind }) {
         ) : (
           <>
             {kind === 'page-content' ?<PageContentRows items={items} /> : kind === 'banner' ?<BannerRows items={items} /> : <RedirectRows items={items} />}
-            <Pagination page={pagination.page} pageSize={pagination.page_size} total={pagination.total} onPageChange={setPage} />
+            <Pagination
+              page={pagination.page}
+              pageSize={pagination.page_size}
+              total={pagination.total}
+              onPageChange={(nextPage) =>
+                updateListUrl((next) => {
+                  if (nextPage <= 1) next.delete('page');
+                  else next.set('page', String(nextPage));
+                })
+              }
+            />
           </>
         )}
       </Card>
@@ -1150,16 +1137,17 @@ export function WebsiteContentDetailPage({
 }) {
   const auth = useAuth();
   const router = useRouter();
-  const meta = contentMeta[kind];
+  const meta = CONTENT_CONFIGS[kind];
   const isCreate = id === 'new';
   const [record, setRecord] = useState<RecordMap>({});
   const [form, setForm] = useState<Record<string, string>>({});
   const [baselineForm, setBaselineForm] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(!isCreate);
   const [saving, setSaving] = useState(false);
+  const mutationInFlightRef = useRef(false);
   const [error, setError] = useState<unknown>(null);
   const [errorContext, setErrorContext] = useState<'module-load' | 'module-save' | 'module-action'>('module-load');
-  const [message, setMessage] = useState('');
+  const [resultDialog, setResultDialog] = useState<ActionResultDialogState | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
   const [pendingAction, setPendingAction] = useState<ContentPendingAction | null>(null);
   const canUpdate = auth.permissions.includes(meta.update);
@@ -1169,6 +1157,26 @@ export function WebsiteContentDetailPage({
   const canSave = isCreate ? canCreate : canUpdate;
 
   const fields = detailFields[kind];
+
+  function showContentResult(title: string, description: string, nextRecordId?: string) {
+    const nextDetailHref = nextRecordId ? `${meta.detailPath}/${nextRecordId}` : '';
+    setResultDialog({
+      tone: 'success',
+      title,
+      description,
+      primaryAction: {
+        label: kind === 'page-content' ? 'Về trang nội dung' : 'Về danh sách',
+        onSelect: () => router.push(meta.detailPath)
+      },
+      secondaryAction: {
+        label: 'Tiếp tục chỉnh sửa',
+        onSelect: () => {
+          if (nextDetailHref) router.replace(nextDetailHref);
+        }
+      },
+      afterClose: nextDetailHref ? () => router.replace(nextDetailHref) : undefined
+    });
+  }
 
   useEffect(() => {
     if (isCreate) {
@@ -1213,18 +1221,30 @@ export function WebsiteContentDetailPage({
 
   async function save(event: FormEvent, formOverride?: Record<string, string>) {
     event.preventDefault();
-    if (!canSave) return;
+    if (!canSave || mutationInFlightRef.current) return;
     const nextForm = formOverride ?? form;
-    const nextFieldErrors = validateContentForm(kind, nextForm);
+    const nextFieldErrors = validateContentForm(
+      kind,
+      nextForm,
+      formOverride?.publish_status === 'published'
+    );
     if (Object.keys(nextFieldErrors).length > 0) {
       setFieldErrors(nextFieldErrors);
-      setMessage('');
+      setResultDialog({
+        tone: 'warning',
+        title: 'Chưa lưu được',
+        description: 'Kiểm tra các mục được đánh dấu rồi thử lại.',
+        details: [...new Set(Object.values(nextFieldErrors))].slice(0, 4)
+      });
+      window.requestAnimationFrame(() => {
+        scrollToFirstError(document, Object.keys(nextFieldErrors));
+      });
       return;
     }
+    mutationInFlightRef.current = true;
     setSaving(true);
     setError(null);
     setErrorContext('module-save');
-    setMessage('');
     try {
       const payload = Object.fromEntries(
         Object.entries(nextForm).map(([key, value]) => {
@@ -1232,7 +1252,7 @@ export function WebsiteContentDetailPage({
             try {
               return [key, value ? JSON.parse(value) : { blocks: [] }];
             } catch {
-              return [key, { blocks: [] }];
+              throw new Error('Dữ liệu khối nội dung phụ không hợp lệ. Tải lại trang trước khi lưu để tránh mất dữ liệu.');
             }
           }
           if (key === 'is_featured') {
@@ -1244,9 +1264,17 @@ export function WebsiteContentDetailPage({
           return [key, normalizeValue(value)];
         })
       );
+      if (kind === 'page-content' && !isCreate && !formOverride) {
+        // Saving content is not a request to approve or publish it.
+        delete payload.review_status;
+        delete payload.publish_status;
+      }
       const result = isCreate
         ? await apiClient.post<unknown>(meta.endpoint, payload)
-        : await apiClient.put<unknown>(byId(meta.endpoint, id), payload);
+        : await apiClient.put<unknown>(byId(meta.endpoint, id), {
+            ...payload,
+            expected_updated_at: String(record.updated_at ?? '')
+          });
       const nextRecord = extractContentRecord(kind, result);
       const savedForm = toForm(
         nextRecord,
@@ -1256,25 +1284,45 @@ export function WebsiteContentDetailPage({
       setForm(savedForm);
       setBaselineForm(savedForm);
       setFieldErrors({});
-      setMessage(isCreate ?'Đã tạo bản ghi.' : 'Đã lưu thay đổi.');
-      if (isCreate && nextRecord.id) {
-        router.replace(`${meta.detailPath}/${String(nextRecord.id)}`);
+      const publishedByAction =
+        kind === 'page-content' &&
+        formOverride?.publish_status === 'published' &&
+        savedForm.publish_status === 'published';
+      const savedNeedsPublication =
+        kind === 'page-content' &&
+        !formOverride &&
+        auth.roles.includes('super_admin') &&
+        savedForm.review_status === 'pending_review' &&
+        savedForm.publish_status === 'unpublished';
+      let successMessage = isCreate ? 'Đã tạo bản ghi.' : 'Đã lưu thay đổi.';
+      if (publishedByAction) successMessage = 'Đã xuất bản trên website.';
+      else if (savedNeedsPublication) {
+        successMessage = 'Đã lưu bản sửa. Nội dung mới chưa hiện ngoài website; kiểm tra rồi chọn Xuất bản để áp dụng.';
       }
+      showContentResult(
+        publishedByAction ? 'Đã xuất bản' : isCreate ? 'Đã tạo nội dung' : 'Đã lưu thay đổi',
+        successMessage,
+        isCreate ? String(nextRecord.id ?? '') : undefined
+      );
     } catch (err) {
       setError(err);
+      setResultDialog({ tone: 'error', title: 'Không lưu được', error: err, errorContext: 'module-save' });
     } finally {
+      mutationInFlightRef.current = false;
       setSaving(false);
     }
   }
 
   async function runRecordAction() {
-    if (isCreate || !pendingAction) return;
+    if (isCreate || !pendingAction || mutationInFlightRef.current) return;
+    mutationInFlightRef.current = true;
     setSaving(true);
     setError(null);
     setErrorContext('module-action');
     try {
       const result = await apiClient.post<unknown>(
-        `${byId(meta.endpoint, id)}/${pendingAction.action}`
+        `${byId(meta.endpoint, id)}/${pendingAction.action}`,
+        { expected_updated_at: String(record.updated_at ?? '') }
       );
       const nextRecord = extractContentRecord(kind, result);
       const restoredForm = toForm(
@@ -1284,16 +1332,53 @@ export function WebsiteContentDetailPage({
       setRecord(nextRecord);
       setForm(restoredForm);
       setBaselineForm(restoredForm);
-      setMessage(
-        pendingAction.action === 'archive'
-          ? 'Đã lưu trữ bản ghi.'
-          : 'Đã khôi phục bản ghi.'
+      showContentResult(
+        pendingAction.action === 'archive' ? 'Đã lưu trữ nội dung' : 'Đã khôi phục nội dung',
+        pendingAction.action === 'archive' ? 'Đã lưu trữ bản ghi.' : 'Đã khôi phục bản ghi.'
       );
     } catch (err) {
       setError(err);
     } finally {
+      mutationInFlightRef.current = false;
       setSaving(false);
       setPendingAction(null);
+    }
+  }
+
+  async function unpublishPage() {
+    if (kind !== 'page-content' || isCreate || !canSave || mutationInFlightRef.current) return;
+    const baselineAtRequest = baselineForm;
+    mutationInFlightRef.current = true;
+    setSaving(true);
+    setError(null);
+    setErrorContext('module-action');
+    try {
+      const result = await apiClient.put<unknown>(byId(meta.endpoint, id), {
+        publish_status: 'unpublished',
+        expected_updated_at: String(record.updated_at ?? '')
+      });
+      const nextRecord = extractContentRecord(kind, result);
+      const nextBaseline = toForm(
+        nextRecord,
+        fields.flatMap((section) => section.fields.map((field) => field.key))
+      );
+      setRecord(nextRecord);
+      setBaselineForm(nextBaseline);
+      setForm((current) => !areStringMapsEqual(current, baselineAtRequest)
+        ? { ...current, publish_status: 'unpublished' }
+        : nextBaseline);
+      setFieldErrors({});
+      setResultDialog({
+        tone: 'success',
+        title: 'Đã ẩn khỏi website',
+        description: 'Nội dung vẫn được giữ trong quản trị. Các chỉnh sửa chưa lưu (nếu có) vẫn còn trên màn hình này.'
+      });
+    } catch (err) {
+      setError(err);
+      setResultDialog({ tone: 'error', title: 'Không ẩn được trang', error: err, errorContext: 'module-action' });
+    } finally {
+      mutationInFlightRef.current = false;
+      setSaving(false);
     }
   }
 
@@ -1313,10 +1398,12 @@ export function WebsiteContentDetailPage({
     });
   }
 
+  const isDirty = !loading && !areStringMapsEqual(form, baselineForm);
+  const changedFields = isDirty ? getChangedFormFields(form, baselineForm) : [];
+
   if (loading) return <Skeleton className="h-[560px] w-full" />;
 
   const archived = Boolean(record.deleted_at);
-  const isDirty = !loading && !areStringMapsEqual(form, baselineForm);
 
   if (kind === 'page-content') {
     return (
@@ -1334,10 +1421,12 @@ export function WebsiteContentDetailPage({
           saving={saving}
           error={error}
           errorContext={errorContext}
-          message={message}
           id={id}
+          isDirty={isDirty}
+          changedFields={changedFields}
           onFieldChange={updateField}
           onSave={save}
+          onUnpublish={unpublishPage}
           onArchive={() => setPendingAction({ action: 'archive' })}
           onRestore={() => setPendingAction({ action: 'restore' })}
           pendingAction={pendingAction}
@@ -1345,6 +1434,7 @@ export function WebsiteContentDetailPage({
           onConfirmAction={runRecordAction}
           initialTemplateId={initialTemplateId}
         />
+        <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
       </>
     );
   }
@@ -1358,7 +1448,6 @@ export function WebsiteContentDetailPage({
       />
       {!canSave ? <ReadOnlyBanner>Không có quyền lưu dữ liệu, màn hình đang ở chế độ chỉ đọc.</ReadOnlyBanner> : null}
       {error ?<ErrorState error={error} context={errorContext} /> : null}
-      {message ?<Notice>{message}</Notice> : null}
       <form onSubmit={save}>
         <div className={cn('grid gap-4', isCreate ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_320px]')}>
           <div className="space-y-4">
@@ -1478,6 +1567,7 @@ export function WebsiteContentDetailPage({
           />
         </Card>
       </form>
+      <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
       <ConfirmDialog
         open={Boolean(pendingAction)}
         title={pendingAction?.action === 'restore' ? 'Khôi phục bản ghi?' : 'Lưu trữ bản ghi?'}
@@ -1506,10 +1596,12 @@ function PageContentDetailForm(props: {
   saving: boolean;
   error: unknown;
   errorContext: AdminErrorContext;
-  message: string;
   id: string;
+  isDirty: boolean;
+  changedFields: string[];
   onFieldChange: (key: string, value: string) => void;
   onSave: (event: FormEvent, formOverride?: Record<string, string>) => void;
+  onUnpublish: () => void;
   onArchive: () => void;
   onRestore: () => void;
   pendingAction: ContentPendingAction | null;
@@ -1651,12 +1743,13 @@ function ContentListFilterControls({
           onChange={(value) => onFilterChange('status', value)}
           options={statusFilterOptions}
         />
-        <CompactFilterSelect
-          label="Vị trí"
-          value={filters.position}
-          onChange={(value) => onFilterChange('position', value)}
-          options={bannerPositionFilterOptions}
-        />
+        <div className="min-w-[210px]">
+          <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor="banner-list-position">Trang hiển thị</label>
+          <div className="flex items-center gap-2">
+            <BannerPagePicker inputId="banner-list-position" value={filters.position} readOnly={false} placeholder="Tất cả trang" onChange={(value) => onFilterChange('position', value)} />
+            {filters.position ? <button aria-label="Bỏ lọc trang" className="min-h-11 shrink-0 rounded-lg px-2 text-xs font-semibold text-primary hover:bg-blue-50" onClick={() => onFilterChange('position', '')} type="button">Bỏ lọc</button> : null}
+          </div>
+        </div>
       </>
     );
   }
@@ -1683,41 +1776,6 @@ function ContentListFilterControls({
       />
     </>
   );
-}
-
-function appendContentFilters(params: URLSearchParams, kind: ContentKind, filters: ContentListFilters) {
-  if (filters.deleted_scope !== 'active') {
-    params.set('deleted_scope', filters.deleted_scope);
-  }
-  if (kind === 'page-content') {
-    setParam(params, 'content_type', filters.content_type);
-    setParam(params, 'review_status', filters.review_status);
-    setParam(params, 'publish_status', filters.publish_status);
-  }
-  if (kind === 'banner') {
-    setParam(params, 'status', filters.status);
-    setParam(params, 'position', filters.position);
-  }
-  if (kind === 'redirect') {
-    setParam(params, 'status', filters.status);
-    setParam(params, 'redirect_type', filters.redirect_type);
-  }
-}
-
-function hasContentFilters(kind: ContentKind, filters: ContentListFilters) {
-  if (kind === 'page-content') {
-    return Boolean(
-      filters.content_type || filters.review_status || filters.publish_status || filters.deleted_scope !== 'active'
-    );
-  }
-  if (kind === 'banner') return Boolean(filters.status || filters.position || filters.deleted_scope !== 'active');
-  return Boolean(filters.status || filters.redirect_type || filters.deleted_scope !== 'active');
-}
-
-function contentCreateLabel(kind: ContentKind) {
-  if (kind === 'page-content') return 'Tạo trang nội dung';
-  if (kind === 'banner') return 'Tạo banner';
-  return 'Tạo chuyển hướng';
 }
 
 type FileManagerMode = 'usage' | 'files';
@@ -1876,6 +1934,8 @@ function FileUsageRecordCard({
 }
 
 export function FileManagerPage() {
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams.get('q') ?? '';
   const auth = useAuth();
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [mode, setMode] = useState<FileManagerMode>('usage');
@@ -1885,7 +1945,7 @@ export function FileManagerPage() {
   const [usageRecordsLoading, setUsageRecordsLoading] = useState(true);
   const [error, setError] = useState('');
   const [usageRecordsError, setUsageRecordsError] = useState('');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(routeQuery);
   const [usageGroup, setUsageGroup] = useState<FileUsageGroupFilter>('all');
   const [filters, setFilters] = useState<FileManagerFilters>(() =>
     defaultFileManagerFilters()
@@ -1893,6 +1953,8 @@ export function FileManagerPage() {
   const [page, setPage] = useState(1);
   const [usagePage, setUsagePage] = useState(1);
   const [selectedFileId, setSelectedFileId] = useState('');
+  const [pendingUploadedFileId, setPendingUploadedFileId] = useState('');
+  const [fileRefreshVersion, setFileRefreshVersion] = useState(0);
   const [selectedUsageRecord, setSelectedUsageRecord] =
     useState<FileUsageRecordSummary | null>(null);
   const [fileDetail, setFileDetail] = useState<RecordMap>({});
@@ -1915,6 +1977,12 @@ export function FileManagerPage() {
     filters.is_orphan !== 'all' ||
     filters.storage_location !== 'all' ||
     filters.entity_type !== 'all';
+
+  useEffect(() => {
+    setQuery(routeQuery);
+    setPage(1);
+    setUsagePage(1);
+  }, [routeQuery]);
 
   function closeFileDetail() {
     setSelectedFileId('');
@@ -2065,7 +2133,8 @@ export function FileManagerPage() {
       page,
       query,
       selectedUsageRecord,
-      usageGroup
+      usageGroup,
+      fileRefreshVersion
     ]
   );
 
@@ -2163,6 +2232,14 @@ export function FileManagerPage() {
     }
   }, [items, loading, mode, selectedFileId]);
 
+  useEffect(() => {
+    if (!pendingUploadedFileId || mode !== 'files' || loading) return;
+    if (items.some((item) => String(item.id ?? '') === pendingUploadedFileId)) {
+      setSelectedFileId(pendingUploadedFileId);
+    }
+    setPendingUploadedFileId('');
+  }, [items, loading, mode, pendingUploadedFileId]);
+
   function openFileDetail(fileId: string) {
     setSelectedFileId(fileId);
     setUsageDetail(null);
@@ -2201,20 +2278,24 @@ export function FileManagerPage() {
 
   async function handleUploaded(file: RecordMap) {
     const uploadedGroup = deriveFileUsageGroup({ file });
+    setLoading(true);
     setMode('files');
     setUsageGroup(uploadedGroup);
     setSelectedUsageRecord(null);
     setPage(1);
+    setQuery('');
+    setFilters(defaultFileManagerFilters());
     const uploadedId = String(file.id ?? '');
     if (uploadedId) {
-      setSelectedFileId(uploadedId);
+      setSelectedFileId('');
+      setPendingUploadedFileId(uploadedId);
       setFileDetail(file);
       setFileUsages([]);
       setUsageDetail(null);
       setDetailError('');
       setActionError('');
     }
-    await loadFiles(true);
+    setFileRefreshVersion((current) => current + 1);
   }
 
   return (
@@ -2694,15 +2775,39 @@ function pageContentTypeLabel(value: unknown) {
 }
 
 function BannerRows({ items }: { items: RecordMap[] }) {
+  const sortKeyCounts = items.reduce((counts, item) => {
+    const key = bannerSortKey(item);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+  const duplicateBannerCount = items.filter(
+    (item) => (sortKeyCounts.get(bannerSortKey(item)) ?? 0) > 1
+  ).length;
+
   return (
-    <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="space-y-3 p-4">
+      {duplicateBannerCount > 0 ? (
+        <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+          <span className="font-semibold">Thứ tự banner đang bị trùng.</span>{' '}
+          Có {duplicateBannerCount} banner dùng cùng một số trong cùng vị trí. Website sẽ dùng thời
+          điểm cập nhật làm điều kiện phụ; nên đặt số riêng để thứ tự luôn rõ ràng.
+        </div>
+      ) : null}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {items.map((item) => {
         const title = formatValue(item.title);
         const previewFile = bannerPreviewFile(item);
+        const mobilePreviewFile = bannerPreviewFile(item, true);
         const linkTypeLabel = bannerLinkTypeLabel(String(item.link_type || ''));
+        const ctaDestinations = bannerCtaDestinations(item);
+        const hasDuplicateSortOrder = (sortKeyCounts.get(bannerSortKey(item)) ?? 0) > 1;
         return (
-          <Link key={String(item.id)} href={`/banners/${String(item.id)}`}>
-            <div className="group rounded-sm border border-border bg-panel hover:border-primary/40 hover:shadow-sm transition-all overflow-hidden">
+          <Link
+            data-banner-row="true"
+            key={String(item.id)}
+            href={`/banners/${String(item.id)}`}
+            className="group flex min-w-0 flex-col overflow-hidden rounded-sm border border-border bg-panel transition-all hover:border-primary/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          >
               <div className="aspect-[12/5] overflow-hidden border-b border-border bg-muted">
                 {previewFile ? (
                   <AdminFileThumbnail
@@ -2718,7 +2823,7 @@ function BannerRows({ items }: { items: RecordMap[] }) {
                   </div>
                 )}
               </div>
-              <div className="p-3 space-y-1.5">
+              <div className="flex flex-1 flex-col space-y-2 p-3">
                 <div className="flex items-start justify-between gap-2">
                   <span className="text-sm font-medium text-text group-hover:text-primary line-clamp-1">
                     {title}
@@ -2730,23 +2835,80 @@ function BannerRows({ items }: { items: RecordMap[] }) {
                 {item.position ? (
                   <div className="text-xs text-muted-foreground">Vị trí: {bannerPositionLabel(String(item.position))}</div>
                 ) : null}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span
+                    className={cn(
+                      'rounded-sm px-2 py-1 font-medium',
+                      hasDuplicateSortOrder
+                        ? 'bg-amber-100 text-amber-900'
+                        : 'bg-muted text-text'
+                    )}
+                    title={hasDuplicateSortOrder ? 'Thứ tự này đang trùng với banner khác trong cùng vị trí.' : undefined}
+                  >
+                    Thứ tự {Number(item.sort_order ?? 0)}{hasDuplicateSortOrder ? ' · Trùng' : ''}
+                  </span>
+                  <span className="rounded-sm bg-muted px-2 py-1">
+                    Máy tính {previewFile ? 'đã có ảnh' : 'thiếu ảnh'}
+                  </span>
+                  <span
+                    className={cn(
+                      'rounded-sm px-2 py-1',
+                      mobilePreviewFile
+                        ? 'bg-emerald-50 text-emerald-800'
+                        : 'bg-amber-50 text-amber-800'
+                    )}
+                  >
+                    Điện thoại {mobilePreviewFile ? 'đã có ảnh' : 'dùng ảnh máy tính'}
+                  </span>
+                </div>
                 {item.link_type && String(item.link_type) !== 'none' ? (
                   <div className="text-xs text-muted-foreground truncate">
                     {linkTypeLabel}{item.link_target ? ` → ${String(item.link_target)}` : ''}
                   </div>
                 ) : null}
+                {ctaDestinations.length > 0 ? (
+                  <div className="space-y-1 border-t border-border/70 pt-2 text-xs text-muted-foreground">
+                    <p className="font-semibold text-text">Nút bấm</p>
+                    {ctaDestinations.map(({ label, href }, index) => (
+                      <p className="truncate" key={`${href}:${index}`} title={`${label} → ${href}`}>
+                        {label} → {href}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-auto flex items-center justify-between border-t border-border pt-2 text-xs">
+                  <span className="text-muted-foreground">Cập nhật {formatDate(item.updated_at)}</span>
+                  <span className="inline-flex min-h-9 items-center gap-1 font-semibold text-primary">
+                    Chỉnh sửa
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </span>
+                </div>
               </div>
-            </div>
           </Link>
         );
       })}
+      </div>
     </div>
   );
 }
 
-function bannerPreviewFile(item: RecordMap): AdminPreviewFile | null {
-  const file = asRecord(item.image_file);
-  const id = String(file.id ?? item.image_file_id ?? '');
+function bannerSortKey(item: RecordMap) {
+  return `${String(item.position ?? '')}:${Number(item.sort_order ?? 0)}`;
+}
+
+function bannerCtaDestinations(item: RecordMap): Array<{ label: string; href: string }> {
+  if (!Array.isArray(item.cta_buttons)) return [];
+  return item.cta_buttons
+    .map((button) => {
+      const data = asRecord(button);
+      return { label: String(data.text ?? '').trim(), href: String(data.url ?? '').trim() };
+    })
+    .filter(({ label, href }) => Boolean(label && href));
+}
+
+function bannerPreviewFile(item: RecordMap, mobile = false): AdminPreviewFile | null {
+  const file = asRecord(mobile ? item.image_mobile_file : item.image_file);
+  const id = String(file.id ?? (mobile ? item.image_mobile_file_id : item.image_file_id) ?? '');
 
   if (!id) {
     return null;
@@ -2772,7 +2934,7 @@ function bannerLinkTypeLabel(type: string): string {
 }
 
 function bannerPositionLabel(position: string): string {
-  return bannerPositionFilterOptions.find((option) => option.value === position)?.label ?? formatValue(position);
+  return `${getBannerPositionLabel(position)}${position.startsWith('/') || position === 'brand-hero' ? '' : ' · cách gán cũ'}`;
 }
 
 function RedirectRows({ items }: { items: RecordMap[] }) {
@@ -2854,28 +3016,13 @@ const menuPositionOptions: Array<{
   shortLabel: string;
   tone: string;
 }> = [
-  { value: 'header', label: 'Đầu trang', shortLabel: 'Header', tone: 'bg-slate-900 text-slate-50' },
-  { value: 'footer_quick', label: 'Footer: Liên kết nhanh', shortLabel: 'Liên kết nhanh', tone: 'bg-blue-700 text-white' },
-  { value: 'footer_support', label: 'Footer: Hỗ trợ khách hàng', shortLabel: 'Hỗ trợ', tone: 'bg-emerald-700 text-white' },
-  { value: 'footer_legal', label: 'Footer: Pháp lý', shortLabel: 'Pháp lý', tone: 'bg-amber-700 text-white' }
+  { value: 'header', label: 'Đầu trang · Thanh điều hướng', shortLabel: 'Đầu trang', tone: 'bg-slate-900 text-slate-50' },
+  { value: 'footer_quick', label: 'Chân trang · Liên kết nhanh', shortLabel: 'Liên kết nhanh', tone: 'bg-blue-700 text-white' },
+  { value: 'footer_support', label: 'Chân trang · Hỗ trợ và nhóm mở rộng', shortLabel: 'Hỗ trợ và nhóm', tone: 'bg-emerald-700 text-white' },
+  { value: 'footer_legal', label: 'Chân trang · Dòng pháp lý', shortLabel: 'Pháp lý', tone: 'bg-amber-700 text-white' }
 ];
 
 const menuPositionOrder = new Map(menuPositionOptions.map((item, index) => [item.value, index]));
-
-const bannerPositionFilterOptions = [
-  { value: '', label: 'Tất cả vị trí' },
-  { value: 'hero', label: 'Hero (Trang chủ)' },
-  { value: 'san-pham', label: 'Hero (Trang Sản phẩm)' },
-  { value: 'gioi-thieu', label: 'Hero (Trang Giới thiệu)' },
-  { value: 'ho-so-nang-luc', label: 'Hero (Trang Hồ sơ năng lực)' },
-  { value: 'dich-vu', label: 'Hero (Trang Dịch vụ)' },
-  { value: 'du-an', label: 'Hero (Trang Dự án)' },
-  { value: 'tin-tuc', label: 'Hero (Trang Tin tức)' },
-  { value: 'doi-tac-thuong-hieu', label: 'Hero (Trang Thương hiệu sản phẩm)' },
-  { value: 'lien-he', label: 'Hero (Trang Liên hệ)' },
-  { value: 'chinh-sach-van-chuyen', label: 'Hero (Trang Chính sách vận chuyển)' },
-  { value: 'brand-hero', label: 'Hero (Trang thương hiệu)' }
-];
 
 const deletedScopeFilterOptions = [
   { value: 'active', label: 'Đang dùng' },
@@ -2938,9 +3085,6 @@ function CompactFilterSelect({
   );
 }
 
-function setParam(params: URLSearchParams, key: string, value: string) {
-  if (value.trim()) params.set(key, value.trim());
-}
 
 function ContentListShell({
   eyebrow,
@@ -3157,7 +3301,7 @@ function MenuItemRow({
               <button
                 type="button"
                 aria-label="Đưa lên"
-                className="rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35 md:h-9 md:w-9"
                 disabled={disabled || !move.up}
                 onClick={() => onMove(item, 'up')}
               >
@@ -3166,7 +3310,7 @@ function MenuItemRow({
               <button
                 type="button"
                 aria-label="Đưa xuống"
-                className="rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35 md:h-9 md:w-9"
                 disabled={disabled || !move.down}
                 onClick={() => onMove(item, 'down')}
               >
@@ -3178,7 +3322,7 @@ function MenuItemRow({
             <button
               type="button"
               aria-label="Thêm mục con"
-              className="rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35 md:h-9 md:w-9"
               disabled={disabled}
               onClick={() => onCreateChild(itemId)}
             >
@@ -3189,7 +3333,7 @@ function MenuItemRow({
             <button
               type="button"
               aria-label="Sửa mục menu"
-              className="rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35 md:h-9 md:w-9"
               disabled={disabled}
               onClick={() => onSelect?.(item)}
             >
@@ -3200,7 +3344,7 @@ function MenuItemRow({
             <button
               type="button"
               aria-label="Lưu trữ mục"
-              className="rounded-sm p-1 text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-sm text-red-600 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-35 md:h-9 md:w-9"
               disabled={disabled}
               onClick={() => onArchive(item)}
             >
@@ -3211,7 +3355,7 @@ function MenuItemRow({
             <button
               type="button"
               aria-label="Khôi phục mục"
-              className="rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-35 md:h-9 md:w-9"
               disabled={disabled}
               onClick={() => onRestore(item)}
             >
@@ -3262,11 +3406,11 @@ function MenuPreviewPanel({ position, title, items }: { position: string; title:
           <div className="rounded-sm border border-slate-200 bg-slate-950 p-3 text-slate-100">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="text-sm font-semibold">SONG THANH</div>
-              <div className="flex min-w-0 flex-wrap justify-end gap-1.5">
+              <div className="flex min-w-0 flex-1 flex-wrap justify-end gap-1.5">
                 {activeTree.length === 0 ? (
                   <span className="text-xs text-slate-400">Chưa có mục</span>
                 ) : (
-                  activeTree.slice(0, 6).map((item) => (
+                  activeTree.map((item) => (
                     <span key={String(item.id)} className="rounded-sm bg-slate-800 px-2 py-1 text-[11px]">
                       {formatValue(item.title)}
                     </span>
@@ -3275,15 +3419,14 @@ function MenuPreviewPanel({ position, title, items }: { position: string; title:
               </div>
             </div>
             {activeTree.some((item) => getArray(item.children).length > 0) ? (
-              <div className="rounded-sm border border-slate-700 bg-slate-900 p-2">
+              <div className="max-h-44 overflow-y-auto rounded-sm border border-slate-700 bg-slate-900 p-2">
                 {activeTree
                   .filter((item) => getArray(item.children).length > 0)
-                  .slice(0, 2)
                   .map((item) => (
                     <div key={String(item.id)} className="mb-1 last:mb-0">
                       <div className="text-[11px] font-medium text-slate-200">{formatValue(item.title)}</div>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {getArray(item.children).slice(0, 4).map((child) => (
+                        {getArray(item.children).map((child) => (
                           <span key={String(child.id)} className="rounded-sm bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">
                             {formatValue(child.title)}
                           </span>
@@ -3293,6 +3436,30 @@ function MenuPreviewPanel({ position, title, items }: { position: string; title:
                   ))}
               </div>
             ) : null}
+          </div>
+        ) : position === 'footer_support' || position === 'footer_quick' ? (
+          <div className="grid gap-4 rounded-sm border border-blue-100 bg-blue-50/60 p-4 text-slate-800 sm:grid-cols-[repeat(auto-fit,minmax(170px,1fr))]">
+            {activeTree.filter((item) => normalizeMenuLinkType(item.link_type) !== 'group').length > 0 ? (
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">
+                  {position === 'footer_support' ? 'Hỗ trợ khách hàng' : 'Liên kết nhanh'}
+                </div>
+                <div className="mt-3 space-y-2">
+                  {activeTree.filter((item) => normalizeMenuLinkType(item.link_type) !== 'group').map((item) => (
+                    <MenuPreviewItem key={String(item.id)} item={item} depth={0} light />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {activeTree.filter((item) => normalizeMenuLinkType(item.link_type) === 'group' && getArray(item.children).length > 0).map((group) => (
+              <div key={String(group.id)}>
+                <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-700">{formatValue(group.title)}</div>
+                <div className="mt-3 space-y-2">
+                  {getArray(group.children).map((item) => <MenuPreviewItem key={String(item.id)} item={item} depth={0} light />)}
+                </div>
+              </div>
+            ))}
+            {activeTree.length === 0 ? <div className="text-xs text-slate-500">Chưa có mục</div> : null}
           </div>
         ) : (
           <div className="rounded-sm border border-slate-200 bg-slate-900 p-4 text-slate-100">
@@ -3315,16 +3482,16 @@ function MenuPreviewPanel({ position, title, items }: { position: string; title:
   );
 }
 
-function MenuPreviewItem({ item, depth }: { item: RecordMap; depth: number }) {
+function MenuPreviewItem({ item, depth, light = false }: { item: RecordMap; depth: number; light?: boolean }) {
   const children = getArray(item.children).filter((child) => !child.deleted_at);
   return (
     <div>
-      <div className="flex items-center gap-2 text-xs text-slate-200" style={{ paddingLeft: depth * 14 }}>
-        {depth > 0 ? <CornerDownRight className="h-3 w-3 text-slate-500" /> : null}
+      <div className={cn('flex items-center gap-2 text-xs', light ? 'text-slate-700' : 'text-slate-200')} style={{ paddingLeft: depth * 14 }}>
+        {depth > 0 ? <CornerDownRight className={cn('h-3 w-3', light ? 'text-slate-400' : 'text-slate-500')} /> : null}
         <span className="truncate">{formatValue(item.title)}</span>
       </div>
       {children.map((child) => (
-        <MenuPreviewItem key={String(child.id)} item={child} depth={depth + 1} />
+        <MenuPreviewItem key={String(child.id)} item={child} depth={depth + 1} light={light} />
       ))}
     </div>
   );
@@ -3434,216 +3601,9 @@ function InfoLine({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-function SettingsMetaRail({
-  loading,
-  settingsAvailable,
-  record
-}: {
-  loading: boolean;
-  settingsAvailable: boolean;
-  record: RecordMap;
-}) {
-  if (loading) {
-    return (
-      <Card className="h-fit overflow-hidden">
-        <div className="border-b border-border bg-muted px-4 py-3">
-          <h2 className="text-sm font-semibold text-text">Thông tin hồ sơ</h2>
-        </div>
-        <div className="space-y-3 p-4">
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-4/5" />
-        </div>
-      </Card>
-    );
-  }
 
-  return (
-    <Card className="h-fit overflow-hidden">
-      <div className="border-b border-border bg-muted px-4 py-3">
-        <h2 className="text-sm font-semibold text-text">Thông tin hồ sơ</h2>
-      </div>
-      {!settingsAvailable ? (
-        <div className="p-4 text-sm leading-6 text-muted-foreground">
-          Chưa lưu cấu hình website lần nào. Điền thông tin và nhấn Lưu để bắt đầu.
-        </div>
-      ) : (
-        <div className="space-y-3 p-4 text-sm">
-          <InfoLine
-            label="Tạo lúc"
-            value={record.created_at ? formatDate(record.created_at) : '—'}
-          />
-          <InfoLine
-            label="Cập nhật lần cuối"
-            value={record.updated_at ? formatDate(record.updated_at) : '—'}
-          />
-          {(record.updated_by || record.created_by) ? (
-            <InfoLine
-              label="Người cập nhật"
-              value={record.updated_by ?? record.created_by ?? '—'}
-            />
-          ) : null}
-        </div>
-      )}
-    </Card>
-  );
-}
 
-function MapEmbedRow({
-  value,
-  editing,
-  readOnly,
-  state,
-  onChange,
-  onStartEdit,
-  onDone
-}: {
-  value: string;
-  editing: boolean;
-  readOnly?: boolean;
-  state: ReturnType<typeof validateMapEmbedCode>;
-  onChange: (value: string) => void;
-  onStartEdit: () => void;
-  onDone: () => void;
-}) {
-  const hasMap = Boolean(state.src);
-  const statusText = state.error
-    ? 'Link/iframe chưa hợp lệ'
-    : hasMap
-      ? 'Đã cấu hình bản đồ'
-      : 'Chưa cấu hình bản đồ';
-  const hintText =
-    'Dán link Google Maps (chia sẻ "Embed a map") để hiển thị bản đồ trên website.';
 
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-2.5 rounded-md border border-border bg-panel px-3 py-2.5">
-        <MapPin className="h-5 w-5 shrink-0 text-muted-foreground" />
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-text">{statusText}</div>
-          <div className="truncate text-[11px] text-muted-foreground">{hintText}</div>
-        </div>
-        {!readOnly ? (
-          <Button type="button" size="sm" variant="ghost" onClick={onStartEdit}>
-            <Pencil className="h-3.5 w-3.5" />
-            {hasMap ? 'Cập nhật' : 'Thêm bản đồ'}
-          </Button>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
-      <label className="text-[11px] font-medium text-muted-foreground">
-        Dán link Google Maps hoặc mã nhúng iframe
-      </label>
-      <Textarea
-        className={cn(
-          'min-h-20 bg-panel',
-          state.error ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : ''
-        )}
-        placeholder="https://www.google.com/maps/embed?... hoặc <iframe ...>"
-        value={value}
-        readOnly={readOnly}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted-foreground">
-          {state.error
-            ? 'Link/iframe chưa hợp lệ.'
-            : state.src
-              ? 'Đã nhận diện link hợp lệ.'
-              : 'Bấm "Xong" sau khi dán link để xem trước.'}
-        </span>
-        <Button type="button" size="sm" variant="secondary" onClick={onDone}>
-          Xong
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function MapsEmbedField({
-  value,
-  readOnly,
-  state,
-  onChange
-}: {
-  value: string;
-  readOnly?: boolean;
-  state: ReturnType<typeof validateMapEmbedCode>;
-  onChange: (value: string) => void;
-}) {
-  const statusTone = state.error ? 'warning' : state.src ? 'success' : 'default';
-  const statusLabel = state.error
-    ? 'Mã nhúng chưa hợp lệ.'
-    : state.src
-      ? state.inputKind === 'url'
-        ? 'URL hợp lệ, sẽ được chuẩn hóa thành iframe khi lưu.'
-        : 'Đã nhận diện iframe Google Maps hợp lệ.'
-      : 'Dán iframe hoặc URL nhúng để xem trước bản đồ.';
-
-  return (
-    <div className="space-y-3">
-      <Textarea
-        className={cn('min-h-28', state.error ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
-        value={value}
-        readOnly={readOnly}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <div className="rounded-sm border border-border bg-muted px-3 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={statusTone}>
-            {state.error ? (
-              <TriangleAlert className="h-3.5 w-3.5" />
-            ) : state.src ? (
-              <CheckCircle2 className="h-3.5 w-3.5" />
-            ) : (
-              <Globe2 className="h-3.5 w-3.5" />
-            )}
-            {state.error ? 'Cần kiểm tra' : state.src ? 'Hợp lệ' : 'Chưa có dữ liệu'}
-          </Badge>
-          <span className="text-xs text-muted-foreground">{statusLabel}</span>
-        </div>
-      </div>
-      {state.src ? (
-        <div className="overflow-hidden rounded-sm border border-border bg-panel">
-          <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-2">
-            <div className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              Xem trước bản đồ
-            </div>
-            <a
-              href={state.src}
-              target="_blank"
-              rel="noreferrer"
-              data-bypass-unsaved-guard="true"
-              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-            >
-              Mở Google Maps
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          </div>
-          <iframe
-            className="h-72 w-full border-0"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-            src={state.src}
-            title="Xem trước Google Maps"
-          />
-        </div>
-      ) : (
-        <div className="rounded-sm border border-dashed border-border bg-panel px-4 py-8 text-center text-sm text-muted-foreground">
-          Chưa có preview bản đồ.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Notice({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-sm border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">{children}</div>;
-}
 
 function ErrorBox({
   error,
@@ -3676,66 +3636,7 @@ function ListSkeleton({ columns }: { columns: number }) {
   );
 }
 
-const websiteFields: SectionSpec[] = [
-  {
-    title: 'Thông tin công ty',
-    icon: <FileText className="h-4 w-4" />,
-    fields: [
-      { key: 'display_name', label: 'Tên hiển thị', required: true },
-      { key: 'legal_name', label: 'Tên pháp lý', required: true }
-    ]
-  },
-  {
-    title: 'Liên hệ',
-    icon: <Share2 className="h-4 w-4" />,
-    fields: [
-      {
-        key: 'hotline',
-        label: 'Hotline',
-        required: true,
-        inputType: 'tel',
-        inputMode: 'tel',
-        autoComplete: 'tel'
-      },
-      {
-        key: 'email',
-        label: 'Email',
-        required: true,
-        inputType: 'email',
-        inputMode: 'email',
-        autoComplete: 'email'
-      },
-      { key: 'address', label: 'Địa chỉ', multiline: true, required: true }
-    ]
-  },
-  {
-    title: 'Giờ làm việc và bản đồ',
-    icon: <MapPin className="h-4 w-4" />,
-    fields: [
-      { key: 'working_hours_from', label: 'Giờ bắt đầu', inputType: 'time' },
-      { key: 'working_hours_to', label: 'Giờ kết thúc', inputType: 'time' },
-      {
-        key: 'map_embed_code',
-        label: 'Bản đồ Google Maps',
-        multiline: true,
-        control: 'map-embed',
-        hint: 'Dán mã iframe hoặc URL nhúng Google Maps.'
-      }
-    ]
-  },
-  {
-    title: 'Tệp nhận diện',
-    icon: <FileImage className="h-4 w-4" />,
-    fields: [
-      { key: 'logo_file_id', label: 'Logo' },
-      { key: 'favicon_file_id', label: 'Favicon' }
-    ]
-  }
-];
 
-const websiteFieldKeys = websiteFields.flatMap((section) =>
-  section.fields.map((field) => field.key)
-);
 
 const detailFields: Record<ContentKind, SectionSpec[]> = {
   'page-content': [
@@ -3890,7 +3791,7 @@ function menuPositionLabel(position: unknown) {
   const value = String(position ?? '');
   const meta = menuPositionMeta(value);
   if (meta) return meta.label;
-  if (value === 'mobile') return 'Mobile (ngừng dùng)';
+  if (value === 'mobile') return 'Di động (chưa kết nối website)';
   return formatValue(value);
 }
 
@@ -4037,11 +3938,15 @@ function areStringMapsEqual(
   return true;
 }
 
-function extractWebsiteSettingsRecord(data: unknown): RecordMap {
-  const record = asRecord(data);
-  const settings = asRecord(record.settings);
-  return settings.id ? settings : extractRecord(data);
+function getChangedFormFields(
+  current: Record<string, string>,
+  baseline: Record<string, string>
+) {
+  return [...new Set([...Object.keys(current), ...Object.keys(baseline)])].filter(
+    (key) => (current[key] ?? '') !== (baseline[key] ?? '')
+  );
 }
+
 
 function emptyMenuItemForm(parentId = '', sortOrder = 0): MenuItemForm {
   return {
@@ -4130,99 +4035,11 @@ function toSlug(title: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-function isValidTimeValue(value: string) {
-  return /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value.trim());
-}
 
-function extractGoogleMapsEmbedSrc(value: string) {
-  const trimmed = value.trim();
-  if (trimmed === '') return null;
 
-  const iframeMatch = trimmed.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/i);
-  return iframeMatch?.[1] ?? trimmed;
-}
 
-function isValidGoogleMapsEmbedSrc(src: string) {
-  try {
-    const parsed = new URL(src);
-    return (
-      parsed.origin === 'https://www.google.com' &&
-      parsed.pathname === '/maps/embed'
-    );
-  } catch {
-    return false;
-  }
-}
 
-function buildGoogleMapsEmbedCode(src: string) {
-  return `<iframe src="${src}" width="600" height="450" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`;
-}
 
-function validateMapEmbedCode(value: string) {
-  const trimmed = value.trim();
-  if (trimmed === '') {
-    return {
-      error: undefined,
-      normalizedValue: null,
-      src: null,
-      inputKind: 'empty' as const
-    };
-  }
-
-  const src = extractGoogleMapsEmbedSrc(trimmed);
-  if (!src || !isValidGoogleMapsEmbedSrc(src)) {
-    return {
-      error:
-        'Chỉ chấp nhận Google Maps iframe hoặc URL nhúng dạng https://www.google.com/maps/embed?...',
-      normalizedValue: null,
-      src: null,
-      inputKind: 'invalid' as const
-    };
-  }
-
-  return {
-    error: undefined,
-    normalizedValue: buildGoogleMapsEmbedCode(src),
-    src,
-    inputKind: trimmed.startsWith('http') ? ('url' as const) : ('iframe' as const)
-  };
-}
-
-function validateWebsiteSettingsForm(form: Record<string, string>): FormErrors {
-  const errors: FormErrors = {};
-
-  if (isBlank(form.display_name ?? '')) {
-    errors.display_name = 'Tên hiển thị không được để trống.';
-  }
-  if (isBlank(form.legal_name ?? '')) {
-    errors.legal_name = 'Tên pháp lý không được để trống.';
-  }
-  if (isBlank(form.hotline ?? '')) {
-    errors.hotline = 'Hotline không được để trống.';
-  }
-  if (isBlank(form.email ?? '')) {
-    errors.email = 'Email không được để trống.';
-  } else if (!/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(form.email.trim())) {
-    errors.email = 'Email chưa đúng định dạng.';
-  }
-  if (isBlank(form.address ?? '')) {
-    errors.address = 'Địa chỉ không được để trống.';
-  }
-  if (form.working_hours_from?.trim() && !isValidTimeValue(form.working_hours_from)) {
-    errors.working_hours_from = 'Giờ bắt đầu phải theo dạng HH:mm hoặc HH:mm:ss.';
-  }
-  if (form.working_hours_to?.trim() && !isValidTimeValue(form.working_hours_to)) {
-    errors.working_hours_to = 'Giờ kết thúc phải theo dạng HH:mm hoặc HH:mm:ss.';
-  }
-  if (form.map_embed_code?.trim()) {
-    const mapState = validateMapEmbedCode(form.map_embed_code);
-    if (mapState.error) {
-      errors.map_embed_code = mapState.error;
-    }
-  }
-
-  return errors;
-}
 
 function validateMenuForm(form: { name: string; position: string }): FormErrors {
   const errors: FormErrors = {};
@@ -4275,24 +4092,56 @@ function validateMenuItemForm(form: MenuItemForm, selectedItemId = ''): FormErro
   return errors;
 }
 
-function validateContentForm(kind: ContentKind, form: Record<string, string>): FormErrors {
+function validateContentForm(
+  kind: ContentKind,
+  form: Record<string, string>,
+  verifyPublication = false
+): FormErrors {
   const errors: FormErrors = {};
 
   if (kind === 'page-content') {
     if (isBlank(form.title ?? '')) {
       errors.title = 'Tiêu đề không được để trống.';
+    } else if (form.title.trim().length > 255) {
+      errors.title = 'Tiêu đề không được vượt quá 255 ký tự.';
     }
     if (!['page', 'news'].includes(form.content_type || 'page')) {
       errors.content_type = 'Loại nội dung không hợp lệ.';
     }
     if (form.slug?.trim() && !isValidSlug(form.slug)) {
       errors.slug = 'Đường dẫn chỉ nên dùng chữ thường, số và dấu gạch ngang.';
+    } else if (form.slug?.trim().length > 255) {
+      errors.slug = 'Đường dẫn không được vượt quá 255 ký tự.';
+    }
+    if ((form.seo_title ?? '').length > 255) {
+      errors.seo_title = 'Tiêu đề SEO không được vượt quá 255 ký tự.';
+    }
+    if ((form.seo_description ?? '').length > 512) {
+      errors.seo_description = 'Mô tả SEO không được vượt quá 512 ký tự.';
+    }
+    let extraBlocks: { blocks?: unknown[] } = { blocks: [] };
+    try {
+      extraBlocks = JSON.parse(form.extra_blocks || '{"blocks":[]}') as {
+        blocks?: unknown[];
+      };
+      if (!Array.isArray(extraBlocks.blocks)) {
+        errors.extra_blocks = 'Dữ liệu khối nội dung phụ không đúng cấu trúc.';
+      }
+    } catch {
+      errors.extra_blocks = 'Dữ liệu khối nội dung phụ bị lỗi. Tải lại trang trước khi lưu để tránh mất dữ liệu.';
     }
     if (
-      (form.publish_status ?? '') === 'published' &&
+      verifyPublication &&
       (form.review_status ?? '') !== 'approved'
     ) {
       errors.publish_status = 'Trang cần được duyệt trước khi xuất bản.';
+    }
+    if (
+      verifyPublication &&
+      !(form.content_type === 'page' && form.slug === 'san-pham') &&
+      !hasMeaningfulPageContent(form.content_html, extraBlocks.blocks)
+    ) {
+      errors.publish_status = 'Trang cần có nội dung thực tế trước khi xuất bản; block rỗng không được tính là nội dung.';
     }
     return errors;
   }
@@ -4358,6 +4207,24 @@ function validateContentForm(kind: ContentKind, form: Record<string, string>): F
   return errors;
 }
 
+function hasMeaningfulPageContent(contentHtml: string | undefined, blocks: unknown[] | undefined) {
+  const meaningfulText = String(contentHtml ?? '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .trim();
+  if (meaningfulText) return true;
+  return (blocks ?? []).some((rawBlock) => {
+    if (!rawBlock || typeof rawBlock !== 'object') return false;
+    const block = rawBlock as RecordMap;
+    if (block.type === 'image_card') return Boolean(String(block.image_file_id ?? '').trim());
+    return (
+      (block.type === 'bullet_list' || block.type === 'card_grid') &&
+      Array.isArray(block.items) &&
+      block.items.length > 0
+    );
+  });
+}
+
 function normalizeMenuItemPayload(form: MenuItemForm) {
   return {
     parent_id: form.parent_id.trim() ? form.parent_id.trim() : null,
@@ -4381,14 +4248,6 @@ function normalizeValue(value: string) {
   return trimmed;
 }
 
-function normalizeWebsiteSettingsValue(key: string, value: string) {
-  const trimmed = value.trim();
-  if (trimmed === '') return null;
-  if (key === 'map_embed_code') {
-    return validateMapEmbedCode(trimmed).normalizedValue ?? null;
-  }
-  return trimmed;
-}
 
 function isFileReferenceField(key: string) {
   return (
@@ -4398,14 +4257,6 @@ function isFileReferenceField(key: string) {
   );
 }
 
-function preferredFileGroupForWebsiteSettings(
-  key: string
-): FileUsageGroup | undefined {
-  if (key === 'logo_file_id' || key === 'favicon_file_id') {
-    return 'website_config';
-  }
-  return undefined;
-}
 
 function preferredFileGroupForContentField(
   kind: ContentKind,

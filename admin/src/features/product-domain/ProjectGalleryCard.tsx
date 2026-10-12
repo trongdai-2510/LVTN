@@ -33,6 +33,8 @@ type ProjectGalleryCardProps = {
   canUpdate: boolean;
   canArchive: boolean;
   canRestore: boolean;
+  onChanged: () => Promise<void>;
+  reviewAfterEdit: boolean;
 };
 
 export function ProjectGalleryCard({
@@ -41,12 +43,15 @@ export function ProjectGalleryCard({
   canCreate,
   canUpdate,
   canArchive,
-  canRestore
+  canRestore,
+  onChanged,
+  reviewAfterEdit
 }: ProjectGalleryCardProps) {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [newFileId, setNewFileId] = useState('');
   const [scope, setScope] = useState<'active' | 'deleted'>('active');
@@ -85,9 +90,14 @@ export function ProjectGalleryCard({
   async function runAction<T>(fn: () => Promise<T>) {
     setBusy(true);
     setActionError('');
+    setActionMessage('');
     try {
       await fn();
       await load();
+      await onChanged();
+      setActionMessage(reviewAfterEdit
+        ? 'Đã lưu. Dự án chuyển sang chờ duyệt và tạm ẩn khỏi website.'
+        : 'Đã lưu thay đổi ảnh dự án.');
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Không thực hiện được thao tác.');
     } finally {
@@ -174,6 +184,7 @@ export function ProjectGalleryCard({
         )}
 
         {actionError ? <p className="text-xs text-red-600">{actionError}</p> : null}
+        {actionMessage ? <p className="text-xs text-green-700" role="status">{actionMessage}</p> : null}
         {loadError ? <p className="text-xs text-red-600">{loadError}</p> : null}
 
         <div className="flex items-center gap-2">

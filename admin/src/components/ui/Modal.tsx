@@ -4,6 +4,7 @@ import { X } from '@/components/icons';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from 'react';
 
 import { cn } from '@/lib/cn';
+import { lockBodyScroll } from '@/lib/bodyScrollLock';
 import { Button } from './Button';
 
 export function Modal({
@@ -38,8 +39,7 @@ export function Modal({
 
     lastActiveRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const releaseScrollLock = lockBodyScroll();
 
     const frame = window.requestAnimationFrame(() => {
       const panel = panelRef.current;
@@ -47,12 +47,12 @@ export function Modal({
         return;
       }
       const focusable = getFocusableElements(panel);
-      (focusable[0] ?? panel).focus();
+      (panel.querySelector<HTMLElement>('[data-modal-autofocus="true"]') ?? focusable[0] ?? panel).focus();
     });
 
     return () => {
       window.cancelAnimationFrame(frame);
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       if (restoreFocusOnClose) {
         lastActiveRef.current?.focus?.();
       }

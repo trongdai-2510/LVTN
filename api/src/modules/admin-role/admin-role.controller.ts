@@ -12,7 +12,9 @@ import {
 } from '@nestjs/common';
 
 import { AuthGuard } from '../../common/auth/auth.guard';
-import { RequirePermissions } from '../../common/permissions/permission.decorator';
+import { CurrentUser } from '../../common/auth/current-user.decorator';
+import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
+import { RequirePermissions, SuperAdminOnly } from '../../common/permissions/permission.decorator';
 import { PermissionGuard } from '../../common/permissions/permission.guard';
 import {
   AdminRoleListQueryDto,
@@ -41,29 +43,34 @@ export class AdminRoleController {
 
   @Post()
   @RequirePermissions('admin_role.create')
-  createRole(@Body() body: CreateAdminRoleDto) {
-    return this.adminRoleService.createRole(body);
+  @SuperAdminOnly()
+  createRole(@Body() body: CreateAdminRoleDto, @CurrentUser() currentUser: CurrentUserContext) {
+    return this.adminRoleService.createRole(body, currentUser);
   }
 
   @Put(':id')
   @RequirePermissions('admin_role.update')
-  updateRole(@Param('id') id: string, @Body() body: UpdateAdminRoleDto) {
-    return this.adminRoleService.updateRole(id, body);
+  @SuperAdminOnly()
+  updateRole(@Param('id') id: string, @Body() body: UpdateAdminRoleDto, @CurrentUser() currentUser: CurrentUserContext) {
+    return this.adminRoleService.updateRole(id, body, currentUser);
   }
 
   @Put(':id/permissions')
   @RequirePermissions('admin_role.manage_permissions')
+  @SuperAdminOnly()
   updateRolePermissions(
     @Param('id') id: string,
-    @Body() body: UpdateAdminRolePermissionsDto
+    @Body() body: UpdateAdminRolePermissionsDto,
+    @CurrentUser() currentUser: CurrentUserContext
   ) {
-    return this.adminRoleService.updateRolePermissions(id, body);
+    return this.adminRoleService.updateRolePermissions(id, body, currentUser);
   }
 
   @Post(':id/archive')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('admin_role.archive')
-  archiveRole(@Param('id') id: string) {
-    return this.adminRoleService.archiveRole(id);
+  @SuperAdminOnly()
+  archiveRole(@Param('id') id: string, @CurrentUser() currentUser: CurrentUserContext) {
+    return this.adminRoleService.archiveRole(id, currentUser);
   }
 }

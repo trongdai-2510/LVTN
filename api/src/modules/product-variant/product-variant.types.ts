@@ -59,6 +59,8 @@ export interface ProductVariantAdminRecord extends ProductVariantRecord {
 
 export interface ProductVariantListItem extends ProductVariantAdminRecord {
   active_quote_item_count: number;
+  attribute_count: number;
+  highlight_spec_count: number;
 }
 
 export interface ProductVariantDependencyCounts {

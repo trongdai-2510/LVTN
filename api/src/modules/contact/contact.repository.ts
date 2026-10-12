@@ -92,52 +92,79 @@ export class ContactRepository {
     };
   }
 
-  async updateStatus(id: string, status: ContactStatus): Promise<boolean> {
-    const updated = await this.knexService.db(CONTACT_REQUEST_TABLE).where({ id }).whereNull('deleted_at').update({ status });
-    return updated > 0;
+  async updateStatus(id: string, status: ContactStatus) {
+    return this.knexService.db.transaction(async (trx) => {
+      const contact = await this.lockContact(trx, id);
+      if (!contact) return 'not_found' as const;
+      if (contact.deleted_at) return 'archived' as const;
+      await trx(CONTACT_REQUEST_TABLE).where({ id }).update({ status });
+      return 'updated' as const;
+    });
   }
 
-  async archive(id: string): Promise<boolean> {
-    const updated = await this.knexService.db(CONTACT_REQUEST_TABLE)
-      .where({ id })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now() });
-    return updated > 0;
+  async archive(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const contact = await this.lockContact(trx, id);
+      if (!contact) return 'not_found' as const;
+      if (contact.deleted_at) return 'archived' as const;
+      await trx(CONTACT_REQUEST_TABLE).where({ id }).update({ deleted_at: trx.fn.now() });
+      return 'updated' as const;
+    });
   }
 
-  async restore(id: string): Promise<boolean> {
-    const updated = await this.knexService.db(CONTACT_REQUEST_TABLE)
-      .where({ id })
-      .whereNotNull('deleted_at')
-      .update({ deleted_at: null });
-    return updated > 0;
+  async restore(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const contact = await this.lockContact(trx, id);
+      if (!contact) return 'not_found' as const;
+      if (!contact.deleted_at) return 'active' as const;
+      await trx(CONTACT_REQUEST_TABLE).where({ id }).update({ deleted_at: null });
+      return 'updated' as const;
+    });
   }
 
-  async permanentlyDelete(id: string): Promise<boolean> {
-    const deleted = await this.knexService.db(CONTACT_REQUEST_TABLE)
-      .where({ id })
-      .whereNotNull('deleted_at')
-      .delete();
-    return deleted > 0;
+  async permanentlyDelete(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const contact = await this.lockContact(trx, id);
+      if (!contact) return 'not_found' as const;
+      if (!contact.deleted_at) return 'active' as const;
+      await trx(CONTACT_REQUEST_TABLE).where({ id }).delete();
+      return 'deleted' as const;
+    });
   }
 
-  async updateAssignee(id: string, assignedTo: number | null): Promise<boolean> {
-    const updated = await this.knexService.db(CONTACT_REQUEST_TABLE)
-      .where({ id })
-      .whereNull('deleted_at')
-      .update({ assigned_to: assignedTo });
-    return updated > 0;
+  async updateAssignee(id: string, assignedTo: number | null) {
+    return this.knexService.db.transaction(async (trx) => {
+      const contact = await this.lockContact(trx, id);
+      if (!contact) return 'not_found' as const;
+      if (contact.deleted_at) return 'archived' as const;
+      if (assignedTo !== null) {
+        const assignee = await trx('admin_user')
+          .select('id')
+          .where({ logic_user_id: assignedTo, status: 'active' })
+          .whereNull('deleted_at')
+          .forUpdate()
+          .first();
+        if (!assignee) return 'assignee_not_found' as const;
+      }
+      await trx(CONTACT_REQUEST_TABLE).where({ id }).update({ assigned_to: assignedTo });
+      return 'updated' as const;
+    });
   }
 
-  async createInternalNote(contactId: string, noteText: string, addedBy: number | null): Promise<ContactInternalNoteRecord> {
-    const [row] = await this.knexService.db<ContactInternalNoteRecord>(CONTACT_INTERNAL_NOTE_TABLE)
-      .insert({
-        contact_id: contactId,
-        note_text: noteText,
-        added_by: addedBy
-      })
-      .returning('*');
-    return row;
+  async createInternalNote(contactId: string, noteText: string, addedBy: number | null) {
+    return this.knexService.db.transaction(async (trx) => {
+      const contact = await this.lockContact(trx, contactId);
+      if (!contact) return { status: 'not_found' as const };
+      if (contact.deleted_at) return { status: 'archived' as const };
+      const [row] = await trx<ContactInternalNoteRecord>(CONTACT_INTERNAL_NOTE_TABLE)
+        .insert({
+          contact_id: contactId,
+          note_text: noteText,
+          added_by: addedBy
+        })
+        .returning('*');
+      return { status: 'created' as const, row };
+    });
   }
 
   async listInternalNotes(contactId: string): Promise<ContactInternalNote[]> {
@@ -159,6 +186,14 @@ export class ContactRepository {
 
   async listAssigneeOptions(): Promise<ContactAssigneeOption[]> {
     return this.logicUsers.listAssignableUsers();
+  }
+
+  private async lockContact(trx: Knex.Transaction, id: string) {
+    return trx<ContactRecord>(CONTACT_REQUEST_TABLE)
+      .select('id', 'deleted_at')
+      .where({ id })
+      .forUpdate()
+      .first();
   }
 
   private applyListFilters(query: Knex.QueryBuilder, alias: string, filters: ContactListFilters): Knex.QueryBuilder {

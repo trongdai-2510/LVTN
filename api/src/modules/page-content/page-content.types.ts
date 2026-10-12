@@ -30,13 +30,23 @@ export type PageContentType = (typeof PAGE_CONTENT_TYPES)[number];
  */
 export interface ExtraBlocksPayload {
   blocks: ExtraBlockItem[];
+  layout?: PageContentLayout | null;
+}
+
+export interface PageContentLayout {
+  sections: PageContentLayoutSection[];
+}
+
+interface PageContentLayoutSection {
+  id: string;
+  visible: boolean;
 }
 
 export type ExtraBlockItem = BulletListBlock | CardGridBlock | ImageCardBlock;
 
 export type ImageCardTone = 'positive' | 'negative' | 'neutral';
 
-export interface BulletListBlock {
+interface BulletListBlock {
   id: string;
   type: 'bullet_list';
   title?: string | null;
@@ -46,7 +56,7 @@ export interface BulletListBlock {
   }>;
 }
 
-export interface CardGridBlock {
+interface CardGridBlock {
   id: string;
   type: 'card_grid';
   title?: string | null;
@@ -64,7 +74,7 @@ export interface CardGridBlock {
  * - slot_key (optional): cho phép frontend đọc theo key có nghĩa (vd: "eligible",
  *   "ineligible") thay vì theo thứ tự — robust khi admin reorder/insert blocks.
  */
-export interface ImageCardBlock {
+interface ImageCardBlock {
   id: string;
   type: 'image_card';
   title?: string | null;
@@ -117,7 +127,11 @@ export type PageContentListItem = Pick<
   | 'created_at'
   | 'updated_at'
   | 'deleted_at'
->;
+> & {
+  has_meaningful_body: boolean;
+  has_seo_description: boolean;
+  has_seo_title: boolean;
+};
 
 export interface PageContentMutationInput {
   title?: string;

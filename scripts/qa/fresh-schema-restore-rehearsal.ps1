@@ -5,7 +5,7 @@ $apiDirectory = Join-Path $workspaceRoot 'api'
 $apiEnvPath = Join-Path $apiDirectory '.env'
 $baselinePath = Join-Path $workspaceRoot 'database\ddl\song_thanh_deployment_schema_20260730.sql'
 $migrationHistoryPath = Join-Path $workspaceRoot 'database\ddl\song_thanh_deployment_migration_history_20260730.sql'
-$outputPath = Join-Path $workspaceRoot 'docs\qa\generated\fresh-schema-restore-rehearsal.md'
+$outputPath = Join-Path $workspaceRoot 'tmp\qa-artifacts\generated\fresh-schema-restore-rehearsal.md'
 $runtimeDirectory = Join-Path $workspaceRoot 'tmp\qa-runtime'
 
 function Import-DotEnv {

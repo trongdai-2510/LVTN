@@ -88,12 +88,6 @@ Public UI smoke QA:
 node scripts\qa\public-ui-smoke.mjs
 ```
 
-Full manual test case map:
-
-```txt
-docs\qa\end-user-test-cases.md
-```
-
 QA import fixture:
 
 ```txt

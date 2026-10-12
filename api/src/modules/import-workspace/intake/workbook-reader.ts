@@ -69,6 +69,7 @@ export interface ParsedWorkbook {
   rows: ParsedWorkbookRow[];
   total_data_row_count: number;
   row_ranges_applied: NormalizedRowRange[];
+  embedded_image_count: number;
 }
 
 export function normalizeRowRanges(value: unknown): NormalizedRowRange[] {
@@ -177,6 +178,11 @@ export async function readWorkbookFixture(
   if (extension !== '.json' && extension !== '.csv' && extension !== '.xlsx') {
     throw validationError('source_workbook_path must point to a .json, .csv, or supported .xlsx workbook.', { field: 'source_workbook_path' });
   }
+  if (sheetName?.trim() && extension !== '.xlsx') {
+    throw validationError('Chỉ tệp Excel .xlsx mới có thể chọn sheet.', {
+      field: 'sheet_name'
+    });
+  }
 
   const fileStats = statSync(normalizedPath);
   if (!fileStats.isFile()) {
@@ -215,7 +221,8 @@ export async function readWorkbookFixture(
     headers,
     rows: selectedRows,
     total_data_row_count: rows.length,
-    row_ranges_applied: rowRanges.length > 0 ? rowRanges : inferDefaultRanges(rows)
+    row_ranges_applied: rowRanges.length > 0 ? rowRanges : inferDefaultRanges(rows),
+    embedded_image_count: 0
   };
 }
 
@@ -262,6 +269,9 @@ async function parseXlsxWorkbook(
     throw validationError('source_workbook_path is not a readable .xlsx file.', { field: 'source_workbook_path' });
   }
   assertZipBudget(zip);
+  const embeddedImageCount = Object.keys(zip.files).filter((entry) =>
+    /^xl\/media\/[^/]+\.(?:png|jpe?g|webp|gif|bmp|tiff?)$/i.test(entry)
+  ).length;
 
   const workbookXml = await readZipText(zip, 'xl/workbook.xml');
   const workbookRelationshipsXml = await readZipText(zip, 'xl/_rels/workbook.xml.rels');
@@ -328,8 +338,7 @@ async function parseXlsxWorkbook(
           return [header, typeof value === 'string' && value.trim() === '' ? null : value ?? null];
         })
       )
-    }))
-    .filter((row, index, allRows) => allRows.findIndex((candidate) => candidate.source_row_number === row.source_row_number) === index);
+    }));
 
   if (rows.length === 0) {
     throw validationError('selected workbook subset does not contain any usable data rows.', { field: 'source_workbook_path' });
@@ -352,7 +361,8 @@ async function parseXlsxWorkbook(
     headers,
     rows,
     total_data_row_count: nonBlankDataRows.length,
-    row_ranges_applied: rowRangesApplied
+    row_ranges_applied: rowRangesApplied,
+    embedded_image_count: embeddedImageCount
   };
 }
 

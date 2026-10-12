@@ -23,8 +23,8 @@ const config: Config = {
         info: 'var(--info)'
       },
       fontFamily: {
-        sans: ['"IBM Plex Sans"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'system-ui', 'sans-serif'],
-        mono: ['"IBM Plex Mono"', '"SFMono-Regular"', 'Consolas', '"Liberation Mono"', 'monospace']
+        sans: ['var(--font-admin-sans)', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-admin-mono)', 'Consolas', '"Liberation Mono"', 'monospace']
       },
       borderRadius: {
         sm: 'var(--radius-sm)',

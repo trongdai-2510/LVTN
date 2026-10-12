@@ -5,7 +5,7 @@ import type {
   ImportReadinessPlannedActions
 } from './import-workspace.types';
 
-export const IMPORT_APPLY_REQUIRED_STATUS = 'ready_to_apply';
+const IMPORT_APPLY_REQUIRED_STATUS = 'ready_to_apply';
 
 export interface ImportReadinessCounts {
   openConflictCount: number;

@@ -45,7 +45,6 @@ const toneStyles: Record<
   {
     iconWrap: string;
     icon: typeof CheckCircle2;
-    title: string;
     helper: string;
     details: string;
   }
@@ -53,28 +52,24 @@ const toneStyles: Record<
   success: {
     iconWrap: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
     icon: CheckCircle2,
-    title: 'text-emerald-900',
     helper: 'text-emerald-800',
     details: 'border-emerald-200 bg-emerald-50 text-emerald-900'
   },
   error: {
     iconWrap: 'bg-red-50 text-red-700 ring-red-100',
     icon: AlertTriangle,
-    title: 'text-red-950',
     helper: 'text-red-800',
     details: 'border-red-200 bg-red-50 text-red-900'
   },
   warning: {
     iconWrap: 'bg-amber-50 text-amber-700 ring-amber-100',
     icon: TriangleAlert,
-    title: 'text-amber-950',
     helper: 'text-amber-900',
     details: 'border-amber-200 bg-amber-50 text-amber-950'
   },
   info: {
     iconWrap: 'bg-blue-50 text-blue-700 ring-blue-100',
     icon: Info,
-    title: 'text-blue-950',
     helper: 'text-blue-800',
     details: 'border-blue-200 bg-blue-50 text-blue-900'
   }
@@ -94,7 +89,7 @@ export function ActionResultDialog({
   const tone = state?.tone ?? 'info';
   const styles = toneStyles[tone];
   const Icon = styles.icon;
-  const title = state?.title || presentation?.title || 'Thông báo';
+  const title = presentation?.title || state?.title || 'Thông báo';
   const description = state?.description || presentation?.message || '';
   const suggestedAction = state?.suggestedAction || presentation?.suggestedAction;
 
@@ -134,11 +129,8 @@ export function ActionResultDialog({
             <Icon className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className={cn('text-base font-semibold leading-6', styles.title)}>
-              {title}
-            </h3>
             {description ? (
-              <p className="mt-1 text-sm leading-6 text-slate-600">{description}</p>
+              <p className="text-sm leading-6 text-slate-600">{description}</p>
             ) : null}
             {suggestedAction ? (
               <p className={cn('mt-3 text-sm leading-6', styles.helper)}>

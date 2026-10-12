@@ -1,8 +1,18 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { Archive, FolderTree, GitBranchPlus, ListTree, PackageSearch, Plus } from '@/components/icons';
+import {
+  Archive,
+  ChevronDown,
+  FolderTree,
+  GitBranchPlus,
+  ListTree,
+  MoreVertical,
+  PackageSearch,
+  Plus
+} from '@/components/icons';
 
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
 import { TableToolbar } from '@/components/data-table/TableToolbar';
@@ -38,16 +48,21 @@ type TreeNode = {
 };
 
 export function ProductCategoryOverviewPage() {
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams.get('q') ?? '';
   const permissions = usePermissions();
   const canCreate = permissions.includes(PERMISSIONS.productCategoryCreate);
   const canArchive = permissions.includes(PERMISSIONS.productCategoryArchive);
   const [reloadKey, setReloadKey] = useState(0);
   const { categories, loading, error } = useAllCategories(reloadKey);
   const archiveActions = useCategoryArchiveActions(() => setReloadKey((current) => current + 1));
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(routeQuery);
+  const [expandedRoots, setExpandedRoots] = useState<Set<string>>(() => new Set());
   const [filters, setFilters] = useState<CategoryFilterState>(() =>
     defaultCategoryFilters()
   );
+
+  useEffect(() => setQuery(routeQuery), [routeQuery]);
 
   const roots = useMemo(() => categories.filter((category) => !category.parent_id), [categories]);
   const children = useMemo(
@@ -83,6 +98,20 @@ export function ProductCategoryOverviewPage() {
       })
       .filter((node): node is TreeNode => Boolean(node));
   }, [childrenByParent, filters, query, roots]);
+
+  useEffect(() => {
+    if (!query.trim()) return;
+    setExpandedRoots(new Set(treeNodes.map(({ root }) => String(root.id ?? ''))));
+  }, [query, treeNodes]);
+
+  function toggleRoot(rootId: string) {
+    setExpandedRoots((current) => {
+      const next = new Set(current);
+      if (next.has(rootId)) next.delete(rootId);
+      else next.add(rootId);
+      return next;
+    });
+  }
 
   const totalProductGroups = useMemo(
     () =>
@@ -157,6 +186,7 @@ export function ProductCategoryOverviewPage() {
           onClear={() => {
             setQuery('');
             setFilters(defaultCategoryFilters());
+            setExpandedRoots(new Set());
           }}
         >
           <CategoryFilterField label="Ngày">
@@ -238,112 +268,162 @@ export function ProductCategoryOverviewPage() {
           </div>
         ) : (
           <div className="space-y-4 p-4" data-product-category-tree="true">
-            {treeNodes.map(({ root, children: rootChildren }) => (
-              <article
-                key={String(root.id)}
-                className="rounded-sm border border-border bg-panel px-4 py-4"
-              >
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-sm font-semibold text-text">
-                        {formatValue(root.name)}
-                      </h2>
-                      <Badge tone="active">Danh mục chính</Badge>
-                      {root.deleted_at ? <Badge tone="archived">Đã lưu trữ</Badge> : null}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {numberValue(rootChildren.length)} danh mục con ·{' '}
-                      {numberValue(root.active_product_group_count)} nhóm sản phẩm
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Link
-                      href={`/product-categories/${String(root.id)}`}
-                      className="text-sm font-medium text-primary hover:underline"
+            {treeNodes.map(({ root, children: rootChildren }) => {
+              const rootId = String(root.id ?? '');
+              const expanded = expandedRoots.has(rootId);
+              const rootName = formatValue(root.name);
+              return (
+                <article
+                  key={rootId}
+                  data-category-branch="true"
+                  data-category-expanded={expanded ? 'true' : 'false'}
+                  className="overflow-visible rounded-sm border border-border bg-panel"
+                >
+                  <div className="flex flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                    <button
+                      type="button"
+                      aria-expanded={rootChildren.length > 0 ? expanded : undefined}
+                      aria-label={`${expanded ? 'Thu gọn' : 'Mở'} ${rootChildren.length} danh mục con của ${rootName}`}
+                      disabled={rootChildren.length === 0}
+                      className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
+                      onClick={() => toggleRoot(rootId)}
                     >
-                      Xem chi tiết
-                    </Link>
-                    {!root.deleted_at && canArchive ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-border bg-muted text-primary">
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                        />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-text">{rootName}</span>
+                          <Badge tone="active">Danh mục chính</Badge>
+                          {root.deleted_at ? <Badge tone="archived">Đã lưu trữ</Badge> : null}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {numberValue(rootChildren.length)} danh mục con ·{' '}
+                          {numberValue(root.active_product_group_count)} nhóm sản phẩm
+                        </span>
+                      </span>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1.5 self-end md:self-auto">
+                      <LinkButton
+                        href={`/product-categories/${rootId}`}
+                        variant="secondary"
                         size="sm"
-                        className="text-red-700 hover:bg-red-50 hover:text-red-800"
-                        data-product-delete-button="true"
-                        disabled={archiveActions.pendingId === String(root.id)}
-                        onClick={() => archiveActions.setConfirmId(String(root.id))}
                       >
-                        {archiveActions.pendingId === String(root.id) ? 'Đang xóa' : 'Xóa'}
-                      </Button>
-                    ) : null}
+                        Mở
+                      </LinkButton>
+                      {!root.deleted_at && canArchive ? (
+                        <CategoryArchiveMenu
+                          categoryId={rootId}
+                          categoryName={rootName}
+                          pending={archiveActions.pendingId === rootId}
+                          onArchive={() => archiveActions.setConfirmId(rootId)}
+                        />
+                      ) : null}
+                    </div>
                   </div>
-                </div>
 
-                {rootChildren.length === 0 ? (
-                  <div className="mt-4 rounded-sm border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
-                    Chưa có danh mục con dưới nhánh này.
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-2 border-l border-border pl-4">
-                    {rootChildren.map((child) => (
-                      <div
-                        key={String(child.id)}
-                        className="flex flex-col gap-2 rounded-sm border border-border bg-muted/20 px-3 py-3 md:flex-row md:items-center md:justify-between"
-                      >
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="text-sm font-medium text-text">
-                              {formatValue(child.name)}
-                            </div>
-                            <Badge tone="info">Danh mục con</Badge>
-                            {child.deleted_at ? <Badge tone="archived">Đã lưu trữ</Badge> : null}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {numberValue(child.active_product_group_count)} nhóm sản phẩm · cập
-                            nhật {formatDate(child.updated_at)}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/product-categories/${String(child.id)}`}
-                            className="text-sm font-medium text-primary hover:underline"
+                  {expanded ? (
+                    <div
+                      data-category-children="true"
+                      className="space-y-2 border-t border-border bg-muted/30 p-3 md:pl-8"
+                    >
+                      {rootChildren.map((child) => {
+                        const childId = String(child.id ?? '');
+                        const childName = formatValue(child.name);
+                        return (
+                          <div
+                            key={childId}
+                            className="flex flex-col gap-2 rounded-sm border border-border bg-panel px-3 py-3 md:flex-row md:items-center md:justify-between"
                           >
-                            Xem chi tiết
-                          </Link>
-                          {!child.deleted_at && canArchive ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-700 hover:bg-red-50 hover:text-red-800"
-                              data-product-delete-button="true"
-                              disabled={archiveActions.pendingId === String(child.id)}
-                              onClick={() => archiveActions.setConfirmId(String(child.id))}
-                            >
-                              {archiveActions.pendingId === String(child.id) ? 'Đang xóa' : 'Xóa'}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-            ))}
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="truncate text-sm font-medium text-text">{childName}</div>
+                                {child.deleted_at ? <Badge tone="archived">Đã lưu trữ</Badge> : null}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {numberValue(child.active_product_group_count)} nhóm sản phẩm · cập
+                                nhật {formatDate(child.updated_at)}
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1.5 self-end md:self-auto">
+                              <LinkButton
+                                href={`/product-categories/${childId}`}
+                                variant="secondary"
+                                size="sm"
+                              >
+                                Mở
+                              </LinkButton>
+                              {!child.deleted_at && canArchive ? (
+                                <CategoryArchiveMenu
+                                  categoryId={childId}
+                                  categoryName={childName}
+                                  pending={archiveActions.pendingId === childId}
+                                  onArchive={() => archiveActions.setConfirmId(childId)}
+                                />
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         )}
       </Card>
 
       <ConfirmDialog
         open={Boolean(archiveActions.confirmId)}
-        title="Xóa danh mục"
+        title="Lưu trữ danh mục"
         description="Thao tác này sẽ lưu trữ mềm danh mục và ẩn khỏi danh sách đang dùng. Dữ liệu không bị xóa vĩnh viễn."
-        confirmLabel="Xóa"
+        confirmLabel="Lưu trữ"
         onClose={() => archiveActions.setConfirmId(null)}
         onConfirm={() => archiveActions.confirmArchive()}
       />
     </section>
+  );
+}
+
+function CategoryArchiveMenu({
+  categoryId,
+  categoryName,
+  pending,
+  onArchive
+}: {
+  categoryId: string;
+  categoryName: string;
+  pending: boolean;
+  onArchive: () => void;
+}) {
+  return (
+    <details className="group relative" data-category-actions={categoryId}>
+      <summary
+        role="button"
+        aria-label={`Thao tác khác cho ${categoryName}`}
+        className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-sm border border-border bg-panel text-muted-foreground transition hover:bg-muted hover:text-text md:h-9 md:w-9"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </summary>
+      <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-sm border border-border bg-panel p-1 shadow-lg">
+        <button
+          type="button"
+          data-product-delete-button="true"
+          disabled={pending}
+          className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 text-left text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={(event) => {
+            event.currentTarget.closest('details')?.removeAttribute('open');
+            onArchive();
+          }}
+        >
+          <Archive className="h-4 w-4" />
+          {pending ? 'Đang lưu trữ' : 'Lưu trữ'}
+        </button>
+      </div>
+    </details>
   );
 }
 
@@ -648,7 +728,7 @@ export function ProductCategoryScopedListPage({ scope }: { scope: CategoryScope 
                             disabled={archiveActions.pendingId === String(category.id)}
                             onClick={() => archiveActions.setConfirmId(String(category.id))}
                           >
-                            {archiveActions.pendingId === String(category.id) ? 'Đang xóa' : 'Xóa'}
+                            {archiveActions.pendingId === String(category.id) ? 'Đang lưu trữ' : 'Lưu trữ'}
                           </Button>
                         ) : null}
                       </div>
@@ -663,9 +743,9 @@ export function ProductCategoryScopedListPage({ scope }: { scope: CategoryScope 
 
       <ConfirmDialog
         open={Boolean(archiveActions.confirmId)}
-        title="Xóa danh mục"
+        title="Lưu trữ danh mục"
         description="Thao tác này sẽ lưu trữ mềm danh mục và ẩn khỏi danh sách đang dùng. Dữ liệu không bị xóa vĩnh viễn."
-        confirmLabel="Xóa"
+        confirmLabel="Lưu trữ"
         onClose={() => archiveActions.setConfirmId(null)}
         onConfirm={() => archiveActions.confirmArchive()}
       />
@@ -725,7 +805,7 @@ function useCategoryArchiveActions(onSuccess: () => void) {
       setError(null);
       setMessage('');
       await apiClient.post<unknown>(`${byId(endpoints.songThanh.productCategories, confirmId)}/archive`, {});
-      setMessage('Đã xóa danh mục khỏi danh sách đang dùng.');
+      setMessage('Đã lưu trữ danh mục. Dữ liệu vẫn được giữ để có thể khôi phục.');
       onSuccess();
     } catch (nextError) {
       setError(nextError);

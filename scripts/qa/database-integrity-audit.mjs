@@ -20,15 +20,15 @@ dotenv.config({ path: path.join(API_ROOT, '.env'), override: false });
 
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'database-integrity-qa-last-run.md'
 );
 const DDL_PATH = path.join(
   ROOT,
   'database',
   'ddl',
-  'song_thanh_physical_schema_v2.sql'
+  'song_thanh_deployment_schema_20260730.sql'
 );
 const MIGRATIONS_DIR = path.join(API_ROOT, 'migrations');
 const HOME_SECTION_TYPES = [
@@ -224,8 +224,84 @@ async function main() {
   );
 
   await runCase(
+    'DB-FK-SUPPORTING-INDEXES',
+    'Every foreign key has a usable child-side index with matching leading columns',
+    async () => {
+      const [foreignKeys, indexes] = await Promise.all([
+        loadForeignKeys(),
+        loadUsableIndexes()
+      ]);
+      const indexesByTable = new Map();
+      for (const index of indexes) {
+        const tableIndexes = indexesByTable.get(index.table_name) ?? [];
+        tableIndexes.push(index);
+        indexesByTable.set(index.table_name, tableIndexes);
+      }
+
+      const missing = foreignKeys.filter((foreignKey) => {
+        const candidates = indexesByTable.get(foreignKey.child_table) ?? [];
+        return !candidates.some((index) =>
+          foreignKey.child_columns.every(
+            (column, position) => index.columns[position] === column
+          )
+        );
+      });
+
+      assert(
+        missing.length === 0,
+        `foreign keys without supporting indexes: ${missing
+          .map(
+            (foreignKey) =>
+              `${foreignKey.child_table}.${foreignKey.constraint_name}(${foreignKey.child_columns.join(',')})`
+          )
+          .join(', ')}`
+      );
+      return {
+        foreign_keys_checked: foreignKeys.length,
+        usable_indexes_checked: indexes.length,
+        missing_supporting_indexes: 0
+      };
+    }
+  );
+
+  await runCase(
+    'DB-FK-DEPENDENCY-CYCLES',
+    'Foreign-key dependencies contain no mutual table cycles',
+    async () => {
+      const foreignKeys = await loadForeignKeys();
+      const cycles = findTableCycles(
+        foreignKeys.map((foreignKey) => ({
+          from: foreignKey.child_table,
+          to: foreignKey.parent_table
+        }))
+      );
+      assert(cycles.length === 0, `mutual FK cycles: ${JSON.stringify(cycles)}`);
+      return { foreign_keys_checked: foreignKeys.length, mutual_cycles: 0 };
+    }
+  );
+
+  await runCase(
+    'DB-FK-CASCADE-CYCLES',
+    'Cascading deletes contain no recursive table cycle',
+    async () => {
+      const foreignKeys = await loadForeignKeys();
+      const cascadeKeys = foreignKeys.filter(
+        (foreignKey) => foreignKey.delete_action === 'CASCADE'
+      );
+      const cycles = findTableCycles(
+        cascadeKeys.map((foreignKey) => ({
+          from: foreignKey.parent_table,
+          to: foreignKey.child_table
+        }))
+      );
+      assert(cycles.length === 0, `cascade delete cycles: ${JSON.stringify(cycles)}`);
+      return { cascade_foreign_keys_checked: cascadeKeys.length, cascade_cycles: 0 };
+    }
+  );
+
+  await runCase(
     'DB-AUTH-SEED',
-    'Standalone admin roles and permission catalog match the runtime contract',
+    'Seeded admin roles remain present alongside custom roles and the permission catalog matches the runtime contract',
     async () => {
       const [permissionCountRow, roleRows] = await Promise.all([
         db('admin_permission').count('* as count').first(),
@@ -240,11 +316,16 @@ async function main() {
         permissionCount === EXPECTED_PERMISSION_COUNT,
         `expected ${EXPECTED_PERMISSION_COUNT} permissions, got ${permissionCount}`
       );
+      const missingSeededRoles = SEEDED_ROLE_CODES.filter((code) => !roles.includes(code));
       assert(
-        JSON.stringify(roles) === JSON.stringify(SEEDED_ROLE_CODES),
-        `role drift: ${roles.join(', ')}`
+        missingSeededRoles.length === 0,
+        `missing seeded roles: ${missingSeededRoles.join(', ')}`
       );
-      return { permissions: permissionCount, roles };
+      return {
+        permissions: permissionCount,
+        seeded_roles: SEEDED_ROLE_CODES,
+        custom_role_count: roles.length - SEEDED_ROLE_CODES.length
+      };
     }
   );
 
@@ -353,6 +434,13 @@ async function loadForeignKeys() {
       c.conname AS constraint_name,
       c.conrelid::regclass::text AS child_table,
       c.confrelid::regclass::text AS parent_table,
+      CASE c.confdeltype
+        WHEN 'a' THEN 'NO ACTION'
+        WHEN 'r' THEN 'RESTRICT'
+        WHEN 'c' THEN 'CASCADE'
+        WHEN 'n' THEN 'SET NULL'
+        WHEN 'd' THEN 'SET DEFAULT'
+      END AS delete_action,
       ARRAY(
         SELECT a.attname
         FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
@@ -373,6 +461,95 @@ async function loadForeignKeys() {
     ORDER BY child_table, constraint_name
   `);
   return result.rows;
+}
+
+async function loadUsableIndexes() {
+  const result = await db.raw(`
+    SELECT
+      table_class.relname AS table_name,
+      index_class.relname AS index_name,
+      ARRAY(
+        SELECT attribute.attname
+        FROM unnest(index_info.indkey::smallint[])
+          WITH ORDINALITY AS index_key(attnum, position)
+        JOIN pg_attribute attribute
+          ON attribute.attrelid = index_info.indrelid
+          AND attribute.attnum = index_key.attnum
+        WHERE index_key.position <= index_info.indnkeyatts
+          AND index_key.attnum > 0
+        ORDER BY index_key.position
+      )::text[] AS columns
+    FROM pg_index index_info
+    JOIN pg_class table_class ON table_class.oid = index_info.indrelid
+    JOIN pg_class index_class ON index_class.oid = index_info.indexrelid
+    JOIN pg_namespace namespace ON namespace.oid = table_class.relnamespace
+    WHERE namespace.nspname = 'public'
+      AND index_info.indisvalid
+      AND index_info.indisready
+      AND index_info.indislive
+      AND index_info.indpred IS NULL
+    ORDER BY table_name, index_name
+  `);
+  return result.rows;
+}
+
+function findTableCycles(edges) {
+  const graph = new Map();
+  for (const { from, to } of edges) {
+    if (from === to) continue;
+    const destinations = graph.get(from) ?? new Set();
+    destinations.add(to);
+    graph.set(from, destinations);
+    if (!graph.has(to)) graph.set(to, new Set());
+  }
+
+  let nextIndex = 0;
+  const indexes = new Map();
+  const lowLinks = new Map();
+  const stack = [];
+  const inStack = new Set();
+  const cycles = [];
+
+  function visit(node) {
+    indexes.set(node, nextIndex);
+    lowLinks.set(node, nextIndex);
+    nextIndex += 1;
+    stack.push(node);
+    inStack.add(node);
+
+    for (const destination of graph.get(node) ?? []) {
+      if (!indexes.has(destination)) {
+        visit(destination);
+        lowLinks.set(
+          node,
+          Math.min(lowLinks.get(node), lowLinks.get(destination))
+        );
+      } else if (inStack.has(destination)) {
+        lowLinks.set(
+          node,
+          Math.min(lowLinks.get(node), indexes.get(destination))
+        );
+      }
+    }
+
+    if (lowLinks.get(node) !== indexes.get(node)) return;
+
+    const component = [];
+    let member;
+    do {
+      member = stack.pop();
+      inStack.delete(member);
+      component.push(member);
+    } while (member !== node);
+
+    if (component.length > 1) cycles.push(component.sort());
+  }
+
+  for (const node of graph.keys()) {
+    if (!indexes.has(node)) visit(node);
+  }
+
+  return cycles.sort((left, right) => left.join('|').localeCompare(right.join('|')));
 }
 
 async function collectSchemaObservations() {

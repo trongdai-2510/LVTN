@@ -12,8 +12,7 @@ import {
 import {
   FILE_DELETED_SCOPES,
   FILE_PURPOSES,
-  FILE_STORAGE_LOCATIONS,
-  FILE_USAGE_GROUPS
+  FILE_STORAGE_LOCATIONS
 } from './file.types';
 
 export class FileListQueryDto {
@@ -49,7 +48,7 @@ export class FileListQueryDto {
   deleted_scope?: 'active' | 'deleted' | 'all';
 
   @IsOptional()
-  @IsIn(FILE_USAGE_GROUPS)
+  @IsIn(FILE_PURPOSES)
   usage_group?:
     | 'product_image'
     | 'brand_logo'
@@ -93,7 +92,7 @@ export class FileUsageRecordListQueryDto {
   q?: string;
 
   @IsOptional()
-  @IsIn(FILE_USAGE_GROUPS)
+  @IsIn(FILE_PURPOSES)
   usage_group?:
     | 'product_image'
     | 'brand_logo'

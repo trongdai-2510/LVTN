@@ -92,9 +92,8 @@ export class AdminRoleRepository {
       .first();
   }
 
-  async listAssignedPermissionCodes(roleId: string): Promise<string[]> {
-    const rows = await this.knexService
-      .db('admin_role_permission as role_permission')
+  async listAssignedPermissionCodes(roleId: string, trx?: Knex.Transaction): Promise<string[]> {
+    const rows = await (trx ?? this.knexService.db)('admin_role_permission as role_permission')
       .join(
         'admin_permission as permission',
         'permission.id',
@@ -124,6 +123,14 @@ export class AdminRoleRepository {
       })
       .where({ code })
       .whereNull('deleted_at')
+      .first();
+  }
+
+  lockRole(trx: Knex.Transaction, roleId: string): Promise<AdminRoleRow | undefined> {
+    return trx<AdminRoleRow>('admin_role')
+      .where({ id: roleId })
+      .whereNull('deleted_at')
+      .forUpdate()
       .first();
   }
 
@@ -165,21 +172,19 @@ export class AdminRoleRepository {
   ): Promise<void> {
     await trx('admin_role_permission').where({ admin_role_id: roleId }).del();
 
-    if (permissionIds.length === 0) {
-      return;
+    if (permissionIds.length > 0) {
+      await trx('admin_role_permission').insert(
+        permissionIds.map((permissionId) => ({
+          admin_role_id: roleId,
+          admin_permission_id: permissionId
+        }))
+      );
     }
-
-    await trx('admin_role_permission').insert(
-      permissionIds.map((permissionId) => ({
-        admin_role_id: roleId,
-        admin_permission_id: permissionId
-      }))
-    );
+    await trx('admin_role').where({ id: roleId }).update({ updated_at: trx.fn.now() });
   }
 
-  countAssignedUsers(roleId: string): Promise<{ total: number }> {
-    return this.knexService
-      .db('admin_user_role as user_role')
+  countAssignedUsers(roleId: string, trx?: Knex.Transaction): Promise<{ total: number }> {
+    return (trx ?? this.knexService.db)('admin_user_role as user_role')
       .join('admin_user as user', 'user.id', 'user_role.admin_user_id')
       .where('user_role.admin_role_id', roleId)
       .whereNull('user.deleted_at')

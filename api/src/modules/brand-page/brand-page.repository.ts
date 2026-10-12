@@ -157,12 +157,16 @@ export class BrandPageRepository {
     return Boolean(row);
   }
 
-  async productGroupContext(productGroupId: string): Promise<ProductGroupContext | null> {
-    const row = await this.knexService
+  async productGroupContexts(productGroupIds: string[]): Promise<Map<string, ProductGroupContext>> {
+    if (productGroupIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.knexService
       .db<ProductGroupContext>(PRODUCT_GROUP_TABLE)
-      .where({ id: productGroupId })
-      .first('id', 'name', 'brand_id', 'status', 'review_status', 'publish_status', 'deleted_at');
-    return row ?? null;
+      .whereIn('id', productGroupIds)
+      .select('id', 'name', 'brand_id', 'status', 'review_status', 'publish_status', 'deleted_at');
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   async create(input: Required<Pick<BrandPageMutationInput, 'brand_id' | 'title'>> & BrandPageMutationInput, nested: {

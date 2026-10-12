@@ -5,7 +5,6 @@ import * as path from 'node:path';
 
 import { config as loadEnv } from 'dotenv';
 import { NestFactory } from '@nestjs/core';
-import type { Knex } from 'knex';
 
 import { AppModule } from '../src/app.module';
 import { readWorkbookFixture } from '../src/modules/import-workspace/intake/workbook-reader';

@@ -30,7 +30,7 @@ const STATUS_LABELS: Record<string, string> = {
   public_price: 'Có giá công khai',
   contact_for_quote: 'Liên hệ để báo giá',
   exact_price: 'Giá cụ thể',
-  from_price: 'Giá từ',
+  from_price: 'Giá theo biến thể',
   invalid_public_price: 'Giá công khai không hợp lệ',
   duplicate_variant_candidate: 'Nghi vấn trùng biến thể',
   manual_edit: 'Sửa thủ công',
@@ -148,8 +148,4 @@ export function labelForCode(value: unknown): string | undefined {
 export function formatStatusLabel(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
   return labelForCode(value) ?? String(value);
-}
-
-function optionLabel(value: string) {
-  return STATUS_LABELS[value] ?? UI_LABELS[value] ?? value;
 }

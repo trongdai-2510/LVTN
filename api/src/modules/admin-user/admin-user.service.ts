@@ -2,8 +2,10 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { HttpStatus, Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import type { Knex } from 'knex';
 
 import type { CurrentUser } from '../../common/auth/auth.types';
+import { assertSuperAdmin } from '../../common/auth/superAdmin';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
 import { createPaginationMeta, getPaginationParams } from '../../common/pagination/pagination';
@@ -73,7 +75,7 @@ export class AdminUserService {
         status: query.status ?? 'all',
         role_id: query.role_id ?? null
       },
-      available_roles: await this.getAssignableRoleOptions()
+      available_roles: await this.getAssignableRoleOptions(currentUser)
     };
   }
 
@@ -103,11 +105,12 @@ export class AdminUserService {
           is_protected: SEEDED_ROLE_CODES.includes(role.code)
         }))
       },
-      available_roles: await this.getAssignableRoleOptions()
+      available_roles: await this.getAssignableRoleOptions(currentUser)
     };
   }
 
   async createUser(input: CreateAdminUserDto, currentUser: CurrentUser) {
+    assertSuperAdmin(currentUser);
     const displayName = this.normalizeDisplayName(input.display_name);
     const email = input.email.trim().toLowerCase();
     const status = input.status ?? 'active';
@@ -128,6 +131,7 @@ export class AdminUserService {
     const userId = randomUUID();
 
     await this.knexService.db.transaction(async (trx) => {
+      await this.assertLockedRolesUsable(trx, roles.map((role) => role.id));
       await this.adminUserRepository.createUser(trx, {
         id: userId,
         display_name: displayName,
@@ -149,6 +153,7 @@ export class AdminUserService {
   }
 
   async updateUser(userId: string, input: UpdateAdminUserDto, currentUser: CurrentUser) {
+    assertSuperAdmin(currentUser);
     const existing = await this.adminUserRepository.findById(userId);
     if (!existing) {
       throw this.notFound('Tài khoản quản trị không tồn tại.');
@@ -168,13 +173,6 @@ export class AdminUserService {
       nextStatus
     });
 
-    await this.assertSuperAdminSafety({
-      existingRoles: currentRoles.map((role) => role.code),
-      nextRoleCodes: nextRoles?.map((role) => role.code) ?? null,
-      nextStatus,
-      targetUserStatus: existing.status
-    });
-
     const email =
       typeof input.email === 'string' ? input.email.trim().toLowerCase() : undefined;
     if (email) {
@@ -189,6 +187,26 @@ export class AdminUserService {
     }
 
     await this.knexService.db.transaction(async (trx) => {
+      // The same role-row lock is used by assignment, status changes and archive.
+      // It also serializes concurrent removals of the final active Super Admin.
+      await this.assertLockedRolesUsable(
+        trx,
+        [...new Set([...currentRoles.map((role) => role.admin_role_id), ...(nextRoleIds ?? [])])],
+        nextRoleIds ?? []
+      );
+      const lockedUser = await this.adminUserRepository.lockUser(trx, userId);
+      if (!lockedUser) throw this.notFound('Tài khoản quản trị không tồn tại.');
+      if (lockedUser.status !== existing.status) {
+        throw this.concurrentUserChange();
+      }
+      await this.assertUnchangedRoleSnapshot(userId, currentRoles, trx);
+      await this.assertSuperAdminSafety({
+        existingRoles: currentRoles.map((role) => role.code),
+        nextRoleCodes: nextRoles?.map((role) => role.code) ?? null,
+        nextStatus,
+        targetUserStatus: existing.status,
+        trx
+      });
       await this.adminUserRepository.updateUser(trx, userId, {
         ...(typeof input.display_name === 'string'
           ? { display_name: this.normalizeDisplayName(input.display_name) }
@@ -204,11 +222,10 @@ export class AdminUserService {
           nextRoles.map((role) => role.id)
         );
       }
+      if (existing.status !== nextStatus && nextStatus !== 'active') {
+        await this.adminUserRepository.revokeAllRefreshSessions(userId, trx);
+      }
     });
-
-    if (existing.status !== nextStatus && nextStatus !== 'active') {
-      await this.adminUserRepository.revokeAllRefreshSessions(userId);
-    }
 
     return this.getUserDetail(userId, currentUser);
   }
@@ -226,21 +243,26 @@ export class AdminUserService {
     input: ResetAdminUserPasswordDto,
     currentUser: CurrentUser
   ) {
+    assertSuperAdmin(currentUser);
     const existing = await this.adminUserRepository.findById(userId);
     if (!existing) {
       throw this.notFound('Tài khoản quản trị không tồn tại.');
     }
 
+    const currentRoles = await this.adminUserRepository.listRolesForUsers([userId]);
     const nextPassword = input.new_password?.trim() || this.generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(nextPassword, PASSWORD_HASH_ROUNDS);
 
     await this.knexService.db.transaction(async (trx) => {
+      await this.assertLockedRolesUsable(trx, currentRoles.map((role) => role.admin_role_id), []);
+      const lockedUser = await this.adminUserRepository.lockUser(trx, userId);
+      if (!lockedUser) throw this.notFound('Tài khoản quản trị không tồn tại.');
+      await this.assertUnchangedRoleSnapshot(userId, currentRoles, trx);
       await this.adminUserRepository.updateUser(trx, userId, {
         password_hash: passwordHash
       });
+      await this.adminUserRepository.revokeAllRefreshSessions(userId, trx);
     });
-
-    await this.adminUserRepository.revokeAllRefreshSessions(userId);
 
     return {
       ...(await this.getUserDetail(userId, currentUser)),
@@ -248,7 +270,7 @@ export class AdminUserService {
     };
   }
 
-  private async getAssignableRoleOptions() {
+  private async getAssignableRoleOptions(currentUser: CurrentUser) {
     const roles = await this.adminUserRepository.listAssignableRoles();
     return roles.map((role) => ({
       id: role.id,
@@ -257,8 +279,33 @@ export class AdminUserService {
       status: role.status,
       description: role.description,
       user_count: role.user_count,
-      is_protected: SEEDED_ROLE_CODES.includes(role.code)
+      permission_count: role.permission_count,
+      is_protected: SEEDED_ROLE_CODES.includes(role.code),
+      is_super_admin: role.code === 'super_admin',
+      can_assign: currentUser.roles.length === 1 && currentUser.roles[0] === 'super_admin'
     }));
+  }
+
+  private async assertUnchangedRoleSnapshot(
+    userId: string,
+    originalRoles: readonly { admin_role_id: string }[],
+    trx: Knex.Transaction
+  ): Promise<void> {
+    const currentRoles = await this.adminUserRepository.listRolesForUsers([userId], trx);
+    const originalIds = originalRoles.map((role) => role.admin_role_id).sort();
+    const currentIds = currentRoles.map((role) => role.admin_role_id).sort();
+    if (originalIds.length !== currentIds.length ||
+        originalIds.some((id, index) => id !== currentIds[index])) {
+      throw this.concurrentUserChange();
+    }
+  }
+
+  private concurrentUserChange(): AppError {
+    return new AppError({
+      code: 'ADMIN_USER_CHANGED_DURING_EDIT',
+      message: 'Tài khoản vừa thay đổi. Hãy tải lại trước khi lưu.',
+      statusCode: HttpStatus.CONFLICT
+    });
   }
 
   private normalizeDisplayName(value: string): string {
@@ -275,11 +322,26 @@ export class AdminUserService {
   }
 
   private normalizeRoleIds(roleIds: readonly string[]): string[] {
+    if (!Array.isArray(roleIds) || roleIds.some((roleId) => typeof roleId !== 'string')) {
+      throw new AppError({
+        code: 'ADMIN_USER_ROLE_INVALID',
+        message: 'Danh sách vai trò không hợp lệ. Hãy chọn lại vai trò rồi lưu.',
+        statusCode: HttpStatus.BAD_REQUEST
+      });
+    }
     const uniqueRoleIds = [...new Set(roleIds.map((roleId) => roleId.trim()).filter(Boolean))];
     if (uniqueRoleIds.length === 0) {
       throw new AppError({
         code: 'ADMIN_USER_ROLE_REQUIRED',
-        message: 'Tài khoản quản trị phải được gán ít nhất một vai trò.',
+        message: 'Tài khoản quản trị phải được gán đúng một vai trò.',
+        statusCode: HttpStatus.BAD_REQUEST
+      });
+    }
+
+    if (roleIds.length !== 1 || uniqueRoleIds.length !== 1) {
+      throw new AppError({
+        code: 'ADMIN_USER_ROLE_INVALID',
+        message: 'Mỗi tài khoản quản trị chỉ được gán một vai trò.',
         statusCode: HttpStatus.BAD_REQUEST
       });
     }
@@ -307,6 +369,26 @@ export class AdminUserService {
     }
 
     return roles;
+  }
+
+  private async assertLockedRolesUsable(
+    trx: Knex.Transaction,
+    roleIds: readonly string[],
+    requiredActiveRoleIds: readonly string[] = roleIds
+  ): Promise<void> {
+    const lockedRoles = await this.adminUserRepository.lockRoles(trx, roleIds);
+    const byId = new Map(lockedRoles.map((role) => [role.id, role]));
+    const unavailable = requiredActiveRoleIds.find((roleId) => {
+      const role = byId.get(roleId);
+      return !role || role.deleted_at || role.status !== 'active';
+    });
+    if (unavailable) {
+      throw new AppError({
+        code: 'ADMIN_USER_ROLE_INACTIVE',
+        message: 'Một vai trò vừa thay đổi và không còn gán được. Hãy tải lại rồi chọn vai trò khác.',
+        statusCode: HttpStatus.CONFLICT
+      });
+    }
   }
 
   private async assertSelfProtection(params: {
@@ -346,6 +428,7 @@ export class AdminUserService {
     nextRoleCodes: readonly string[] | null;
     nextStatus: 'active' | 'inactive' | 'locked';
     targetUserStatus: 'active' | 'inactive' | 'locked';
+    trx: Knex.Transaction;
   }): Promise<void> {
     const currentlySuperAdmin = params.existingRoles.includes('super_admin');
     if (!currentlySuperAdmin) {
@@ -365,7 +448,7 @@ export class AdminUserService {
       return;
     }
 
-    const { total } = await this.adminUserRepository.countActiveSuperAdmins();
+    const { total } = await this.adminUserRepository.countActiveSuperAdmins(params.trx);
     if (total <= 1) {
       throw new AppError({
         code: 'ADMIN_USER_LAST_SUPER_ADMIN_BLOCKED',

@@ -24,8 +24,6 @@ import type {
 } from './home-page.types';
 import { DEFAULT_CONFIGS } from './home-page.types';
 
-type RecordMap = Record<string, unknown>;
-
 export interface ListEditorContext {
   resolvedById: Map<string, ResolvedSummary>;
   onOpenPicker: () => void;

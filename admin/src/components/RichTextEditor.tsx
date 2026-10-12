@@ -34,6 +34,7 @@ import { cn } from '@/lib/cn';
 interface RichTextEditorProps {
   value: string;
   onChange: (html: string) => void;
+  ariaLabel?: string;
   placeholder?: string;
   readOnly?: boolean;
   className?: string;
@@ -61,6 +62,27 @@ const IMAGE_WIDTH_OPTIONS = ['25', '50', '75', '100'] as const;
 type ImageWidth = (typeof IMAGE_WIDTH_OPTIONS)[number];
 const IMAGE_ALIGN_OPTIONS = ['left', 'center', 'right'] as const;
 type ImageAlign = (typeof IMAGE_ALIGN_OPTIONS)[number];
+
+function normalizeEditorHtml(html: string, editorIsEmpty = false): string {
+  const trimmed = html.trim();
+  if (
+    editorIsEmpty ||
+    trimmed === '' ||
+    /^(?:<p>(?:\s|<br\s*\/?>)*<\/p>)+$/i.test(trimmed)
+  ) {
+    return '';
+  }
+  return html;
+}
+
+function comparableEditorHtml(html: string, editorIsEmpty = false): string {
+  return normalizeEditorHtml(html, editorIsEmpty)
+    .trim()
+    .replace(/>\s+</g, '><')
+    // Tiptap represents a plain legacy `<li>text</li>` as `<li><p>text</p></li>`.
+    // Treat both forms as equal so merely opening an older record does not mark it dirty.
+    .replace(/<li><p>((?:(?!<\/p>)[\s\S])*)<\/p><\/li>/gi, '<li>$1</li>');
+}
 
 function normalizeImageWidth(value: unknown): ImageWidth {
   const str = typeof value === 'string' ? value.trim() : '';
@@ -194,6 +216,7 @@ type MammothModule = {
 export function RichTextEditor({
   value,
   onChange,
+  ariaLabel = 'Nội dung bài viết',
   placeholder = 'Nhập nội dung...',
   readOnly = false,
   className,
@@ -238,16 +261,26 @@ export function RichTextEditor({
     ],
     content: value,
     editable: !readOnly,
+    editorProps: {
+      attributes: {
+        'aria-label': ariaLabel,
+        'aria-multiline': 'true',
+        role: 'textbox'
+      }
+    },
     onUpdate({ editor: ed }) {
-      onChange(ed.getHTML());
+      const next = normalizeEditorHtml(ed.getHTML(), ed.isEmpty);
+      if (comparableEditorHtml(next, ed.isEmpty) === comparableEditorHtml(value)) return;
+      onChange(next);
     }
   });
 
   useEffect(() => {
     if (!editorInstance) return;
-    const current = editorInstance.getHTML();
-    if (current !== value) {
-      editorInstance.commands.setContent(value);
+    const current = normalizeEditorHtml(editorInstance.getHTML(), editorInstance.isEmpty);
+    const next = normalizeEditorHtml(value);
+    if (current !== next) {
+      editorInstance.commands.setContent(next, { emitUpdate: false });
     }
   }, [value, editorInstance]);
 
@@ -593,16 +626,18 @@ export function RichTextEditor({
       <button
         type="button"
         title={title}
+        aria-label={title}
+        aria-pressed={typeof active === 'boolean' ? active : undefined}
         disabled={disabled}
         onMouseDown={(event) => {
           event.preventDefault();
           if (!disabled) onMouseDown();
         }}
         className={cn(
-          'flex h-8 w-8 items-center justify-center rounded text-sm transition-colors',
+          'flex h-11 w-11 items-center justify-center rounded-sm text-sm transition-colors md:h-9 md:w-9',
           active
-            ? 'bg-blue-100 text-blue-700'
-            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700',
+            ? 'bg-primary text-primary-foreground shadow-sm'
+            : 'text-slate-600 hover:bg-muted hover:text-text',
           disabled ? 'cursor-not-allowed opacity-50' : '',
           className
         )}
@@ -612,7 +647,7 @@ export function RichTextEditor({
     );
   }
 
-  const divider = <div className="mx-1 h-5 w-px flex-shrink-0 bg-gray-200" />;
+  const divider = <div className="mx-1 h-6 w-px flex-shrink-0 bg-border" />;
   const isLeftAligned =
     editor.isActive({ textAlign: 'left' }) ||
     (!editor.isActive({ textAlign: 'center' }) && !editor.isActive({ textAlign: 'right' }));
@@ -620,7 +655,7 @@ export function RichTextEditor({
   return (
     <div
       ref={editorWrapRef}
-      className={cn('relative overflow-visible rounded border border-border bg-panel', className)}
+      className={cn('relative overflow-visible rounded-md border border-slate-300 bg-panel shadow-[inset_0_1px_0_rgb(255_255_255_/_0.7)] focus-within:border-primary focus-within:ring-2 focus-within:ring-blue-100', className)}
     >
       {!readOnly && (
         <>
@@ -640,8 +675,13 @@ export function RichTextEditor({
           />
 
           {/* Toolbar */}
-          <div className="flex flex-wrap items-center gap-1 overflow-visible border-b border-gray-200 bg-gray-50 px-2 py-1.5">
+          <div
+            role="toolbar"
+            aria-label={`${ariaLabel} – công cụ định dạng`}
+            className="flex flex-wrap items-center gap-1 overflow-visible rounded-t-md border-b border-border bg-surface px-3 py-2"
+          >
             <select
+              aria-label="Kiểu đoạn văn"
               value={
                 editor.isActive('heading', { level: 2 })
                   ? 'h2'
@@ -651,7 +691,7 @@ export function RichTextEditor({
               }
               onChange={(event) => handleHeadingChange(event.target.value)}
               onMouseDown={(event) => event.stopPropagation()}
-              className="mr-1 h-7 cursor-pointer rounded border border-gray-200 bg-white px-1.5 text-xs text-gray-700 focus:border-blue-400 focus:outline-none"
+              className="mr-1 h-11 cursor-pointer rounded-sm border border-border bg-panel px-2 text-sm font-medium text-text focus:border-primary focus:outline-none focus:ring-2 focus:ring-blue-100 md:h-9"
               style={{ minWidth: 100 }}
             >
               <option value="paragraph">Đoạn văn</option>
@@ -730,7 +770,7 @@ export function RichTextEditor({
                     .run();
                 }
               }}
-              title="Chèn bảng (3x3) — bấm lại để xóa bảng"
+              title="Chèn bảng (3x3), bấm lại để xóa bảng"
             >
               <TableIcon size={14} />
             </ToolbarButton>
@@ -766,7 +806,7 @@ export function RichTextEditor({
               disabled={isImporting}
               onMouseDown={() => wordInputRef.current?.click()}
               title="Nhập nội dung từ file Word (.docx)"
-              className="h-7 w-auto flex-shrink-0 gap-1.5 border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+              className="h-11 w-auto min-w-[108px] flex-shrink-0 gap-1.5 whitespace-nowrap border border-border bg-panel px-3 text-sm font-semibold text-slate-700 hover:border-primary/40 hover:bg-muted md:h-9"
             >
               {isImporting ? <Loader2 size={14} className="animate-spin" /> : <FileUp size={14} />}
               Nhập Word
@@ -921,25 +961,25 @@ export function RichTextEditor({
         />
       )}
 
-      <div className="overflow-y-auto" style={{ minHeight: Math.max(200, minHeight), maxHeight: 520 }}>
+      <div className="overflow-y-auto bg-white" style={{ minHeight: Math.max(240, minHeight), maxHeight: 680 }}>
         <EditorContent
           editor={editor}
           className={cn(
-            'prose prose-sm max-w-none p-3 text-[14px] text-text focus-within:outline-none',
+            'prose prose-sm max-w-none px-5 py-4 text-[15px] leading-7 text-text focus-within:outline-none sm:px-6 sm:py-5',
             '[&_.ProseMirror]:min-h-[200px] [&_.ProseMirror]:outline-none',
             // Heading visibility — make h1/h2/h3 clearly distinct while editing
-            '[&_.ProseMirror_h1]:text-[22px] [&_.ProseMirror_h1]:font-extrabold [&_.ProseMirror_h1]:leading-snug [&_.ProseMirror_h1]:mt-4 [&_.ProseMirror_h1]:mb-2 [&_.ProseMirror_h1]:text-strong',
-            '[&_.ProseMirror_h2]:text-[18px] [&_.ProseMirror_h2]:font-bold [&_.ProseMirror_h2]:leading-snug [&_.ProseMirror_h2]:mt-4 [&_.ProseMirror_h2]:mb-2 [&_.ProseMirror_h2]:text-strong [&_.ProseMirror_h2]:border-l-[3px] [&_.ProseMirror_h2]:border-primary [&_.ProseMirror_h2]:pl-3',
-            '[&_.ProseMirror_h3]:text-[15px] [&_.ProseMirror_h3]:font-semibold [&_.ProseMirror_h3]:leading-snug [&_.ProseMirror_h3]:mt-3 [&_.ProseMirror_h3]:mb-1.5 [&_.ProseMirror_h3]:text-strong',
+            '[&_.ProseMirror_h1]:mt-5 [&_.ProseMirror_h1]:mb-2 [&_.ProseMirror_h1]:text-[24px] [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h1]:text-text',
+            '[&_.ProseMirror_h2]:mt-5 [&_.ProseMirror_h2]:mb-2 [&_.ProseMirror_h2]:text-[20px] [&_.ProseMirror_h2]:font-bold [&_.ProseMirror_h2]:leading-snug [&_.ProseMirror_h2]:text-text',
+            '[&_.ProseMirror_h3]:mt-4 [&_.ProseMirror_h3]:mb-1.5 [&_.ProseMirror_h3]:text-[17px] [&_.ProseMirror_h3]:font-semibold [&_.ProseMirror_h3]:leading-snug [&_.ProseMirror_h3]:text-text',
             // Paragraph rhythm — chút khoảng cách để dễ phân biệt block
             '[&_.ProseMirror_p]:my-2 [&_.ProseMirror_p]:leading-[1.65]',
             // List visuals — bullets + numbers rõ ràng
             '[&_.ProseMirror_ul]:my-2 [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul_li]:my-1 [&_.ProseMirror_ul_li::marker]:text-primary',
             '[&_.ProseMirror_ol]:my-2 [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol_li]:my-1 [&_.ProseMirror_ol_li::marker]:font-semibold [&_.ProseMirror_ol_li::marker]:text-primary',
             // Blockquote — gạch trái + nền nhẹ để nhận ra
-            '[&_.ProseMirror_blockquote]:my-3 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-primary [&_.ProseMirror_blockquote]:bg-subtle [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:pr-3 [&_.ProseMirror_blockquote]:py-2 [&_.ProseMirror_blockquote]:italic [&_.ProseMirror_blockquote]:text-body',
+            '[&_.ProseMirror_blockquote]:my-3 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-primary [&_.ProseMirror_blockquote]:bg-muted [&_.ProseMirror_blockquote]:py-2 [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:pr-3 [&_.ProseMirror_blockquote]:italic [&_.ProseMirror_blockquote]:text-slate-700',
             // Inline marks
-            '[&_.ProseMirror_strong]:font-semibold [&_.ProseMirror_strong]:text-strong',
+            '[&_.ProseMirror_strong]:font-semibold [&_.ProseMirror_strong]:text-text',
             '[&_.ProseMirror_em]:italic',
             '[&_.ProseMirror_a]:text-primary [&_.ProseMirror_a]:underline [&_.ProseMirror_a]:underline-offset-2',
             // Placeholder cho ô rỗng

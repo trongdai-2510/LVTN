@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Knex } from 'knex';
 
+import { AppError } from '../../common/errors/app-error';
+import { ErrorCodes } from '../../common/errors/error-codes';
 import {
   extractPublicFileIdsFromHtml,
   syncManagedFileUsage,
@@ -8,6 +10,7 @@ import {
   type FileUsageDatabase
 } from '../../common/files/file-usage-sync';
 import { KnexService } from '../../db/knex.service';
+import { lockUsableProductGroupForChildMutation } from '../product-group/productGroupTransactionGuard';
 import {
   FILE_METADATA_TABLE,
   FILE_USAGE_TABLE,
@@ -352,9 +355,11 @@ export class ProjectRepository {
     projectId: string,
     input: Required<Pick<ProjectGalleryMutationInput, 'file_id' | 'sort_order'>> &
       ProjectGalleryMutationInput,
-    actorId: number
+    actorId: number,
+    reopenReview = false
   ): Promise<ProjectGalleryRecord> {
     return this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
       const [row] = await trx<ProjectGalleryRecord>(PROJECT_GALLERY_TABLE)
         .insert({
           project_id: projectId,
@@ -372,25 +377,33 @@ export class ProjectRepository {
         row.file_id,
         PROJECT_GALLERY_FILE_USAGE_ENTITY_TYPE
       );
+      await this.reopenProjectReview(trx, project, reopenReview);
       return row;
     });
   }
 
-  async updateGalleryItem(projectId: string, galleryId: string, input: ProjectGalleryMutationInput): Promise<boolean> {
+  async updateGalleryItem(projectId: string, galleryId: string, input: ProjectGalleryMutationInput, reopenReview = false): Promise<boolean> {
     const patch: Record<string, unknown> = {};
     if (typeof input.alt_text !== 'undefined') patch.alt_text = input.alt_text;
     if (typeof input.sort_order !== 'undefined') patch.sort_order = input.sort_order;
     if (Object.keys(patch).length === 0) return true;
-    const updated = await this.knexService
-      .db(PROJECT_GALLERY_TABLE)
-      .where({ id: galleryId, project_id: projectId })
-      .whereNull('deleted_at')
-      .update(patch);
-    return updated > 0;
+    return this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
+      const current = await trx(PROJECT_GALLERY_TABLE)
+        .where({ id: galleryId, project_id: projectId })
+        .whereNull('deleted_at').forUpdate().first();
+      if (!current) return false;
+      if (Object.entries(patch).some(([key, value]) => current[key] !== value)) {
+        await trx(PROJECT_GALLERY_TABLE).where({ id: galleryId }).update(patch);
+        await this.reopenProjectReview(trx, project, reopenReview);
+      }
+      return true;
+    });
   }
 
-  async archiveGalleryItem(projectId: string, galleryId: string): Promise<boolean> {
+  async archiveGalleryItem(projectId: string, galleryId: string, reopenReview = false): Promise<boolean> {
     return this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
       const existing = await trx<ProjectGalleryRecord>(PROJECT_GALLERY_TABLE)
         .where({ id: galleryId, project_id: projectId })
         .forUpdate()
@@ -408,13 +421,15 @@ export class ProjectRepository {
           null,
           PROJECT_GALLERY_FILE_USAGE_ENTITY_TYPE
         );
+        await this.reopenProjectReview(trx, project, reopenReview);
       }
       return updated > 0;
     });
   }
 
-  async restoreGalleryItem(projectId: string, galleryId: string): Promise<boolean> {
+  async restoreGalleryItem(projectId: string, galleryId: string, reopenReview = false): Promise<boolean> {
     return this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
       const existing = await trx<ProjectGalleryRecord>(PROJECT_GALLERY_TABLE)
         .where({ id: galleryId, project_id: projectId })
         .forUpdate()
@@ -432,19 +447,25 @@ export class ProjectRepository {
           existing?.file_id ?? null,
           PROJECT_GALLERY_FILE_USAGE_ENTITY_TYPE
         );
+        await this.reopenProjectReview(trx, project, reopenReview);
       }
       return updated > 0;
     });
   }
 
-  async reorderGalleryItems(projectId: string, items: ProjectGalleryReorderInput[]): Promise<void> {
+  async reorderGalleryItems(projectId: string, items: ProjectGalleryReorderInput[], reopenReview = false): Promise<void> {
     await this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
+      let changed = false;
       for (const item of items) {
-        await trx(PROJECT_GALLERY_TABLE)
+        const count = await trx(PROJECT_GALLERY_TABLE)
           .where({ id: item.id, project_id: projectId })
           .whereNull('deleted_at')
+          .whereNot('sort_order', item.sort_order)
           .update({ sort_order: item.sort_order });
+        changed ||= count > 0;
       }
+      if (changed) await this.reopenProjectReview(trx, project, reopenReview);
     });
   }
 
@@ -509,29 +530,61 @@ export class ProjectRepository {
   async attachProductGroup(
     projectId: string,
     productGroupId: string,
-    actorId: number
+    actorId: number,
+    reopenReview = false
   ): Promise<void> {
-    await this.knexService.db(PROJECT_PRODUCT_GROUP_TABLE).insert({
-      project_id: projectId,
-      product_group_id: productGroupId,
-      created_by: actorId
+    await this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
+      await lockUsableProductGroupForChildMutation(trx, productGroupId);
+      await trx(PROJECT_PRODUCT_GROUP_TABLE).insert({
+        project_id: projectId,
+        product_group_id: productGroupId,
+        created_by: actorId
+      });
+      await this.reopenProjectReview(trx, project, reopenReview);
     });
   }
 
-  async detachProductGroup(projectId: string, productGroupId: string): Promise<boolean> {
-    const updated = await this.knexService.db(PROJECT_PRODUCT_GROUP_TABLE)
-      .where({ project_id: projectId, product_group_id: productGroupId })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now() });
-    return updated > 0;
+  async detachProductGroup(projectId: string, productGroupId: string, reopenReview = false): Promise<boolean> {
+    return this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
+      const count = await trx(PROJECT_PRODUCT_GROUP_TABLE)
+        .where({ project_id: projectId, product_group_id: productGroupId })
+        .whereNull('deleted_at').update({ deleted_at: trx.fn.now() });
+      if (count) await this.reopenProjectReview(trx, project, reopenReview);
+      return count > 0;
+    });
   }
 
-  async restoreProductGroup(projectId: string, productGroupId: string): Promise<boolean> {
-    const updated = await this.knexService.db(PROJECT_PRODUCT_GROUP_TABLE)
-      .where({ project_id: projectId, product_group_id: productGroupId })
-      .whereNotNull('deleted_at')
-      .update({ deleted_at: null });
-    return updated > 0;
+  async restoreProductGroup(projectId: string, productGroupId: string, reopenReview = false): Promise<boolean> {
+    return this.knexService.db.transaction(async (trx) => {
+      const project = await this.lockEditableProject(trx, projectId);
+      await lockUsableProductGroupForChildMutation(trx, productGroupId);
+      const count = await trx(PROJECT_PRODUCT_GROUP_TABLE)
+        .where({ project_id: projectId, product_group_id: productGroupId })
+        .whereNotNull('deleted_at')
+        .update({ deleted_at: null });
+      if (count) await this.reopenProjectReview(trx, project, reopenReview);
+      return count > 0;
+    });
+  }
+
+  private async lockEditableProject(trx: Knex.Transaction, id: string): Promise<ProjectRecord> {
+    const project = await trx<ProjectRecord>(PROJECT_TABLE).where({ id }).forUpdate().first();
+    if (!project || project.deleted_at) throw new AppError({
+      code: ErrorCodes.NOT_FOUND,
+      message: 'Project was not found.',
+      statusCode: HttpStatus.NOT_FOUND
+    });
+    return project;
+  }
+
+  private async reopenProjectReview(trx: Knex.Transaction, project: ProjectRecord, requested: boolean): Promise<void> {
+    if (!requested || project.review_status !== 'approved' || project.publish_status !== 'published') return;
+    await trx(PROJECT_TABLE).where({ id: project.id }).update({
+      review_status: 'pending_review', publish_status: 'unpublished', approved_by: null,
+      updated_at: trx.fn.now()
+    });
   }
 
   private async syncFileUsage(

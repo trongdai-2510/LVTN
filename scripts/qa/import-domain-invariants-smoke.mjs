@@ -32,8 +32,8 @@ const FIXTURE_ROOT = path.join(ROOT, 'tmp', 'qa-import', RUN_ID);
 const OUTSIDE_ROOT = mkdtempSync(path.join(tmpdir(), 'song-thanh-import-outside-'));
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'import-domain-invariants-qa-last-run.md'
 );
 const MAX_IMPORT_WORKBOOK_BYTES = 20 * 1024 * 1024;
@@ -131,6 +131,28 @@ try {
     };
   });
 
+  await runCase('IMPORT-LIST-BOUNDARIES', 'Batch search and pagination reject values beyond API/database limits', async () => {
+    const exactQuery = encodeURIComponent('q'.repeat(255));
+    const oversizedQuery = encodeURIComponent('q'.repeat(256));
+    const exact = await adminRequest(
+      `/song-thanh/import-batches?q=${exactQuery}&page=1&page_size=1`
+    );
+    assertOk(exact);
+    const oversized = await adminRequest(
+      `/song-thanh/import-batches?q=${oversizedQuery}`
+    );
+    assertError(oversized, 400, 'VALIDATION_ERROR');
+    const overflowingPage = await adminRequest(
+      '/song-thanh/import-batches?page=2147483648'
+    );
+    assertError(overflowingPage, 400, 'VALIDATION_ERROR');
+    return {
+      exact_query_status: exact.status,
+      oversized_query_status: oversized.status,
+      overflowing_page_status: overflowingPage.status
+    };
+  });
+
   await runCase('IMPORT-DATE-BOUNDARIES', 'Date filters reject impossible/reversed dates and use complete Vietnam-local days', async () => {
     const impossible = await adminRequest(
       '/song-thanh/import-batches?created_from=2026-02-30'
@@ -196,6 +218,13 @@ try {
     });
     assertError(emptySelection, 400, 'VALIDATION_ERROR');
     evidence.push({ filename: 'empty selected range', status: emptySelection.status });
+
+    const overflowingRange = await intake(validFixture, {
+      batch_name: `QA overflowing range ${RUN_ID}`,
+      row_ranges: [{ start_row: 2, end_row: 2_147_483_648 }]
+    });
+    assertError(overflowingRange, 400, 'VALIDATION_ERROR');
+    evidence.push({ filename: 'overflowing selected range', status: overflowingRange.status });
 
     const outsideFixture = path.join(OUTSIDE_ROOT, 'outside.csv');
     writeFileSync(outsideFixture, 'name\noutside\n', 'utf8');
@@ -392,6 +421,79 @@ try {
       statuses: responses.map((response) => response.status).sort(),
       staging: stats
     };
+  });
+
+  await runCase('IMPORT-TAXONOMY-DELETE-RACE', 'Taxonomy bootstrap cannot publish categories from a batch archived while it waits', async () => {
+    const mainCategoryName = `QA Bootstrap Race Main ${RUN_ID}`;
+    const subCategoryName = `QA Bootstrap Race Sub ${RUN_ID}`;
+    const fixture = writeFixture(
+      'taxonomy-delete-race.csv',
+      [
+        'main,sub,group,variant',
+        `${mainCategoryName},${subCategoryName},Race Group,Race Variant`
+      ].join('\n')
+    );
+    const intakeResponse = await intake(fixture, {
+      batch_name: `QA taxonomy delete race ${RUN_ID}`
+    });
+    assertOk(intakeResponse);
+    const batchId = readBatchId(unwrap(intakeResponse.body));
+    const confirmed = await adminRequest(
+      `/song-thanh/import-batches/${batchId}/confirm-mapping`,
+      {
+        method: 'POST',
+        body: {
+          category_main_column: 'main',
+          category_sub_column: 'sub',
+          product_group_column: 'group',
+          product_variant_column: 'variant'
+        }
+      }
+    );
+    assertOk(confirmed);
+
+    const lockingTransaction = await db.transaction();
+    let transactionOpen = true;
+    try {
+      await lockingTransaction('import_batch')
+        .where({ id: batchId })
+        .forUpdate()
+        .first('id');
+      let settled = false;
+      const pendingBootstrap = adminRequest(
+        `/song-thanh/import-batches/${batchId}/taxonomy-baseline-bootstrap`,
+        { method: 'POST', body: {} }
+      ).finally(() => {
+        settled = true;
+      });
+      await delay(350);
+      const waitedForLock = !settled;
+      await lockingTransaction('import_batch')
+        .where({ id: batchId })
+        .update({ deleted_at: lockingTransaction.fn.now() });
+      await lockingTransaction.commit();
+      transactionOpen = false;
+
+      const response = await pendingBootstrap;
+      const categoryCountRow = await db('product_category')
+        .whereIn('name', [mainCategoryName, subCategoryName])
+        .whereNull('deleted_at')
+        .count({ count: '*' })
+        .first();
+      const categoryCount = Number(categoryCountRow?.count || 0);
+      await deleteBatch(batchId);
+
+      assert(waitedForLock, 'taxonomy bootstrap did not wait for the held batch lock');
+      assertError(response, 409, 'IMPORT_BATCH_ARCHIVED_READ_ONLY');
+      assert(categoryCount === 0, `taxonomy bootstrap leaked ${categoryCount} categories`);
+      return {
+        waited_for_lock: waitedForLock,
+        response_status: response.status,
+        leaked_categories: categoryCount
+      };
+    } finally {
+      if (transactionOpen) await lockingTransaction.rollback().catch(() => undefined);
+    }
   });
 
   await runCase('IMPORT-CONSISTENCY-GUARDS', 'Repeated group identity conflicts and unknown brands cannot silently lose data', async () => {
@@ -600,6 +702,31 @@ try {
     context.pendingVariantId = variants[0]?.id || '';
     assert(variants[0]?.conflict_id === context.conflictId, 'pending conflict link mismatch');
     return { ...stats, conflict_id: context.conflictId };
+  });
+
+  await runCase('IMPORT-STAGING-LIST-BOUNDARIES', 'Review lists enforce query and page boundaries consistently', async () => {
+    const oversizedQuery = encodeURIComponent('q'.repeat(256));
+    const routes = [
+      `/song-thanh/import-batches/${context.batchId}/pending-product-groups`,
+      `/song-thanh/import-batches/${context.batchId}/pending-variants`,
+      `/song-thanh/import-batches/${context.batchId}/conflicts`
+    ];
+    const queryResponses = await Promise.all(
+      routes.map((route) => adminRequest(`${route}?q=${oversizedQuery}`))
+    );
+    const pageResponses = await Promise.all(
+      routes.map((route) => adminRequest(`${route}?page=2147483648`))
+    );
+    [...queryResponses, ...pageResponses].forEach(
+      (response, index) => {
+        assertError(response, 400, 'VALIDATION_ERROR');
+        assert(response.status < 500, `review-list boundary ${index + 1} leaked a server error`);
+      }
+    );
+    return {
+      query_rejections: queryResponses.map((response) => response.status),
+      page_rejections: pageResponses.map((response) => response.status)
+    };
   });
 
   await runCase('IMPORT-READINESS-ROLLBACK', 'Premature ready transition is rejected without changing batch status', async () => {
@@ -1006,6 +1133,10 @@ function writeFixture(filename, contents) {
   const target = path.join(FIXTURE_ROOT, filename);
   writeFileSync(target, contents, 'utf8');
   return target;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function intake(sourceWorkbookPath, extraBody = {}) {

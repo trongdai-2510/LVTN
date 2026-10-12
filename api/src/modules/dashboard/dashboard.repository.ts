@@ -1,11 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import type { Knex } from "knex";
 
 import { KnexService } from "../../db/knex.service";
 import { PRODUCT_GROUP_TABLE } from "../product-group/product-group.types";
 
-export const PRODUCT_GROUP_DAILY_VIEW_TABLE = "product_group_daily_view";
-export const SITE_DAILY_VIEW_TABLE = "site_daily_view";
+const PRODUCT_GROUP_DAILY_VIEW_TABLE = "product_group_daily_view";
+const SITE_DAILY_VIEW_TABLE = "site_daily_view";
 
 export interface DashboardTrafficRow {
   bucket: string;

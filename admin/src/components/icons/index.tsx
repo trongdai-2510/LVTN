@@ -1,264 +1,296 @@
 'use client';
 
 /**
- * Icon adapter — re-exports Phosphor icons under their Lucide-equivalent names,
- * defaulting to weight="fill" for a consistent solid look across the admin.
+ * Shared admin icon system.
  *
- * Codebase imports from '@/components/icons' instead of 'lucide-react'.
+ * The public names stay compatible with the previous Lucide-style adapter so
+ * feature code does not need to know which icon package renders the glyph.
+ * Motion is reserved for actions and navigation; status and disclosure icons
+ * remain still to keep dense admin screens calm.
  */
 
+import type { ComponentPropsWithoutRef, ComponentType } from 'react';
 import {
-  Archive as PhArchive,
-  ArrowBendDownRight as PhArrowBendDownRight,
-  ArrowCounterClockwise as PhArrowCounterClockwise,
-  ArrowDown as PhArrowDown,
-  ArrowDownLeft as PhArrowDownLeft,
-  ArrowDownRight as PhArrowDownRight,
-  ArrowLeft as PhArrowLeft,
-  ArrowRight as PhArrowRight,
-  ArrowSquareOut as PhArrowSquareOut,
-  ArrowUp as PhArrowUp,
-  ArrowUpLeft as PhArrowUpLeft,
-  ArrowUpRight as PhArrowUpRight,
-  ArrowsClockwise as PhArrowsClockwise,
-  ArrowsCounterClockwise as PhArrowsCounterClockwise,
-  ArrowsLeftRight as PhArrowsLeftRight,
-  ArrowsOutCardinal as PhArrowsOutCardinal,
-  BellRinging as PhBellRinging,
-  BookOpen as PhBookOpen,
-  Briefcase as PhBriefcase,
-  Buildings as PhBuildings,
-  CaretDown as PhCaretDown,
-  CaretLeft as PhCaretLeft,
-  CaretRight as PhCaretRight,
-  CaretUp as PhCaretUp,
-  ChartBar as PhChartBar,
-  ChatCircleText as PhChatCircleText,
-  ChatsCircle as PhChatsCircle,
-  Check as PhCheck,
-  CheckCircle as PhCheckCircle,
-  CheckSquare as PhCheckSquare,
-  CircleNotch as PhCircleNotch,
-  ClipboardText as PhClipboardText,
-  Clock as PhClock,
-  ClockCounterClockwise as PhClockCounterClockwise,
-  CloudArrowUp as PhCloudArrowUp,
-  Copy as PhCopy,
-  Database as PhDatabase,
-  DotsSixVertical as PhDotsSixVertical,
-  DotsThree as PhDotsThree,
-  DotsThreeVertical as PhDotsThreeVertical,
-  DownloadSimple as PhDownloadSimple,
-  Envelope as PhEnvelope,
-  Eye as PhEye,
-  EyeSlash as PhEyeSlash,
-  FacebookLogo as PhFacebookLogo,
-  FileArchive as PhFileArchive,
-  FileArrowDown as PhFileArrowDown,
-  FileArrowUp as PhFileArrowUp,
-  FileImage as PhFileImage,
-  FileText as PhFileText,
-  FileXls as PhFileXls,
-  Flag as PhFlag,
-  FloppyDisk as PhFloppyDisk,
-  FunnelSimple as PhFunnelSimple,
-  Gear as PhGear,
-  GitBranch as PhGitBranch,
-  GitFork as PhGitFork,
-  GitPullRequest as PhGitPullRequest,
-  Globe as PhGlobe,
-  GridFour as PhGridFour,
-  Handshake as PhHandshake,
-  House as PhHouse,
-  Image as PhImage,
-  ImageBroken as PhImageBroken,
-  InstagramLogo as PhInstagramLogo,
-  Info as PhInfo,
-  Kanban as PhKanban,
-  Layout as PhLayout,
-  Link as PhLink,
-  LinkedinLogo as PhLinkedinLogo,
-  List as PhList,
-  ListBullets as PhListBullets,
-  ListChecks as PhListChecks,
-  ListNumbers as PhListNumbers,
-  MagnifyingGlass as PhMagnifyingGlass,
-  MapPin as PhMapPin,
-  MapTrifold as PhMapTrifold,
-  Minus as PhMinus,
-  NavigationArrow as PhNavigationArrow,
-  Newspaper as PhNewspaper,
-  Package as PhPackage,
-  PaperPlaneTilt as PhPaperPlaneTilt,
-  PencilSimple as PhPencilSimple,
-  Phone as PhPhone,
-  Plus as PhPlus,
-  Quotes as PhQuotes,
-  Receipt as PhReceipt,
-  SealCheck as PhSealCheck,
-  ShareNetwork as PhShareNetwork,
-  Shield as PhShield,
-  ShieldCheck as PhShieldCheck,
-  ShieldWarning as PhShieldWarning,
-  SignOut as PhSignOut,
-  Table as PhTable,
-  Sparkle as PhSparkle,
-  Stack as PhStack,
-  Star as PhStar,
-  Tag as PhTag,
-  TextAlignCenter as PhTextAlignCenter,
-  TextAlignLeft as PhTextAlignLeft,
-  Trash as PhTrash,
-  Tray as PhTray,
-  Tree as PhTree,
-  UploadSimple as PhUploadSimple,
-  UserCircle as PhUserCircle,
-  Users as PhUsers,
-  Warning as PhWarning,
-  WarningCircle as PhWarningCircle,
-  Wrench as PhWrench,
-  X as PhX,
-  YoutubeLogo as PhYoutubeLogo,
-  type Icon as PhosphorIcon,
-  type IconProps as PhIconProps,
-} from '@phosphor-icons/react';
+  AlignCenterIcon,
+  AlignLeftIcon,
+  ArrowDownIcon,
+  ArrowDownLeftIcon,
+  ArrowDownRightIcon,
+  ArrowLeftIcon,
+  ArrowLeftRightIcon,
+  ArrowRightIcon,
+  ArrowUpIcon,
+  ArrowUpLeftIcon,
+  ArrowUpRightIcon,
+  BellRingIcon,
+  BookOpenIcon,
+  BoxesIcon,
+  ChartBarIcon,
+  ChartGanttIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  CircleCheckBigIcon,
+  ClipboardIcon,
+  ClockIcon,
+  CloudUploadIcon,
+  CopyIcon,
+  CornerDownRightIcon,
+  DownloadIcon,
+  EllipsisIcon,
+  EllipsisVerticalIcon,
+  ExternalLinkIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FileArchiveIcon,
+  FileCheckIcon,
+  FileImageIcon,
+  FileSpreadsheetIcon,
+  FileTextIcon,
+  FileXIcon,
+  FilterIcon,
+  GitBranchPlusIcon,
+  GitCompareArrowsIcon,
+  GlobeIcon,
+  HistoryIcon,
+  HouseIcon,
+  ImageIcon as AnimatedImageIcon,
+  InboxIcon,
+  InfoIcon,
+  LayersIcon,
+  LayoutDashboardIcon,
+  LayoutGridIcon,
+  LinkIcon,
+  ListChecksIcon,
+  ListChevronsUpDownIcon,
+  ListIcon,
+  ListOrderedIcon,
+  LoaderCircleIcon,
+  LogOutIcon,
+  MailIcon,
+  MapPinIcon,
+  MenuIcon,
+  MessageSquareIcon,
+  MessageCircleMoreIcon,
+  MinusIcon,
+  MoveDiagonal2Icon,
+  NavigationIcon,
+  PackageIcon,
+  PackageSearchIcon,
+  PencilIcon,
+  PhoneIcon,
+  PlugZapIcon,
+  PlusIcon,
+  QuoteIcon,
+  RefreshCwIcon,
+  RouteIcon,
+  SaveIcon,
+  SearchIcon,
+  SendIcon,
+  ServerIcon,
+  SettingsIcon,
+  ShareIcon,
+  ShieldCheckIcon,
+  ShieldXIcon,
+  SparklesIcon,
+  StarIcon,
+  StoreIcon,
+  TagIcon,
+  TagsIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+  UploadIcon,
+  UserRoundIcon,
+  UsersIcon,
+  UsersRoundIcon,
+  XIcon
+} from '@animateicons/react/lucide';
 
-export type LucideIcon = PhosphorIcon;
+type AnimateIconSource = typeof AlignCenterIcon;
+type AnimateIconProps = ComponentPropsWithoutRef<AnimateIconSource>;
 
-type IncomingProps = PhIconProps & { strokeWidth?: number | string };
+type AdminIconProps = AnimateIconProps & {
+  /** Accepted for compatibility; AnimateIcons uses its own fixed line weight. */
+  strokeWidth?: number;
+  /** Accepted for compatibility with the former Phosphor adapter. */
+  weight?: string;
+};
 
-function fill(Ph: PhosphorIcon): PhosphorIcon {
-  const Wrapped = (({ strokeWidth: _sw, weight, ...rest }: IncomingProps) => (
-    <Ph weight={weight ?? 'fill'} {...rest} />
-  )) as unknown as PhosphorIcon;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (Wrapped as any).displayName = `Filled(${(Ph as any).displayName ?? 'Icon'})`;
-  return Wrapped;
+export type LucideIcon = ComponentType<AdminIconProps>;
+
+type MotionMode = 'hover' | 'static';
+
+function createAdminIcon(
+  Source: AnimateIconSource,
+  motion: MotionMode = 'hover'
+): LucideIcon {
+  function AdminIcon({
+    className,
+    size,
+    duration,
+    isAnimated,
+    strokeWidth: _strokeWidth,
+    weight: _weight,
+    style,
+    ...rest
+  }: AdminIconProps) {
+    const iconSize = resolveIconSize(size, className);
+    const usesCssAnimation = className?.includes('animate-') ?? false;
+    const ariaHidden = rest['aria-hidden'] ?? (rest['aria-label'] ? undefined : true);
+
+    return (
+      <Source
+        {...rest}
+        aria-hidden={ariaHidden}
+        className={['admin-icon', className].filter(Boolean).join(' ')}
+        data-admin-icon="true"
+        data-icon-motion={motion}
+        duration={duration ?? 0.25}
+        isAnimated={isAnimated ?? (motion === 'hover' && !usesCssAnimation)}
+        size={iconSize}
+        style={style}
+      />
+    );
+  }
+
+  AdminIcon.displayName = `AdminIcon(${Source.displayName ?? 'Icon'})`;
+  return AdminIcon;
 }
 
-// === Lucide-equivalent exports ===
-export const AlertCircle = fill(PhWarningCircle);
-export const AlertTriangle = fill(PhWarning);
-export const AlignCenter = fill(PhTextAlignCenter);
-export const AlignLeft = fill(PhTextAlignLeft);
-export const Archive = fill(PhArchive);
-export const ArchiveRestore = fill(PhArchive);
-export const ArrowDown = fill(PhArrowDown);
-export const ArrowDownLeft = fill(PhArrowDownLeft);
-export const ArrowDownRight = fill(PhArrowDownRight);
-export const ArrowLeft = fill(PhArrowLeft);
-export const ArrowRight = fill(PhArrowRight);
-export const ArrowRightLeft = fill(PhArrowsLeftRight);
-export const ArrowUp = fill(PhArrowUp);
-export const ArrowUpLeft = fill(PhArrowUpLeft);
-export const ArrowUpRight = fill(PhArrowUpRight);
-export const BadgeCheck = fill(PhSealCheck);
-export const BarChart3 = fill(PhChartBar);
-export const BellRing = fill(PhBellRinging);
-export const BookOpen = fill(PhBookOpen);
-export const Boxes = fill(PhStack);
-export const Briefcase = fill(PhBriefcase);
-export const Building2 = fill(PhBuildings);
-export const Check = fill(PhCheck);
-export const CheckCircle2 = fill(PhCheckCircle);
-export const CheckSquare2 = fill(PhCheckSquare);
-export const ChevronDown = fill(PhCaretDown);
-export const ChevronLeft = fill(PhCaretLeft);
-export const ChevronRight = fill(PhCaretRight);
-export const ChevronUp = fill(PhCaretUp);
-export const ClipboardList = fill(PhClipboardText);
-export const Clock = fill(PhClock);
-export const Clock3 = fill(PhClock);
-export const CloudUpload = fill(PhCloudArrowUp);
-export const Copy = fill(PhCopy);
-export const CornerDownRight = fill(PhArrowBendDownRight);
-export const Database = fill(PhDatabase);
-export const DatabaseZap = fill(PhDatabase);
-export const Download = fill(PhDownloadSimple);
-export const ExternalLink = fill(PhArrowSquareOut);
-export const Eye = fill(PhEye);
-export const EyeOff = fill(PhEyeSlash);
-export const Facebook = fill(PhFacebookLogo);
-export const FileArchive = fill(PhFileArchive);
-export const FileCheck2 = fill(PhFileText);
-export const FileDown = fill(PhFileArrowDown);
-export const FileImage = fill(PhFileImage);
-export const FileSpreadsheet = fill(PhFileXls);
-export const FileText = fill(PhFileText);
-export const FileUp = fill(PhFileArrowUp);
-export const Filter = fill(PhFunnelSimple);
-export const Flag = fill(PhFlag);
-export const FolderKanban = fill(PhKanban);
-export const FolderTree = fill(PhTree);
-export const GalleryHorizontal = fill(PhImage);
-export const GitBranchPlus = fill(PhGitBranch);
-export const GitFork = fill(PhGitFork);
-export const GitPullRequest = fill(PhGitPullRequest);
-export const Globe2 = fill(PhGlobe);
-export const Grid3X3 = fill(PhGridFour);
-export const GripVertical = fill(PhDotsSixVertical);
-export const Handshake = fill(PhHandshake);
-export const History = fill(PhClockCounterClockwise);
-export const Home = fill(PhHouse);
-export const Image = fill(PhImage);
-export const ImageIcon = fill(PhImage);
-export const ImageOff = fill(PhImageBroken);
-export const Table = fill(PhTable);
-export const Inbox = fill(PhTray);
-export const Info = fill(PhInfo);
-export const Instagram = fill(PhInstagramLogo);
-export const Layers = fill(PhStack);
-export const Layers3 = fill(PhStack);
-export const LayoutGrid = fill(PhGridFour);
-export const Link2 = fill(PhLink);
-export const Linkedin = fill(PhLinkedinLogo);
-export const List = fill(PhList);
-export const ListChecks = fill(PhListChecks);
-export const ListOrdered = fill(PhListNumbers);
-export const ListTree = fill(PhListBullets);
-export const Loader2 = fill(PhCircleNotch);
-export const LogOut = fill(PhSignOut);
-export const Mail = fill(PhEnvelope);
-export const MapPin = fill(PhMapPin);
-export const Menu = fill(PhList);
-export const MessageSquare = fill(PhChatCircleText);
-export const MessagesSquare = fill(PhChatsCircle);
-export const Minus = fill(PhMinus);
-export const MoreHorizontal = fill(PhDotsThree);
-export const MoreVertical = fill(PhDotsThreeVertical);
-export const Move = fill(PhArrowsOutCardinal);
-export const Navigation = fill(PhNavigationArrow);
-export const Newspaper = fill(PhNewspaper);
-export const Package = fill(PhPackage);
-export const PackageSearch = fill(PhPackage);
-export const PanelsTopLeft = fill(PhLayout);
-export const Pencil = fill(PhPencilSimple);
-export const Phone = fill(PhPhone);
-export const Plus = fill(PhPlus);
-export const Quote = fill(PhQuotes);
-export const ReceiptText = fill(PhReceipt);
-export const RefreshCcw = fill(PhArrowsCounterClockwise);
-export const RefreshCw = fill(PhArrowsClockwise);
-export const RotateCcw = fill(PhArrowCounterClockwise);
-export const Route = fill(PhMapTrifold);
-export const Save = fill(PhFloppyDisk);
-export const Search = fill(PhMagnifyingGlass);
-export const Send = fill(PhPaperPlaneTilt);
-export const Settings = fill(PhGear);
-export const Share2 = fill(PhShareNetwork);
-export const Shield = fill(PhShield);
-export const ShieldAlert = fill(PhShieldWarning);
-export const ShieldCheck = fill(PhShieldCheck);
-export const Sparkles = fill(PhSparkle);
-export const Star = fill(PhStar);
-export const Tag = fill(PhTag);
-export const Tags = fill(PhTag);
-export const Trash2 = fill(PhTrash);
-export const TriangleAlert = fill(PhWarning);
-export const Upload = fill(PhUploadSimple);
-export const UploadCloud = fill(PhCloudArrowUp);
-export const UserRound = fill(PhUserCircle);
-export const Users = fill(PhUsers);
-export const Wrench = fill(PhWrench);
-export const X = fill(PhX);
-export const Youtube = fill(PhYoutubeLogo);
+function createStaticIcon(Source: AnimateIconSource): LucideIcon {
+  return createAdminIcon(Source, 'static');
+}
+
+function resolveIconSize(size: number | undefined, className: string | undefined): number {
+  if (typeof size === 'number' && Number.isFinite(size) && size > 0) return size;
+
+  const arbitraryPixelSize = className?.match(/(?:^|\s)(?:size|h|w)-\[(\d+(?:\.\d+)?)px\]/);
+  if (arbitraryPixelSize) return Number(arbitraryPixelSize[1]);
+
+  const spacingSize = className?.match(/(?:^|\s)(?:size|h|w)-(\d+(?:\.\d+)?)(?:\s|$)/);
+  if (spacingSize) return Number(spacingSize[1]) * 4;
+
+  return 20;
+}
+
+// Status and validation feedback: visually stable on dense forms and tables.
+export const AlertCircle = createStaticIcon(TriangleAlertIcon);
+export const AlertTriangle = createStaticIcon(TriangleAlertIcon);
+export const BadgeCheck = createStaticIcon(CircleCheckBigIcon);
+export const Check = createStaticIcon(CheckIcon);
+export const CheckCircle2 = createStaticIcon(CircleCheckBigIcon);
+export const CheckSquare2 = createStaticIcon(ListChecksIcon);
+export const Clock = createStaticIcon(ClockIcon);
+export const Info = createStaticIcon(InfoIcon);
+export const Loader2 = createStaticIcon(LoaderCircleIcon);
+export const ShieldAlert = createStaticIcon(ShieldXIcon);
+export const TriangleAlert = createStaticIcon(TriangleAlertIcon);
+
+// Disclosure and editor alignment already have state-driven CSS transitions.
+export const AlignCenter = createAdminIcon(AlignCenterIcon);
+export const AlignLeft = createAdminIcon(AlignLeftIcon);
+export const ChevronDown = createStaticIcon(ChevronDownIcon);
+export const ChevronLeft = createStaticIcon(ChevronLeftIcon);
+export const ChevronRight = createStaticIcon(ChevronRightIcon);
+export const ChevronUp = createStaticIcon(ChevronUpIcon);
+export const GripVertical = createStaticIcon(EllipsisVerticalIcon);
+export const Search = createStaticIcon(SearchIcon);
+
+// Actions and navigation: short hover motion provides direct feedback.
+export const Archive = createAdminIcon(FileArchiveIcon);
+export const ArchiveRestore = createAdminIcon(HistoryIcon);
+export const ArrowDown = createAdminIcon(ArrowDownIcon);
+export const ArrowDownLeft = createAdminIcon(ArrowDownLeftIcon);
+export const ArrowDownRight = createAdminIcon(ArrowDownRightIcon);
+export const ArrowLeft = createAdminIcon(ArrowLeftIcon);
+export const ArrowRight = createAdminIcon(ArrowRightIcon);
+export const ArrowRightLeft = createAdminIcon(ArrowLeftRightIcon);
+export const ArrowUp = createAdminIcon(ArrowUpIcon);
+export const ArrowUpLeft = createAdminIcon(ArrowUpLeftIcon);
+export const ArrowUpRight = createAdminIcon(ArrowUpRightIcon);
+export const BarChart3 = createAdminIcon(ChartBarIcon);
+export const BellRing = createAdminIcon(BellRingIcon);
+export const BookOpen = createAdminIcon(BookOpenIcon);
+export const Boxes = createAdminIcon(BoxesIcon);
+export const Briefcase = createAdminIcon(ChartGanttIcon);
+export const Building2 = createAdminIcon(StoreIcon);
+export const ClipboardList = createAdminIcon(ClipboardIcon);
+export const Copy = createAdminIcon(CopyIcon);
+export const CornerDownRight = createAdminIcon(CornerDownRightIcon);
+export const Database = createAdminIcon(ServerIcon);
+export const DatabaseZap = createAdminIcon(PlugZapIcon);
+export const Download = createAdminIcon(DownloadIcon);
+export const ExternalLink = createAdminIcon(ExternalLinkIcon);
+export const Eye = createAdminIcon(EyeIcon);
+export const EyeOff = createAdminIcon(EyeOffIcon);
+export const FileArchive = createAdminIcon(FileArchiveIcon);
+export const FileCheck2 = createStaticIcon(FileCheckIcon);
+export const FileDown = createAdminIcon(DownloadIcon);
+export const FileImage = createAdminIcon(FileImageIcon);
+export const FileSpreadsheet = createAdminIcon(FileSpreadsheetIcon);
+export const FileText = createAdminIcon(FileTextIcon);
+export const FileUp = createAdminIcon(UploadIcon);
+export const Filter = createAdminIcon(FilterIcon);
+export const FolderKanban = createAdminIcon(ChartGanttIcon);
+export const FolderTree = createAdminIcon(ListChevronsUpDownIcon);
+export const GalleryHorizontal = createAdminIcon(AnimatedImageIcon);
+export const GitBranchPlus = createAdminIcon(GitBranchPlusIcon);
+export const GitPullRequest = createAdminIcon(GitCompareArrowsIcon);
+export const Globe2 = createAdminIcon(GlobeIcon);
+export const Grid3X3 = createAdminIcon(LayoutGridIcon);
+export const Handshake = createAdminIcon(UsersRoundIcon);
+export const History = createAdminIcon(HistoryIcon);
+export const Home = createAdminIcon(HouseIcon);
+export const Image = createAdminIcon(AnimatedImageIcon);
+export const ImageOff = createAdminIcon(FileXIcon);
+export const Table = createAdminIcon(LayoutGridIcon);
+export const Inbox = createAdminIcon(InboxIcon);
+export const Layers = createAdminIcon(LayersIcon);
+export const LayoutGrid = createAdminIcon(LayoutGridIcon);
+export const Link2 = createAdminIcon(LinkIcon);
+export const List = createAdminIcon(ListIcon);
+export const ListChecks = createAdminIcon(ListChecksIcon);
+export const ListOrdered = createAdminIcon(ListOrderedIcon);
+export const ListTree = createAdminIcon(ListChevronsUpDownIcon);
+export const LogOut = createAdminIcon(LogOutIcon);
+export const Mail = createAdminIcon(MailIcon);
+export const MapPin = createAdminIcon(MapPinIcon);
+export const Menu = createAdminIcon(MenuIcon);
+export const MessageSquare = createAdminIcon(MessageSquareIcon);
+export const MessagesSquare = createAdminIcon(MessageCircleMoreIcon);
+export const Minus = createStaticIcon(MinusIcon);
+export const MoreHorizontal = createAdminIcon(EllipsisIcon);
+export const MoreVertical = createAdminIcon(EllipsisVerticalIcon);
+export const Move = createAdminIcon(MoveDiagonal2Icon);
+export const Navigation = createAdminIcon(NavigationIcon);
+export const Newspaper = createAdminIcon(FileTextIcon);
+export const Package = createAdminIcon(PackageIcon);
+export const PackageSearch = createAdminIcon(PackageSearchIcon);
+export const PanelsTopLeft = createAdminIcon(LayoutDashboardIcon);
+export const Pencil = createAdminIcon(PencilIcon);
+export const Phone = createAdminIcon(PhoneIcon);
+export const Plus = createAdminIcon(PlusIcon);
+export const Quote = createAdminIcon(QuoteIcon);
+export const RefreshCcw = createAdminIcon(RefreshCwIcon);
+export const RefreshCw = createAdminIcon(RefreshCwIcon);
+export const RotateCcw = createAdminIcon(RefreshCwIcon);
+export const Route = createAdminIcon(RouteIcon);
+export const Save = createAdminIcon(SaveIcon);
+export const Send = createAdminIcon(SendIcon);
+export const Settings = createAdminIcon(SettingsIcon);
+export const Share2 = createAdminIcon(ShareIcon);
+export const Shield = createAdminIcon(ShieldCheckIcon);
+export const ShieldCheck = createStaticIcon(ShieldCheckIcon);
+export const Sparkles = createAdminIcon(SparklesIcon);
+export const Star = createAdminIcon(StarIcon);
+export const Tag = createAdminIcon(TagIcon);
+export const Tags = createAdminIcon(TagsIcon);
+export const Trash2 = createAdminIcon(Trash2Icon);
+export const Upload = createAdminIcon(UploadIcon);
+export const UploadCloud = createAdminIcon(CloudUploadIcon);
+export const UserRound = createAdminIcon(UserRoundIcon);
+export const Users = createAdminIcon(UsersIcon);
+export const Wrench = createAdminIcon(SettingsIcon);
+export const X = createAdminIcon(XIcon);

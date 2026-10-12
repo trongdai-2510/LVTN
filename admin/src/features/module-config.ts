@@ -1,6 +1,11 @@
 import { endpoints } from '@/lib/api-endpoints';
 import { PERMISSIONS } from '@/lib/permissions';
-import type { Column } from '@/components/data-table/DataTable';
+
+type ModuleColumn = {
+  key: string;
+  label: string;
+  kind?: 'date' | 'status' | 'text';
+};
 
 export interface ModuleConfig {
   key: string;
@@ -14,7 +19,7 @@ export interface ModuleConfig {
   updatePermission?: string;
   archivePermission?: string;
   restorePermission?: string;
-  columns: Column[];
+  columns: ModuleColumn[];
   fields: Array<{ key: string; label: string; multiline?: boolean; readOnly?: boolean }>;
   createDisabledReason?: string;
   notes?: string;
@@ -215,7 +220,7 @@ export const moduleConfigs = {
   },
   productVariants: {
     key: 'productVariants',
-    title: 'Biến thể sản phẩm',
+    title: 'Biến thể / SKU',
     subtitle: 'Mã SKU, tên biến thể và thông tin giá của từng sản phẩm.',
     listPath: '/product-variants',
     detailPath: '/product-variants',

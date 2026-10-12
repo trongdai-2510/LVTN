@@ -1,11 +1,11 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
   Building2,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   ExternalLink,
@@ -13,7 +13,7 @@ import {
   EyeOff,
   Grid3X3,
   Image as ImageIcon,
-  Layers3,
+  Layers,
   PackageSearch,
   Phone,
   Save,
@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
+import { ActionResultDialog, type ActionResultDialogState } from '@/components/feedback/ActionResultDialog';
 import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
 import { ReadOnlyBanner } from '@/components/form/ReadOnlyBanner';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -70,7 +71,7 @@ const ICON_MAP = {
   building: Building2,
   package: PackageSearch,
   briefcase: Wrench,
-  layers: Layers3,
+  layers: Layers,
   tag: Tag,
   check: ShieldCheck,
   phone: Phone
@@ -96,6 +97,7 @@ function sectionsEqual(left: HomeSection[], right: HomeSection[]): boolean {
 }
 
 export function HomePageManager() {
+  const router = useRouter();
   const auth = useAuthState();
   const canRead = auth.permissions.includes(PERMISSIONS.homePageRead);
   const canUpdate = auth.permissions.includes(PERMISSIONS.homePageUpdate);
@@ -108,7 +110,7 @@ export function HomePageManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState('');
+  const [resultDialog, setResultDialog] = useState<ActionResultDialogState | null>(null);
   const [expandedId, setExpandedId] = useState<string>('');
   const [picker, setPicker] = useState<PickerState>({ open: false });
   const [pendingDisableConfirm, setPendingDisableConfirm] = useState<HomeSectionType | null>(null);
@@ -174,7 +176,6 @@ export function HomePageManager() {
     setSections((prev) =>
       prev.map((section) => (section.section_type === sectionType ? { ...section, ...patch } : section))
     );
-    setSaveMessage('');
   }
 
   function toggleSection(sectionType: HomeSectionType) {
@@ -203,7 +204,6 @@ export function HomePageManager() {
       [next[index], next[swapWith]] = [next[swapWith], next[index]];
       return next.map((section, idx) => ({ ...section, sort_order: idx }));
     });
-    setSaveMessage('');
   }
 
   function handleResetSection(sectionType: HomeSectionType) {
@@ -216,7 +216,6 @@ export function HomePageManager() {
     setExpandedId('');
     setSeoTitle(initialSeo.title);
     setSeoDescription(initialSeo.description);
-    setSaveMessage('');
   }
 
   async function handleSave() {
@@ -250,9 +249,15 @@ export function HomePageManager() {
       setSeoTitle(nextSeo.title);
       setSeoDescription(nextSeo.description);
       setInitialSeo(nextSeo);
-      setSaveMessage('Đã lưu trang chủ.');
+      setResultDialog({
+        tone: 'success',
+        title: 'Đã lưu trang chủ',
+        description: 'Nội dung trang chủ đã được cập nhật.',
+        primaryAction: { label: 'Về tổng quan', onSelect: () => router.push('/dashboard') },
+        secondaryAction: { label: 'Tiếp tục chỉnh sửa', onSelect: () => setResultDialog(null) },
+      });
     } catch (err) {
-      setError(err);
+      setResultDialog({ tone: 'error', title: 'Không lưu được trang chủ', error: err });
     } finally {
       setSaving(false);
     }
@@ -324,7 +329,7 @@ export function HomePageManager() {
               className={cn(!dirty ? 'opacity-60' : '')}
             >
               <Save className="h-3.5 w-3.5" />
-              {saving ? 'Đang lưu...' : dirty ? 'Lưu thay đổi' : 'Đã lưu'}
+              {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
             </Button>
           </div>
         </div>
@@ -332,11 +337,6 @@ export function HomePageManager() {
           <div className="mt-2 flex items-center gap-1.5 text-[12px] text-amber-700">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
             Có thay đổi chưa lưu — bấm "Lưu thay đổi" để áp dụng lên website.
-          </div>
-        ) : saveMessage ? (
-          <div className="mt-2 flex items-center gap-1.5 text-[12px] text-green-700">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            {saveMessage}
           </div>
         ) : null}
       </div>
@@ -372,7 +372,7 @@ export function HomePageManager() {
                 maxLength={255}
                 readOnly={!canUpdate}
                 placeholder="Song Thanh - Thiết bị điện và chiếu sáng"
-                onChange={(event) => { setSeoTitle(event.target.value); setSaveMessage(''); }}
+                onChange={(event) => setSeoTitle(event.target.value)}
               />
               <span className="mt-1 block text-[11px] text-muted-foreground">Nên khoảng 50-60 ký tự. {seoTitle.length}/255</span>
             </label>
@@ -384,7 +384,7 @@ export function HomePageManager() {
                 readOnly={!canUpdate}
                 rows={3}
                 placeholder="Mô tả ngắn gọn lĩnh vực hoạt động và nội dung chính của website."
-                onChange={(event) => { setSeoDescription(event.target.value); setSaveMessage(''); }}
+                onChange={(event) => setSeoDescription(event.target.value)}
               />
               <span className="mt-1 block text-[11px] text-muted-foreground">Nên khoảng 120-160 ký tự. {seoDescription.length}/500</span>
             </label>
@@ -559,10 +559,11 @@ export function HomePageManager() {
           onClose={() => setPicker({ open: false })}
           onConfirm={(nextIds) => {
             applyPickedIds(setSections, picker.sectionType, picker.kind, nextIds);
-            setSaveMessage('');
           }}
         />
       ) : null}
+
+      <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
 
       {response?.sections[0]?.updated_at ? (
         <p className="text-center text-[11px] text-muted-foreground">

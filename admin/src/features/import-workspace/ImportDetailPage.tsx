@@ -46,6 +46,7 @@ import {
 import { ImportWorkbookPreview } from '@/features/import-workspace/ImportWorkbookPreview';
 import { extractItems, extractPagination } from '@/features/shared/extract';
 import { ApiClientError, apiClient } from '@/lib/api-client';
+import { formatAdminError } from '@/lib/admin-error-messages';
 import { adminPath } from '@/lib/admin-navigation';
 import { pushAdminFlash } from '@/lib/admin-flash';
 import { byId, endpoints } from '@/lib/api-endpoints';
@@ -192,6 +193,7 @@ export function ImportDetailPage({ id }: { id: string }) {
   const batch = getBatch(detail);
   const stats = getStats(detail);
   const preview = asRecord(detail.preview);
+  const embeddedImageCount = Math.max(0, Number(preview.embedded_image_count) || 0);
   const isMappingStage = Boolean(
     detail.workflow_stage === 'mapping' || detail.mapping_required
   );
@@ -239,7 +241,7 @@ export function ImportDetailPage({ id }: { id: string }) {
     statusSubmitting || !showReviewTransitionAction;
   const showApplyAction =
     canApply && isReadyToApplyBatch && !isAppliedBatch && !isArchivedBatch;
-  const detailLead = getImportDetailLead(batch, isArchivedBatch);
+  const detailLead = getImportDetailLead(batch);
   const groupItems = useMemo(
     () => extractItems(groupsData) as PendingGroupRow[],
     [groupsData]
@@ -485,7 +487,7 @@ export function ImportDetailPage({ id }: { id: string }) {
 
   async function deleteBatch() {
     const confirmed = window.confirm(
-      'Xóa hẳn lô nhập này? Thao tác sẽ xóa dữ liệu tạm, xung đột, mapping của lô và có thể xóa luôn workbook nguồn nếu không còn lô nào khác dùng file đó.'
+      'Xóa hẳn lô nhập này? Thao tác sẽ xóa dữ liệu tạm, các vấn đề đang xử lý, cách ghép cột và có thể xóa tệp nguồn nếu không còn lô nào khác sử dụng.'
     );
     if (!confirmed) return;
 
@@ -771,7 +773,7 @@ export function ImportDetailPage({ id }: { id: string }) {
         )}/resolve`,
         body
       );
-      setActionMessage('Đã xử lý xung đột import.');
+      setActionMessage('Đã xử lý xung đột của lô nhập.');
       setResolveConflictId('');
       setResolveNote('');
       setManualPriceAmount('');
@@ -804,9 +806,7 @@ export function ImportDetailPage({ id }: { id: string }) {
                 {formatValue(batch.batch_name || batch.source_file_name || id)}
               </h1>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                Workbook đã được đọc sơ bộ. Bước tiếp theo là xác nhận cột nào đi
-                vào danh mục, nhóm sản phẩm, biến thể và cột nào chỉ giữ ở dữ liệu
-                tạm.
+                Tệp đã được đọc. Hãy xác nhận cách ghép các cột trước khi tiếp tục.
               </p>
             </div>
             <Badge tone={statusTone(batch.status)}>{formatValue(batch.status)}</Badge>
@@ -832,44 +832,38 @@ export function ImportDetailPage({ id }: { id: string }) {
           </div>
         ) : null}
 
-        <Card className="overflow-hidden" data-import-main-content="true">
-          <div className="border-b border-border bg-muted px-4 py-3">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-sm border border-border bg-panel text-primary">
-                <ListChecks className="h-4 w-4" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold text-text">
-                  Chọn cột nào đi vào dữ liệu nào
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Hệ thống chưa tạo dữ liệu tạm ở giai đoạn này. Sau khi bạn xác
-                  nhận mapping, hệ thống mới tạo nhóm sản phẩm tạm, biến thể tạm và
-                  các xung đột cần duyệt.
-                </p>
-              </div>
-            </div>
-          </div>
+        <EmbeddedImageNotice count={embeddedImageCount} />
 
-          <div className="space-y-4 p-4">
-            <ImportColumnMappingPanel
-              preview={preview}
-              submitting={mappingSubmitting}
-              onSubmit={confirmMapping}
-            />
+        <div className="space-y-4" data-import-main-content="true">
+          <ImportColumnMappingPanel
+            preview={preview}
+            submitting={mappingSubmitting}
+            onSubmit={confirmMapping}
+          />
+          <details className="overflow-hidden rounded-sm border border-border bg-panel">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-text">
+              <span>Kiểm tra dữ liệu mẫu</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                {formatValue(preview.selected_row_count)} dòng ·{' '}
+                {formatValue(Array.isArray(preview.detected_columns) ? preview.detected_columns.length : 0)} cột
+              </span>
+            </summary>
+            <div className="border-t border-border p-4">
             <ImportWorkbookPreview
               preview={preview}
-              title="Bản xem trước workbook"
-              subtitle="Kiểm tra lại các cột hệ thống vừa đọc, mẫu dữ liệu nguồn và gợi ý mapping trước khi tạo dữ liệu tạm."
+              title="Xem trước tệp"
+              subtitle="Đối chiếu tên cột và vài dòng mẫu trước khi xác nhận."
+              condensed
             />
-          </div>
-        </Card>
+            </div>
+          </details>
+        </div>
 
         <Card className="border-red-200 bg-white" data-import-danger-zone="true">
           <div className="border-b border-red-200 bg-red-50 px-4 py-3">
             <h2 className="text-sm font-semibold text-red-900">Xóa lô nhập</h2>
             <p className="mt-0.5 text-xs text-red-800">
-              Thao tác này xóa lô nhập, workbook nguồn và mọi dữ liệu phát sinh từ
+              Thao tác này xóa lô nhập, tệp nguồn và mọi dữ liệu phát sinh từ
               lô này nếu sau đó bạn tiếp tục tạo dữ liệu tạm.
             </p>
           </div>
@@ -912,12 +906,7 @@ export function ImportDetailPage({ id }: { id: string }) {
             <h1 className="mt-1 text-[22px] font-semibold leading-7 tracking-tight text-text">
               {formatValue(batch.batch_name || batch.source_file_name || id)}
             </h1>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground" hidden>
-              Dữ liệu tạm là dữ liệu đã đọc từ workbook và chưa được ghi vào dữ liệu
-              chính thức. Hãy duyệt các dòng hợp lệ trước khi chuyển lô sang trạng
-              thái sẵn sàng áp dụng.
-            </p>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{detailLead}</p>
+            {detailLead ? <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{detailLead}</p> : null}
           </div>
 
           <div
@@ -982,6 +971,8 @@ export function ImportDetailPage({ id }: { id: string }) {
           {actionMessage}
         </div>
       ) : null}
+
+      <EmbeddedImageNotice count={embeddedImageCount} />
 
       {applyPreview && !isAppliedBatch && !isArchivedBatch ? (
         <ApplyPreviewStrip preview={applyPreview} />
@@ -1138,8 +1129,8 @@ export function ImportDetailPage({ id }: { id: string }) {
         <div className="border-b border-red-200 bg-red-50 px-4 py-3">
           <h2 className="text-sm font-semibold text-red-900">Xóa lô nhập</h2>
           <p className="mt-0.5 text-xs text-red-800">
-            Thao tác này xóa lô nhập, dữ liệu tạm, xung đột, mapping và có thể xóa
-            luôn workbook nguồn nếu file đó không còn được lô nào khác sử dụng.
+            Thao tác này xóa lô nhập, dữ liệu tạm, các vấn đề đang xử lý, cách ghép
+            cột và có thể xóa tệp nguồn nếu không còn lô nào khác sử dụng.
           </p>
         </div>
         <div className="space-y-3 p-4">
@@ -1188,7 +1179,7 @@ function OverviewPanel({
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-4">
-        <Metric label="Dòng workbook" value={stats.raw_data_count ?? batch.total_rows} />
+        <Metric label="Dòng dữ liệu" value={stats.raw_data_count ?? batch.total_rows} />
         <Metric label="Nhóm sản phẩm tạm" value={stats.pending_product_group_count} />
         <Metric label="Biến thể tạm" value={stats.pending_variant_count} />
         <Metric
@@ -1200,8 +1191,8 @@ function OverviewPanel({
 
       <ImportWorkbookPreview
         preview={preview}
-        title="Bản xem trước workbook"
-        subtitle="Bản xem này cho biết sheet, cột, mẫu dữ liệu và hướng xử lý hiện tại của lô nhập."
+        title="Xem trước tệp"
+        subtitle="Xem tên cột và dữ liệu mẫu của lô nhập."
       />
     </div>
   );
@@ -1296,7 +1287,6 @@ function PendingGroupsPanel(props: {
                   const hasConflict = Boolean(row.conflict_id);
                   const isPending = String(row.status || '') === 'pending_review';
                   const isExpanded = props.expandedId === rowId;
-                  const pendingProductGroup = asRecord(row.pending_product_group);
                   return (
                     <Fragment key={rowId}>
                       <tr>
@@ -2152,22 +2142,13 @@ function ReadinessSummary({
                 Đã áp dụng vào dữ liệu chính thức
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Lô nhập này đã hoàn tất áp dụng. Bạn có thể mở lại dữ liệu tạm để đối
-                chiếu hoặc lưu trữ lô nhập khỏi danh sách chính.
+                Xem lại dữ liệu tạm hoặc lưu trữ lô nhập khi không cần theo dõi nữa.
               </p>
             </div>
           </div>
-          <Badge tone="active">Hoàn tất</Badge>
         </div>
 
         <div className="space-y-3 border-t border-blue-200 px-4 py-4">
-          <div className="rounded-sm border border-blue-200 bg-white/70 px-3 py-3 text-xs leading-5 text-blue-800">
-            <p className="font-semibold">Lô nhập đã áp dụng xong.</p>
-            <p className="mt-1">
-              Không còn điều kiện chặn cần xử lý ở bước áp dụng cho lô nhập này.
-            </p>
-          </div>
-
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -2205,24 +2186,6 @@ function ReadinessSummary({
             ) : null}
           </div>
 
-          <details
-            className="rounded-sm border border-blue-200 bg-white/60"
-            data-import-technical-details="true"
-          >
-            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-blue-700">
-              Chi tiết kỹ thuật dành cho quản trị hệ thống
-            </summary>
-            <div className="space-y-2 border-t border-blue-200 px-3 py-3 text-[12px] leading-5 text-blue-900">
-              <div>
-                <span className="font-semibold">Trạng thái lô hiện tại:</span>{' '}
-                {formatValue(batch.status)}
-              </div>
-              <div>
-                <span className="font-semibold">Thời điểm áp dụng:</span>{' '}
-                {formatDate(batch.applied_at)}
-              </div>
-            </div>
-          </details>
         </div>
       </Card>
     );
@@ -2452,7 +2415,6 @@ function Metric({
 }
 
 function ImportBatchDangerZone({
-  isAppliedBatch,
   isArchivedBatch,
   canArchiveBatch,
   canDeleteBatch,
@@ -2510,7 +2472,7 @@ function ImportBatchDangerZone({
             ? 'Khôi phục lô nhập để đưa lại vào danh sách đang dùng.'
             : canArchiveBatch
               ? 'Lô nhập đã áp dụng nên không xóa cứng. Bạn có thể lưu trữ để ẩn khỏi danh sách mặc định mà vẫn giữ lịch sử.'
-              : 'Thao tác này xóa lô nhập, dữ liệu tạm, xung đột, mapping và có thể xóa luôn workbook nguồn nếu file đó không còn được lô nào khác sử dụng.'}
+              : 'Thao tác này xóa lô nhập, dữ liệu tạm, các vấn đề đang xử lý, cách ghép cột và có thể xóa tệp nguồn nếu không còn lô nào khác sử dụng.'}
         </p>
       </div>
       <div className="space-y-3 p-4">
@@ -2686,7 +2648,7 @@ function ImportBlockerChecklist({
                         >
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-medium text-text">
-                              {blocker.entityLabel || 'Bản ghi import'}
+                              {blocker.entityLabel || 'Dòng dữ liệu'}
                             </span>
                             <Badge tone="info">
                               {formatImportEntityType(blocker.entityType)}
@@ -2838,6 +2800,7 @@ function ImportBlockerExplorer({
           <Field label="Tìm vấn đề">
             <Input
               value={query}
+              maxLength={255}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Tìm theo tên dòng, mã sản phẩm, SKU hoặc mã định danh từ file"
             />
@@ -2976,7 +2939,7 @@ function ImportBlockerRow({
       setEditing(true);
     } catch (error) {
       setSubmitError(
-        getApiErrorMessage(error, 'Không tải được dữ liệu để chỉnh sửa blocker này.')
+        getApiErrorMessage(error, 'Không tải được dữ liệu của vấn đề này để chỉnh sửa.')
       );
     } finally {
       setLoading(false);
@@ -3021,7 +2984,7 @@ function ImportBlockerRow({
       }
       setEditing(false);
     } catch (error) {
-      setSubmitError(getApiErrorMessage(error, 'Không thể lưu thay đổi cho blocker này.'));
+      setSubmitError(getApiErrorMessage(error, 'Không thể lưu thay đổi cho vấn đề này.'));
     } finally {
       setLoading(false);
     }
@@ -3051,7 +3014,7 @@ function ImportBlockerRow({
       await onResolved('Đã bỏ qua dòng tạm và cập nhật lại điều kiện áp dụng.');
       setEditing(false);
     } catch (error) {
-      setSubmitError(getApiErrorMessage(error, 'Không thể bỏ qua dòng tạm này.'));
+      setSubmitError(getApiErrorMessage(error, 'Không thể bỏ qua dòng dữ liệu này.'));
     } finally {
       setLoading(false);
     }
@@ -3063,7 +3026,7 @@ function ImportBlockerRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h4 className="text-sm font-semibold text-text">
-              {blocker.entityLabel || 'Bản ghi import'}
+              {blocker.entityLabel || 'Dòng dữ liệu'}
             </h4>
             <Badge tone="info">{formatImportEntityType(blocker.entityType)}</Badge>
           </div>
@@ -3153,7 +3116,7 @@ function ImportBlockerRow({
                           placeholder="Nhập SKU"
                         />
                       </Field>
-                      <Field label="Model code">
+                      <Field label="Mã sản phẩm">
                         <Input
                           value={variantForm.modelCode}
                           onChange={(event) =>
@@ -3167,7 +3130,7 @@ function ImportBlockerRow({
                       </Field>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Giá trị trống sẽ được trim trước khi gửi lên API. Readiness sẽ chạy lại ngay sau khi lưu.
+                      Khoảng trắng thừa sẽ được tự dọn. Hệ thống sẽ kiểm tra lại ngay sau khi lưu.
                     </p>
                   </div>
                 ) : isGroupEdit ? (
@@ -3683,10 +3646,6 @@ function buildImportExternalCodeChecklistItem(
   };
 }
 
-function formatImportBlocker(blocker: ImportBlocker) {
-  return getImportBlockerPresentation(blocker).message;
-}
-
 function formatImportBlockerHint(blocker: ImportBlocker) {
   return getImportBlockerPresentation(blocker).hint;
 }
@@ -3705,9 +3664,8 @@ function normalizeEditableValue(value: string) {
 }
 
 function getApiErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof ApiClientError) return error.message;
-  if (error instanceof Error && error.message.trim() !== '') return error.message;
-  return fallback;
+  const presentation = formatAdminError(error, 'import-action');
+  return presentation.message.trim() || fallback;
 }
 
 function isExternalCodeDuplicateBlocker(blocker: ImportBlocker) {
@@ -3940,7 +3898,7 @@ function getImportBlockerPresentation(blocker: ImportBlocker) {
     if (code.includes('MISSING_PRODUCT_GROUP_MAPPING')) {
       return {
         message: 'Biến thể tạm chưa gắn với nhóm sản phẩm hợp lệ.',
-        hint: 'Kiểm tra lại liên kết nhóm sản phẩm hoặc mapping áp dụng trước khi tiếp tục.'
+        hint: 'Mở Nhóm sản phẩm tạm và hoàn tất liên kết còn thiếu trước khi tiếp tục.'
       };
   }
 
@@ -3980,7 +3938,7 @@ function getImportWorkflowGuide(
       badgeLabel: 'Mới nhập',
       current: 'Mới nhập',
       next: 'Xác nhận cột dữ liệu',
-      summary: 'Workbook mới chỉ được đọc sơ bộ và chưa đi vào bước duyệt dữ liệu tạm.',
+      summary: 'Tệp mới được đọc và chưa chuyển sang bước duyệt dữ liệu tạm.',
       hint: 'Xác nhận cột nào dùng cho nhóm sản phẩm, biến thể và dữ liệu tạm trước khi tiếp tục.'
     };
   }
@@ -4058,18 +4016,26 @@ function formatSuggestedAction(value: string) {
   }
 }
 
-function getImportDetailLead(batch: RecordMap, isArchivedBatch: boolean) {
+function EmbeddedImageNotice({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 rounded-sm border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:gap-2" role="status">
+      <strong>{count} ảnh nhúng trong Excel chưa được nhập.</strong>
+      <span>Luồng hiện tại chỉ nhập dữ liệu cột; ảnh cần gắn trong hồ sơ sản phẩm sau khi đối chiếu mã/SKU.</span>
+    </div>
+  );
+}
+
+function getImportDetailLead(batch: RecordMap) {
   if (String(batch.status || '') === 'applied' || batch.applied_at) {
-    return isArchivedBatch
-      ? 'Lô nhập này đã được áp dụng vào dữ liệu chính thức và đang ở trạng thái lưu trữ.'
-      : 'Lô nhập này đã được áp dụng vào dữ liệu chính thức. Bạn có thể xem lại dữ liệu tạm, lịch sử kiểm tra và lưu trữ lô nhập khi không cần hiển thị trong danh sách chính.';
+    return '';
   }
 
   if (String(batch.status || '') === 'ready_to_apply') {
     return 'Lô nhập này đã vượt qua các điều kiện kiểm tra hiện tại và đang chờ thao tác áp dụng vào dữ liệu chính thức.';
   }
 
-  return 'Dữ liệu tạm là dữ liệu đã đọc từ workbook và chưa được ghi vào dữ liệu chính thức. Hãy duyệt các dòng hợp lệ trước khi chuyển lô sang trạng thái sẵn sàng áp dụng.';
+  return 'Dữ liệu từ tệp đang chờ duyệt. Hãy kiểm tra các dòng hợp lệ trước khi chuyển lô sang trạng thái sẵn sàng áp dụng.';
 }
 
 function formatPendingStatus(value: unknown) {

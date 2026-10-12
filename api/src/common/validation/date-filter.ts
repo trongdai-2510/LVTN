@@ -6,7 +6,7 @@ import { ErrorCodes } from '../errors/error-codes';
 
 const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-export const ADMIN_LOCAL_TIMEZONE = 'Asia/Saigon';
+const ADMIN_LOCAL_TIMEZONE = 'Asia/Saigon';
 const ADMIN_LOCAL_UTC_OFFSET_HOURS = 7;
 
 export function normalizeOptionalLocalDate(

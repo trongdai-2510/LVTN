@@ -46,7 +46,7 @@ export class WorkflowApprovalGuard implements CanActivate {
     throw new AppError({
       code: ErrorCodes.PERMISSION_DENIED,
       message:
-        'Chỉ quản trị cao nhất hoặc người được ủy quyền mới được duyệt, từ chối hoặc xuất bản nội dung.',
+        'Chỉ Super Admin được duyệt, từ chối hoặc xuất bản nội dung.',
       statusCode: HttpStatus.FORBIDDEN,
       details: {
         required_role: 'super_admin',

@@ -1,6 +1,6 @@
 'use client';
 
-import { Archive, ChevronRight, Download, RefreshCcw, X } from '@/components/icons';
+import { Archive, ChevronRight, Download, RefreshCcw } from '@/components/icons';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -12,8 +12,8 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { Modal } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { cn } from '@/lib/cn';
 import {
   deriveFileUsageGroup,
   fileUsageGroupLabel
@@ -207,55 +207,35 @@ export function FileDetailDrawer({
   if (!open) return null;
 
   return (
-    <div
-      data-file-detail-drawer="true"
-      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <Modal
+      open={open}
+      title={String(file.original_filename ?? file.original_name ?? 'Chi tiết tệp')}
+      onClose={onClose}
+      panelClassName="max-w-[500px]"
+      bodyClassName="p-0"
     >
-      <div
-        className="flex max-h-[88vh] w-full max-w-[500px] flex-col overflow-hidden rounded-xl border border-border bg-panel shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* ── Header ────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between gap-3 px-5 py-4">
-          <div className="min-w-0">
-            <p className="truncate text-[15px] font-semibold text-text">
-              {formatValue(file.original_filename ?? file.original_name)}
-            </p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              <Badge tone="info">{fileUsageGroupLabel(usageGroup)}</Badge>
-              <Badge tone={statusTone(file.status ?? (archived ? 'archived' : 'active'))}>
-                {formatValue(file.status ?? (archived ? 'archived' : 'active'))}
-              </Badge>
-            </div>
-          </div>
-          <button
-            type="button"
-            data-file-detail-close="true"
-            onClick={onClose}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-text transition-colors"
-            aria-label="Đóng"
-          >
-            <X className="h-4 w-4" />
-          </button>
+      <div data-file-detail-drawer="true">
+        <div className="flex flex-wrap gap-1.5 border-b border-border px-5 py-3">
+          <Badge tone="info">{fileUsageGroupLabel(usageGroup)}</Badge>
+          <Badge tone={statusTone(file.status ?? (archived ? 'archived' : 'active'))}>
+            {formatValue(file.status ?? (archived ? 'archived' : 'active'))}
+          </Badge>
         </div>
 
-        {/* ── Scrollable body ────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto">
-          {loading ? (
-            <div className="space-y-3 p-5">
-              <Skeleton className="h-32 w-full" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-24 w-full" />
-            </div>
-          ) : error ? (
-            <div className="p-5"><ErrorState message={error} context="file-load" /></div>
-          ) : !file.id ? (
-            <div className="p-5">
-              <EmptyState title="Chưa có thông tin" description="Chọn một tệp để xem chi tiết." />
-            </div>
-          ) : (
-            <>
+        {loading ? (
+          <div className="space-y-3 p-5">
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : error ? (
+          <div className="p-5"><ErrorState message={error} context="file-load" /></div>
+        ) : !file.id ? (
+          <div className="p-5">
+            <EmptyState title="Chưa có thông tin" description="Chọn một tệp để xem chi tiết." />
+          </div>
+        ) : (
+          <>
               {(actionError || downloadError) && (
                 <div className="px-5 pb-0 pt-0">
                   <ErrorMessagePanel error={actionError || downloadError} context="file-action" compact />
@@ -386,11 +366,10 @@ export function FileDetailDrawer({
                   {formatValue(file.id)}
                 </p>
               </details>
-            </>
-          )}
-        </div>
+          </>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 

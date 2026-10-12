@@ -26,7 +26,7 @@ export interface PublicMenu {
   items: PublicMenuItemNode[];
 }
 
-export interface PublicCompanyInfo {
+interface PublicCompanyInfo {
   id: string;
   display_name: string;
   legal_name: string;
@@ -44,7 +44,7 @@ export interface PublicCompanyInfo {
   favicon_file: PublicFileSummary | null;
 }
 
-export interface PublicSocialLink {
+interface PublicSocialLink {
   id: string;
   platform: string;
   label: string;
@@ -62,7 +62,7 @@ export interface PublicSiteShellResponse {
   footer_legal_menu: PublicMenu | null;
 }
 
-export interface PublicCategoryListItem {
+interface PublicCategoryListItem {
   id: string;
   name: string;
   slug: string;
@@ -100,32 +100,44 @@ export interface PublicProductGroupListItem {
   status: "active";
   sort_order: number;
   variant_count: number;
+  model_code_summary?: {
+    count: number;
+    codes: Array<{ id: string; code: string }>;
+  } | null;
+  public_price_summary: PublicProductPriceSummary;
   document_count: number;
   highlight_specs: PublicHighlightSpec[];
 }
 
-export type PublicProductGroupSort =
+export interface PublicProductPriceSummary {
+  display_mode: 'contact_for_quote' | 'exact_price' | 'from_price';
+  display_amount: number | null;
+  priced_variant_count: number;
+  variant_count: number;
+}
+
+type PublicProductGroupSort =
   "newest" | "popular" | "name_asc" | "name_desc";
 
-export interface PublicProductBrandFacetOption {
+interface PublicProductBrandFacetOption {
   id: string;
   slug: string;
   label: string;
   count: number;
 }
 
-export interface PublicProductStatusFacetOption {
+interface PublicProductStatusFacetOption {
   key: "contact" | "has_price";
   label: string;
   count: number;
 }
 
-export interface PublicProductChildCategoryFacetOption {
+interface PublicProductChildCategoryFacetOption {
   category_id: string;
   count: number;
 }
 
-export interface PublicProductSpecFacetOption {
+interface PublicProductSpecFacetOption {
   token: string;
   label: string;
   count: number;
@@ -162,7 +174,7 @@ export interface PublicProductGroupListResponse {
   };
 }
 
-export interface PublicSpecItem {
+interface PublicSpecItem {
   id: string;
   spec_name: string;
   spec_value: string;
@@ -185,7 +197,7 @@ export interface PublicHighlightSpec {
   sort_order: number;
 }
 
-export interface PublicProductImage {
+interface PublicProductImage {
   id: string;
   product_group_id: string;
   product_variant_id: string | null;
@@ -195,7 +207,7 @@ export interface PublicProductImage {
   file: PublicFileSummary;
 }
 
-export interface PublicVariant {
+interface PublicVariant {
   id: string;
   product_group_id: string;
   model_code: string | null;
@@ -208,7 +220,7 @@ export interface PublicVariant {
   spec_groups: PublicSpecGroup[];
 }
 
-export interface PublicTechnicalDocument {
+interface PublicTechnicalDocument {
   id: string;
   product_group_id: string;
   product_variant_id: string | null;
@@ -221,7 +233,7 @@ export interface PublicTechnicalDocument {
   file: PublicFileSummary;
 }
 
-export interface PublicProductGroupDetail {
+interface PublicProductGroupDetail {
   id: string;
   name: string;
   slug: string;
@@ -239,7 +251,7 @@ export interface PublicProductGroupDetail {
   sort_order: number;
 }
 
-export interface PublicBrandSummary {
+interface PublicBrandSummary {
   id: string;
   name: string | null;
   slug: string | null;
@@ -281,7 +293,7 @@ export interface PublicSiteViewResponse {
   view_count: number;
 }
 
-export interface PublicServiceListItem {
+interface PublicServiceListItem {
   id: string;
   title: string;
   slug: string;
@@ -330,7 +342,7 @@ export interface PublicServiceDetailResponse {
   related_product_groups: PublicRelatedProductGroup[];
 }
 
-export interface PublicProjectListItem {
+interface PublicProjectListItem {
   id: string;
   title: string;
   slug: string;
@@ -355,7 +367,7 @@ export interface PublicProjectListResponse {
   };
 }
 
-export interface PublicProjectGalleryItem {
+interface PublicProjectGalleryItem {
   id: string;
   project_id: string;
   file_id: string;
@@ -383,7 +395,7 @@ export interface PublicProjectDetailResponse {
   related_product_groups: PublicRelatedProductGroup[];
 }
 
-export interface PublicBrandListItem {
+interface PublicBrandListItem {
   id: string;
   name: string;
   slug: string;
@@ -408,7 +420,7 @@ export interface PublicBrandListResponse {
   };
 }
 
-export interface PublicBrandDetailBrand {
+interface PublicBrandDetailBrand {
   id: string;
   name: string;
   slug: string;
@@ -418,7 +430,7 @@ export interface PublicBrandDetailBrand {
   logo_file: PublicFileSummary | null;
 }
 
-export interface PublicBrandDetailPage {
+interface PublicBrandDetailPage {
   id: string;
   brand_id: string;
   title: string;
@@ -447,7 +459,7 @@ export interface PublicBrandDetailPage {
   seo_og_image_file: PublicFileSummary | null;
 }
 
-export interface PublicBrandDetailBanner {
+interface PublicBrandDetailBanner {
   id: string;
   position: string;
   title: string;
@@ -468,7 +480,7 @@ export interface PublicBrandDetailBanner {
   }> | null;
 }
 
-export interface PublicBrandDetailStat {
+interface PublicBrandDetailStat {
   id: string;
   value: string;
   label: string;
@@ -476,7 +488,7 @@ export interface PublicBrandDetailStat {
   sort_order: number;
 }
 
-export interface PublicBrandDerivedCategory {
+interface PublicBrandDerivedCategory {
   id: string;
   name: string;
   slug: string;
@@ -484,7 +496,7 @@ export interface PublicBrandDerivedCategory {
   product_count: number;
 }
 
-export interface PublicBrandPageSource {
+interface PublicBrandPageSource {
   id: string;
   title: string;
   source_type: "website" | "catalogue" | "certificate" | "other";
@@ -495,9 +507,9 @@ export interface PublicBrandPageSource {
   sort_order: number;
 }
 
-export type PublicBrandHeroTitleSize = "medium" | "large" | "xlarge";
-export type PublicBrandHeroExcerptSize = "medium" | "large";
-export type PublicBrandLayoutArchetype =
+type PublicBrandHeroTitleSize = "medium" | "large" | "xlarge";
+type PublicBrandHeroExcerptSize = "medium" | "large";
+type PublicBrandLayoutArchetype =
   "auto" | "international" | "domestic" | "minimal";
 
 export interface PublicBrandDetailResponse {
@@ -536,6 +548,11 @@ export interface PublicPageContentDetailResponse {
  */
 export interface PublicExtraBlocksPayload {
   blocks: PublicExtraBlockItem[];
+  layout: PublicPageContentLayout | null;
+}
+
+export interface PublicPageContentLayout {
+  sections: Array<{ id: string; visible: boolean }>;
 }
 
 export type PublicExtraBlockItem =
@@ -575,7 +592,7 @@ export interface PublicRelatedNewsListResponse {
   items: PublicNewsListItem[];
 }
 
-export interface PublicNewsCategoryItem {
+interface PublicNewsCategoryItem {
   id: string;
   name: string;
   slug: string;
@@ -586,7 +603,7 @@ export interface PublicNewsCategoryListResponse {
   items: PublicNewsCategoryItem[];
 }
 
-export interface PublicNewsListItem {
+interface PublicNewsListItem {
   id: string;
   title: string;
   slug: string;
@@ -607,7 +624,7 @@ export interface PublicNewsListResponse {
   category_slug: string | null;
 }
 
-export interface PublicCtaButton {
+interface PublicCtaButton {
   text: string;
   url: string;
   color?: string;
@@ -615,7 +632,7 @@ export interface PublicCtaButton {
   style?: "solid" | "outline" | "ghost";
 }
 
-export interface PublicBannerListItem {
+interface PublicBannerListItem {
   id: string;
   position: string;
   title: string;
@@ -651,7 +668,7 @@ export interface PublicBannerListResponse {
   };
 }
 
-export interface PublicContactRequestRecord {
+interface PublicContactRequestRecord {
   id: string;
   full_name: string;
   phone: string;
@@ -667,7 +684,7 @@ export interface PublicContactRequestCreateResponse {
   contact_request: PublicContactRequestRecord;
 }
 
-export interface PublicQuoteRequestRecord {
+interface PublicQuoteRequestRecord {
   id: string;
   full_name: string;
   company_name: string | null;
@@ -675,16 +692,23 @@ export interface PublicQuoteRequestRecord {
   email: string | null;
   address: string | null;
   message: string | null;
+  project_name: string | null;
+  project_context: string | null;
+  project_requirements: Array<{ label: string; value: string }>;
   status: string;
   created_at: Date | string;
 }
 
-export interface PublicQuoteRequestItemRecord {
+interface PublicQuoteRequestItemRecord {
   id: string;
   quote_request_id: string;
   product_group_id: string;
   product_variant_id: string | null;
   quantity: number | null;
+  quantity_raw: string | null;
+  quantity_unit: string | null;
+  quantity_state: 'confirmed' | 'unspecified';
+  public_price_amount_at_request: number | null;
   notes: string | null;
 }
 
@@ -693,7 +717,7 @@ export interface PublicQuoteRequestCreateResponse {
   items: PublicQuoteRequestItemRecord[];
 }
 
-export interface PublicSearchSuggestionItem {
+interface PublicSearchSuggestionItem {
   type:
     | "product_group"
     | "variant"
@@ -718,7 +742,7 @@ export interface PublicSearchSuggestionResponse {
   items: PublicSearchSuggestionItem[];
 }
 
-export interface PublicRedirectItem {
+interface PublicRedirectItem {
   from_path: string;
   to_path: string;
   redirect_type: 301 | 302;

@@ -1,4 +1,5 @@
-﻿import sharp from 'sharp';
+﻿// API emits CommonJS without esModuleInterop; sharp's require export is callable.
+const sharp: typeof import('sharp').default = require('sharp');
 
 /**
  * Các extension ảnh có thể xử lý (resize, convert sang WebP, strip EXIF).

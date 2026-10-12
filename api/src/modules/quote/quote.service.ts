@@ -87,54 +87,47 @@ export class QuoteService {
 
   async updateStatus(quoteId: string, input: QuoteStatusDto) {
     const id = assertUuid('quote_id', quoteId);
-    const quote = await this.assertProcessable(id);
     const status = normalizeMutationStatus(input.status);
-    await this.quoteRepository.updateStatus(quote.id, status);
-    return this.getQuoteDetail(quote.id);
+    const outcome = await this.quoteRepository.updateStatus(id, status);
+    this.assertActiveMutationOutcome(outcome);
+    return this.getQuoteDetail(id);
   }
 
   async updateAssignee(quoteId: string, input: QuoteAssigneeDto) {
     const id = assertUuid('quote_id', quoteId);
-    const quote = await this.assertProcessable(id);
     const assignedTo = normalizeNullableAssignee(input.assigned_to);
-    if (
-      assignedTo !== null &&
-      !(await this.logicUsers.isAssignable(assignedTo))
-    ) {
+    const outcome = await this.quoteRepository.updateAssignee(id, assignedTo);
+    if (outcome === 'assignee_not_found') {
       throw this.notFound('Assignee was not found.');
     }
-    await this.quoteRepository.updateAssignee(quote.id, assignedTo);
-    return this.getQuoteDetail(quote.id);
+    this.assertActiveMutationOutcome(outcome);
+    return this.getQuoteDetail(id);
   }
 
   async archiveQuote(quoteId: string) {
     const id = assertUuid('quote_id', quoteId);
-    const quote = await this.quoteRepository.findById(id);
-    if (!quote) throw this.notFound('Quote request was not found.');
-    if (quote.deleted_at) throw this.conflict('Quote request is already archived.');
-    await this.quoteRepository.archive(id);
-    const updated = await this.quoteRepository.findById(id);
-    return this.buildDetail(updated!);
+    const outcome = await this.quoteRepository.archive(id);
+    if (outcome === 'not_found') throw this.notFound('Quote request was not found.');
+    if (outcome === 'archived') throw this.conflict('Quote request is already archived.');
+    return this.getQuoteDetail(id);
   }
 
   async restoreQuote(quoteId: string) {
     const id = assertUuid('quote_id', quoteId);
-    const quote = await this.quoteRepository.findById(id);
-    if (!quote) throw this.notFound('Quote request was not found.');
-    if (!quote.deleted_at) throw this.conflict('Quote request is not archived.');
-    await this.quoteRepository.restore(id);
+    const outcome = await this.quoteRepository.restore(id);
+    if (outcome === 'not_found') throw this.notFound('Quote request was not found.');
+    if (outcome === 'active') throw this.conflict('Quote request is not archived.');
     return this.getQuoteDetail(id);
   }
 
   async permanentlyDeleteQuote(quoteId: string, currentUser: CurrentUser | null) {
     const id = assertUuid('quote_id', quoteId);
     this.assertSuperAdmin(currentUser);
-    const quote = await this.quoteRepository.findById(id);
-    if (!quote) throw this.notFound('Quote request was not found.');
-    if (!quote.deleted_at) {
+    const outcome = await this.quoteRepository.permanentlyDelete(id);
+    if (outcome === 'not_found') throw this.notFound('Quote request was not found.');
+    if (outcome === 'active') {
       throw this.conflict('Phải lưu trữ yêu cầu báo giá trước khi xóa vĩnh viễn.');
     }
-    await this.quoteRepository.permanentlyDelete(id);
     return { id, deleted: true };
   }
 
@@ -144,15 +137,15 @@ export class QuoteService {
     currentUser: CurrentUser | null
   ) {
     const id = assertUuid('quote_id', quoteId);
-    const quote = await this.assertProcessable(id);
     const noteText = normalizeNoteText(input.note_text ?? input.note);
     const logicUserId = await this.requireLogicUserId(currentUser);
-    await this.quoteRepository.createInternalNote(
-      quote.id,
+    const outcome = await this.quoteRepository.createInternalNote(
+      id,
       noteText,
       logicUserId
     );
-    return this.getQuoteDetail(quote.id);
+    this.assertActiveMutationOutcome(outcome.status);
+    return this.getQuoteDetail(id);
   }
 
   private async buildDetail(quote: QuoteDetailRecord) {
@@ -164,11 +157,11 @@ export class QuoteService {
     };
   }
 
-  private async assertProcessable(id: string): Promise<QuoteDetailRecord> {
-    const quote = await this.quoteRepository.findById(id);
-    if (!quote) throw this.notFound('Quote request was not found.');
-    if (quote.deleted_at) throw this.conflict('Quote request is archived and cannot be processed.');
-    return quote;
+  private assertActiveMutationOutcome(outcome: string): void {
+    if (outcome === 'not_found') throw this.notFound('Quote request was not found.');
+    if (outcome === 'archived') {
+      throw this.conflict('Quote request is archived and cannot be processed.');
+    }
   }
 
   private notFound(message: string): AppError {

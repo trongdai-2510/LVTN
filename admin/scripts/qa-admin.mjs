@@ -109,7 +109,9 @@ async function main() {
     '/product-groups'
   );
   const importDetailRoute =
-    (await seedImportMappingProfileRoute(session.access_token)) ||
+    (process.env.QA_MUTATING_TESTS_CONFIRMED === '1'
+      ? await seedImportMappingProfileRoute(session.access_token)
+      : null) ||
     (await findImportDetailRoute(session.access_token));
   const routes = [...baseRoutes];
   if (productGroupDetailRoute) {

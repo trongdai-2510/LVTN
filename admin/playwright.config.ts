@@ -1,5 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
+if (process.env.QA_MUTATING_TESTS_CONFIRMED !== '1') {
+  throw new Error(
+    'The default Playwright suite writes and permanently deletes QA records. Use tests/readonly.config.ts for safe checks, or set QA_MUTATING_TESTS_CONFIRMED=1 only against an isolated QA database.'
+  );
+}
+
 const adminBaseURL = (process.env.ADMIN_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
 const adminBasePath = normalizeAdminBasePath(process.env.ADMIN_BASE_PATH || '/admin');
 const apiBaseURL = (
@@ -7,9 +13,8 @@ const apiBaseURL = (
   process.env.API_BASE_URL ||
   'http://localhost:4000'
 ).replace(/\/$/, '');
-const npmRun = process.platform === 'win32' ? 'npm.cmd run dev' : 'npm run dev';
-const browserChannel =
-  process.env.PLAYWRIGHT_BROWSER_CHANNEL || (process.platform === 'win32' ? 'chrome' : undefined);
+const npmRun = process.platform === 'win32' ? 'npm.cmd run dev:qa' : 'npm run dev:qa';
+const browserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL || 'chrome';
 
 function normalizeAdminBasePath(basePath: string): string {
   const trimmed = basePath.trim().replace(/^\/+|\/+$/g, '');
@@ -23,9 +28,12 @@ function adminUrl(pathname: string): string {
 
 export default defineConfig({
   testDir: './tests/e2e',
+  globalTeardown: './tests/e2e/globalteardown.ts',
   timeout: 60_000,
   expect: {
-    timeout: 10_000
+    // Next.js dev evicts inactive route bundles; cold recompilation of the
+    // largest admin detail pages can legitimately take just over 10 seconds.
+    timeout: 20_000
   },
   fullyParallel: false,
   workers: 1,
@@ -40,16 +48,10 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'chrome',
       use: {
         ...devices['Desktop Chrome'],
-        ...(browserChannel ? { channel: browserChannel } : {})
-      }
-    },
-    {
-      name: 'firefox',
-      use: {
-        ...devices['Desktop Firefox']
+        channel: browserChannel
       }
     }
   ],

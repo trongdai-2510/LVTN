@@ -6,8 +6,7 @@
  * admin_user/admin_role/admin_permission số ít của app mới), i18n_locale
  * không còn được dùng. Drop CASCADE để dọn FK ràng buộc lẫn nhau giữa chúng.
  *
- * Down: không khôi phục — backup trong database/ddl/song_thanh_physical_schema_v3.sql
- * và các .dump cũ (nếu cần).
+ * Down: không khôi phục — dùng schema snapshot trong database/ddl/ hoặc bản .dump riêng.
  */
 
 const LEGACY_TABLES = [
@@ -62,6 +61,6 @@ exports.up = async function up(knex) {
 
 exports.down = async function down() {
   throw new Error(
-    'Cannot rollback drop_legacy_strapi_tables. Restore from database/ddl/song_thanh_physical_schema_v3.sql or a .dump backup.',
+    'Cannot rollback drop_legacy_strapi_tables. Restore from the database/ddl schema snapshot or a .dump backup.',
   );
 };

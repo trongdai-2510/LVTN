@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
@@ -13,6 +14,8 @@ import {
   Min,
   ValidateNested
 } from 'class-validator';
+
+import { POSTGRES_SMALLINT_MAX } from '../../common/validation/databaseLimits';
 
 import {
   PRODUCT_HIGHLIGHT_SPEC_ALLOWED_SOURCE_TYPES,
@@ -139,10 +142,16 @@ export class CreateProductGroupDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
 }
 
 export class UpdateProductGroupDto {
+  @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
+
   @IsOptional()
   @IsString()
   name?: string;
@@ -198,7 +207,15 @@ export class UpdateProductGroupDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
+}
+
+export class ProductGroupVersionDto {
+  @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
 }
 
 export class BulkUpdateProductGroupsDto {
@@ -263,6 +280,7 @@ export class CreateProductHighlightSpecDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
 }
 
@@ -279,6 +297,7 @@ export class UpdateProductHighlightSpecDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
 }
 
@@ -289,6 +308,7 @@ export class ProductHighlightSpecReorderItemDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order!: number;
 }
 

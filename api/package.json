@@ -9,6 +9,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test:unit": "node --require ts-node/register --test tests/unit/*.test.ts",
+    "audit:role-boundaries": "node --require ts-node/register scripts/roleAccessAudit.js",
     "import:product-images": "ts-node --project tsconfig.json scripts/one-time-import-product-images.ts",
     "backfill:variant-specs": "ts-node --project tsconfig.json scripts/backfill-variant-specs-from-excel.ts",
     "backfill:mpe-specs": "ts-node --project tsconfig.json scripts/backfill-variant-specs-from-mpe-result.ts",
@@ -41,8 +42,8 @@
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sanitize-html": "^2.17.6",
-    "sharp": "^0.35.3"
+    "sanitize-html": "^2.17.7",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.23",
@@ -52,13 +53,15 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.2",
     "@types/sanitize-html": "^2.16.1",
+    "express": "^5.2.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
   },
   "overrides": {
     "@nestjs/platform-express": {
-      "multer": "2.2.0"
+      "multer": "2.4.0"
     },
+    "proxy-addr": "2.0.8",
     "postcss": "8.5.25"
   }
 }

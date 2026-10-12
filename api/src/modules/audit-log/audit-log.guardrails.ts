@@ -20,15 +20,6 @@ export function normalizeSearch(value: unknown): string | null {
   return normalized === '' ? null : normalized;
 }
 
-export function normalizeOptionalPositiveInteger(fieldName: string, value: unknown): number | null {
-  if (typeof value === 'undefined' || value === null || value === '') return null;
-  const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw validationError(`${fieldName} must be a positive integer.`, { field: fieldName });
-  }
-  return parsed;
-}
-
 export function normalizeOptionalAction(value: unknown): AuditLogAction | null {
   if (typeof value === 'undefined' || value === null || value === '' || value === 'all') return null;
   if (!AUDIT_LOG_ACTIONS.includes(value as AuditLogAction)) {
@@ -58,6 +49,6 @@ export function normalizeOptionalDate(fieldName: string, value: unknown, useEndO
   return date;
 }
 
-export function validationError(message: string, details?: Record<string, unknown>): AppError {
+function validationError(message: string, details?: Record<string, unknown>): AppError {
   return new AppError({ code: ErrorCodes.VALIDATION_ERROR, message, statusCode: HttpStatus.BAD_REQUEST, details: details ?? null });
 }

@@ -1,5 +1,7 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsISO8601, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+
+import { POSTGRES_SMALLINT_MAX } from '../../common/validation/databaseLimits';
 
 import {
   TECHNICAL_DOCUMENT_ALLOWED_STATUSES,
@@ -97,10 +99,16 @@ export class CreateTechnicalDocumentDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
 }
 
 export class UpdateTechnicalDocumentDto {
+  @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
+
   @IsOptional()
   @IsUUID()
   product_group_id?: string;
@@ -141,5 +149,13 @@ export class UpdateTechnicalDocumentDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
+}
+
+export class TechnicalDocumentVersionDto {
+  @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
 }

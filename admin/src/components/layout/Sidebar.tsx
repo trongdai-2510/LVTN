@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { getVisibleSidebarGroups, sidebarGroups } from '@/lib/route-map';
 import { cn } from '@/lib/cn';
+import { AdminBrand } from './AdminBrand';
 
 export function Sidebar({
   hydrated,
@@ -51,20 +52,17 @@ export function Sidebar({
   return (
     <aside
       data-admin-sidebar="true"
-      className="fixed inset-y-0 left-0 hidden w-[var(--sidebar-width)] border-r border-[#2c2e45] bg-sidebar text-slate-100 lg:block"
+      className="fixed inset-y-0 left-0 z-30 hidden w-[var(--sidebar-width)] border-r border-[#244158] bg-sidebar text-slate-100 lg:block"
     >
-      <div className="flex h-[var(--topbar-height)] items-center border-b border-[#2c2e45] px-6">
-        <div>
-          <div className="text-sm font-semibold tracking-[0.18em] text-white">SONG THANH</div>
-          <div className="mt-1 text-[11px] text-slate-400">Quản trị nội dung</div>
-        </div>
+      <div className="flex h-[var(--topbar-height)] min-h-16 items-center border-b border-[#244158] px-4 py-2.5">
+        <AdminBrand />
       </div>
-      <nav className="admin-sidebar-scroll h-[calc(100dvh-var(--topbar-height))] overflow-y-auto px-3 py-5">
+      <nav className="admin-sidebar-scroll h-[calc(100dvh-var(--topbar-height))] overflow-y-auto px-3 py-4">
         {!hydrated ? <SidebarPlaceholder /> : null}
         {hydrated
           ? visibleGroups.map((group) => (
-              <div key={group.label} className="mb-5">
-                <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <div key={group.label} className="mb-6">
+                <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
                   {group.label}
                 </div>
                 <div className="space-y-0.5">
@@ -112,14 +110,16 @@ function SidebarItem({
     return (
       <Link
         href={item.href}
+        aria-current={parentActive ? 'page' : undefined}
+        data-sidebar-active={parentActive ? 'true' : undefined}
         className={cn(
-          'flex min-h-[27px] items-center gap-2 rounded-md px-3.5 py-1.5 text-[13px] transition-colors',
+          'group relative flex min-h-10 items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors before:absolute before:bottom-2 before:left-0 before:top-2 before:w-0.5 before:rounded-r before:bg-sky-300 before:opacity-0 before:transition-opacity',
           parentActive
-            ? 'bg-sidebar-active text-white'
-            : 'text-slate-300 hover:bg-[#252743] hover:text-white'
+            ? 'bg-sidebar-active font-medium text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] before:opacity-100'
+            : 'text-slate-300 hover:bg-white/[0.06] hover:text-white'
         )}
       >
-        <Icon className="h-4 w-4 shrink-0" />
+        <Icon className={cn('h-4 w-4 shrink-0 transition-colors', parentActive ? 'text-sky-100' : 'text-slate-400 group-hover:text-slate-100')} />
         <span className="truncate">{item.label}</span>
       </Link>
     );
@@ -130,23 +130,27 @@ function SidebarItem({
       <div
         className={cn(
           'flex items-stretch rounded-md transition-colors',
-          parentActive ? 'bg-sidebar-active text-white' : 'text-slate-300 hover:bg-[#252743]'
+          parentActive
+            ? 'bg-sidebar-active text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
+            : 'text-slate-300 hover:bg-white/[0.06]'
         )}
       >
         <Link
           href={item.href}
-          className="flex min-h-[27px] min-w-0 flex-1 items-center gap-2 px-3.5 py-1.5 text-[13px]"
+          aria-current={pathname === item.href ? 'page' : undefined}
+          data-sidebar-active={parentActive ? 'true' : undefined}
+          className="group flex min-h-10 min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-[13px]"
         >
-          <Icon className="h-4 w-4 shrink-0" />
+          <Icon className={cn('h-4 w-4 shrink-0 transition-colors', parentActive ? 'text-sky-100' : 'text-slate-400 group-hover:text-slate-100')} />
           <span className="truncate">{item.label}</span>
         </Link>
         <button
           type="button"
-          aria-label={expanded ? 'Thu gọn danh mục sản phẩm' : 'Mở rộng danh mục sản phẩm'}
+          aria-label={expanded ? `Thu gọn ${item.label}` : `Mở rộng ${item.label}`}
           aria-expanded={expanded}
           onClick={onToggle}
           className={cn(
-            'flex w-9 items-center justify-center rounded-r-md text-slate-300 transition-colors hover:text-white',
+            'flex w-10 items-center justify-center rounded-r-md text-slate-300 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-200',
             parentActive ? 'text-white' : ''
           )}
         >
@@ -155,7 +159,7 @@ function SidebarItem({
       </div>
 
       {expanded ? (
-        <div className="ml-6 mt-1 border-l border-[#2c2e45] pl-3" data-sidebar-children="true">
+        <div className="ml-5 mt-1 border-l border-[#2d4a62] pl-3" data-sidebar-children="true">
           <div className="space-y-0.5">
             {item.children?.map((child) => {
               const childActive =
@@ -164,11 +168,12 @@ function SidebarItem({
                 <Link
                   key={child.href}
                   href={child.href}
+                  aria-current={childActive ? 'page' : undefined}
                   className={cn(
-                    'flex min-h-[27px] items-center rounded-md px-3 py-1.5 text-[12px] transition-colors',
+                    'relative flex min-h-9 items-center rounded-md px-3 py-1.5 text-[12px] transition-colors before:absolute before:-left-[13px] before:h-1.5 before:w-1.5 before:rounded-full before:bg-sky-300 before:opacity-0',
                     childActive
-                      ? 'bg-sidebar-active text-white'
-                      : 'text-slate-300 hover:bg-[#252743] hover:text-white'
+                      ? 'bg-white/[0.1] font-medium text-white before:opacity-100'
+                      : 'text-slate-400 hover:bg-white/[0.06] hover:text-white'
                   )}
                 >
                   <span className="truncate">{child.label}</span>

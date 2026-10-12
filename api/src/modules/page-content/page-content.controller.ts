@@ -6,7 +6,12 @@ import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.t
 import { RequirePermissions } from '../../common/permissions/permission.decorator';
 import { PermissionGuard } from '../../common/permissions/permission.guard';
 import { WorkflowApprovalGuard } from '../../common/workflow/workflow-approval.guard';
-import { CreatePageContentDto, PageContentListQueryDto, UpdatePageContentDto } from './page-content.dto';
+import {
+  CreatePageContentDto,
+  PageContentListQueryDto,
+  PageContentVersionDto,
+  UpdatePageContentDto
+} from './page-content.dto';
 import { PageContentService } from './page-content.service';
 
 @Controller('song-thanh/page-contents')
@@ -50,9 +55,10 @@ export class PageContentController {
   @RequirePermissions('page_content.archive')
   archivePageContent(
     @Param('id') id: string,
+    @Body() body: PageContentVersionDto,
     @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.pageContentService.archivePageContent(id, currentUser);
+    return this.pageContentService.archivePageContent(id, body, currentUser);
   }
 
   @Post(':id/restore')
@@ -60,8 +66,9 @@ export class PageContentController {
   @RequirePermissions('page_content.restore')
   restorePageContent(
     @Param('id') id: string,
+    @Body() body: PageContentVersionDto,
     @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.pageContentService.restorePageContent(id, currentUser);
+    return this.pageContentService.restorePageContent(id, body, currentUser);
   }
 }

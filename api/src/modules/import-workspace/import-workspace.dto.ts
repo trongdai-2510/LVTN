@@ -1,9 +1,12 @@
 import { Type } from 'class-transformer';
-import { ArrayUnique, IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, Min } from 'class-validator';
+import { ArrayUnique, IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+
+import { POSTGRES_INTEGER_MAX } from '../../common/validation/databaseLimits';
 
 export class ImportBatchListQueryDto {
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   q?: string;
 
   @IsOptional()
@@ -26,6 +29,7 @@ export class ImportBatchListQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(POSTGRES_INTEGER_MAX)
   page?: number;
 
   @IsOptional()
@@ -39,6 +43,7 @@ export class ImportBatchListQueryDto {
 export class ImportStagingListQueryDto {
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   q?: string;
 
   @IsOptional()
@@ -57,6 +62,7 @@ export class ImportStagingListQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(POSTGRES_INTEGER_MAX)
   page?: number;
 
   @IsOptional()
@@ -88,30 +94,38 @@ export class ImportRowRangeDto {
   @Type(() => Number)
   @IsInt()
   @Min(2)
+  @Max(POSTGRES_INTEGER_MAX)
   start_row?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(2)
+  @Max(POSTGRES_INTEGER_MAX)
   end_row?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(2)
+  @Max(POSTGRES_INTEGER_MAX)
   from?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(2)
+  @Max(POSTGRES_INTEGER_MAX)
   to?: number;
 }
 
 export class ImportIntakeDto {
   @IsString()
   source_workbook_path!: string;
+
+  @IsOptional()
+  @IsString()
+  sheet_name?: string;
 
   @IsOptional()
   @IsString()
@@ -142,6 +156,10 @@ export class ImportUploadDto {
   @IsOptional()
   @IsString()
   source_kind?: string;
+
+  @IsOptional()
+  @IsString()
+  sheet_name?: string;
 }
 
 export class ConfirmImportMappingDto {

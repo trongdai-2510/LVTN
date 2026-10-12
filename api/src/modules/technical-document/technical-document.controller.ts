@@ -6,6 +6,7 @@ import { PermissionGuard } from '../../common/permissions/permission.guard';
 import {
   CreateTechnicalDocumentDto,
   TechnicalDocumentListQueryDto,
+  TechnicalDocumentVersionDto,
   UpdateTechnicalDocumentDto
 } from './technical-document.dto';
 import { TechnicalDocumentService } from './technical-document.service';
@@ -42,14 +43,14 @@ export class TechnicalDocumentController {
   @Post(':id/archive')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('technical_document.archive')
-  archiveTechnicalDocument(@Param('id') id: string) {
-    return this.technicalDocumentService.archiveTechnicalDocument(id);
+  archiveTechnicalDocument(@Param('id') id: string, @Body() body: TechnicalDocumentVersionDto) {
+    return this.technicalDocumentService.archiveTechnicalDocument(id, body);
   }
 
   @Post(':id/restore')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('technical_document.restore')
-  restoreTechnicalDocument(@Param('id') id: string) {
-    return this.technicalDocumentService.restoreTechnicalDocument(id);
+  restoreTechnicalDocument(@Param('id') id: string, @Body() body: TechnicalDocumentVersionDto) {
+    return this.technicalDocumentService.restoreTechnicalDocument(id, body);
   }
 }

@@ -302,7 +302,7 @@ export class CustomerRepository {
     return row;
   }
 
-  async update(id: string, input: CustomerMutationInput): Promise<void> {
+  async update(id: string, input: CustomerMutationInput) {
     const patch: Record<string, unknown> = {};
     for (const field of ['full_name', 'phone', 'email', 'company_name'] as const) {
       if (typeof input[field] !== 'undefined') {
@@ -310,52 +310,72 @@ export class CustomerRepository {
       }
     }
 
-    if (Object.keys(patch).length === 0) {
-      return;
-    }
-
-    await this.knexService.db(CUSTOMER_PROFILE_TABLE).where({ id }).whereNull('deleted_at').update(patch);
+    return this.knexService.db.transaction(async (trx) => {
+      const customer = await this.lockCustomer(trx, id);
+      if (!customer) return 'not_found' as const;
+      if (customer.deleted_at) return 'archived' as const;
+      if (Object.keys(patch).length > 0) {
+        await trx(CUSTOMER_PROFILE_TABLE).where({ id }).update(patch);
+      }
+      return 'updated' as const;
+    });
   }
 
-  async archive(id: string): Promise<void> {
-    await this.knexService.db(CUSTOMER_PROFILE_TABLE)
-      .where({ id })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now() });
+  async archive(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const customer = await this.lockCustomer(trx, id);
+      if (!customer) return 'not_found' as const;
+      if (customer.deleted_at) return 'archived' as const;
+      await trx(CUSTOMER_PROFILE_TABLE).where({ id }).update({ deleted_at: trx.fn.now() });
+      return 'updated' as const;
+    });
   }
 
-  async restore(id: string): Promise<void> {
-    await this.knexService.db(CUSTOMER_PROFILE_TABLE)
-      .where({ id })
-      .whereNotNull('deleted_at')
-      .update({ deleted_at: null });
+  async restore(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const customer = await this.lockCustomer(trx, id);
+      if (!customer) return 'not_found' as const;
+      if (!customer.deleted_at) return 'active' as const;
+      await trx(CUSTOMER_PROFILE_TABLE).where({ id }).update({ deleted_at: null });
+      return 'updated' as const;
+    });
   }
 
-  async countActiveSources(customerId: string): Promise<{ contacts: number; quotes: number }> {
-    const [contactRow, quoteRow] = await Promise.all([
-      this.knexService.db(CONTACT_REQUEST_TABLE)
-        .where({ customer_id: customerId })
+  async permanentlyDeleteWithGuard(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const customer = await this.lockCustomer(trx, id);
+      if (!customer) return { status: 'not_found' as const };
+      if (!customer.deleted_at) return { status: 'active' as const };
+
+      const contactRow = await trx(CONTACT_REQUEST_TABLE)
+        .where({ customer_id: id })
         .whereNull('deleted_at')
         .count<{ total: string | number }>({ total: 'id' })
-        .first(),
-      this.knexService.db(QUOTE_REQUEST_TABLE)
-        .where({ customer_id: customerId })
+        .first();
+      const quoteRow = await trx(QUOTE_REQUEST_TABLE)
+        .where({ customer_id: id })
         .whereNull('deleted_at')
         .count<{ total: string | number }>({ total: 'id' })
-        .first()
-    ]);
+        .first();
+      const sources = {
+        contacts: Number(contactRow?.total ?? 0),
+        quotes: Number(quoteRow?.total ?? 0)
+      };
+      if (sources.contacts > 0 || sources.quotes > 0) {
+        return { status: 'blocked' as const, sources };
+      }
 
-    return {
-      contacts: Number(contactRow?.total ?? 0),
-      quotes: Number(quoteRow?.total ?? 0)
-    };
+      await trx(CUSTOMER_PROFILE_TABLE).where({ id }).delete();
+      return { status: 'deleted' as const };
+    });
   }
 
-  async permanentlyDelete(id: string): Promise<void> {
-    await this.knexService.db(CUSTOMER_PROFILE_TABLE)
+  private async lockCustomer(trx: Knex.Transaction, id: string) {
+    return trx<CustomerProfileRecord>(CUSTOMER_PROFILE_TABLE)
+      .select('id', 'deleted_at')
       .where({ id })
-      .whereNotNull('deleted_at')
-      .delete();
+      .forUpdate()
+      .first();
   }
 
   private contactSummarySubquery(alias: string) {

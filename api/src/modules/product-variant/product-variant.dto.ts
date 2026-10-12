@@ -6,12 +6,15 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
   Max,
   Min
 } from 'class-validator';
+
+import { POSTGRES_SMALLINT_MAX } from '../../common/validation/databaseLimits';
 
 import {
   PRODUCT_VARIANT_ALLOWED_PUBLIC_PRICE_MODES,
@@ -130,10 +133,16 @@ export class CreateProductVariantDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
 }
 
 export class UpdateProductVariantDto {
+  @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
+
   @IsOptional()
   @IsUUID()
   product_group_id?: string;
@@ -188,7 +197,15 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   sort_order?: number;
+}
+
+export class ProductVariantVersionDto {
+  @IsOptional()
+  @IsISO8601()
+  expected_updated_at?: string;
 }
 
 export class BulkUpdateProductVariantsDto {
@@ -226,6 +243,8 @@ export class CreateVariantAttributeDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   display_order?: number;
 }
 
@@ -241,5 +260,7 @@ export class UpdateVariantAttributeDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  @Min(0)
+  @Max(POSTGRES_SMALLINT_MAX)
   display_order?: number;
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { type MouseEventHandler, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
@@ -148,16 +149,23 @@ function makeQuery(statusFilter: StatusFilter, query: string, page: number): str
 
 export function ServiceProjectListPage({ kind }: { kind: DomainKind }) {
   const cfg = config[kind];
+  const searchParams = useSearchParams();
+  const routeQuery = searchParams.get('q') ?? '';
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(routeQuery);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [page, setPage] = useState(1);
   const [archiveId, setArchiveId] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    setQuery(routeQuery);
+    setPage(1);
+  }, [routeQuery]);
 
   useEffect(() => {
     let active = true;
@@ -305,11 +313,12 @@ export function ServiceProjectListPage({ kind }: { kind: DomainKind }) {
       ) : (
         <>
           <div
+            data-domain-grid={kind}
             className={cn(
               'grid gap-3',
               kind === 'service'
                 ? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
-                : 'grid-cols-[repeat(auto-fill,minmax(200px,1fr))]'
+                : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 min-[2240px]:grid-cols-5'
             )}
           >
             {items.map((item) => (
@@ -383,7 +392,10 @@ function DomainCard({
   const relatedCount = serviceRelatedCount(item);
 
   return (
-    <article className="group overflow-hidden rounded-lg border border-border bg-panel transition-all hover:border-blue-300 hover:shadow-md">
+    <article
+      data-domain-card={kind}
+      className="group overflow-hidden rounded-lg border border-border bg-panel transition-all hover:border-blue-300 hover:shadow-md"
+    >
       <Link
         aria-label={`Chỉnh sửa ${cfg.singular} ${title}`}
         href={editPath}

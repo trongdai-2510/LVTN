@@ -25,6 +25,9 @@ export function normalizeOptionalSearch(value: unknown): string | null {
   if (typeof value === 'undefined' || value === null) return null;
   if (typeof value !== 'string') throw validationError('q must be a string.', { field: 'q' });
   const normalized = value.trim();
+  if (normalized.length > 255) {
+    throw validationError('q must not exceed 255 characters.', { field: 'q' });
+  }
   return normalized === '' ? null : normalized;
 }
 
@@ -50,26 +53,36 @@ export function normalizeSourceKind(value: unknown): CustomerSourceKind {
   return value as CustomerSourceKind;
 }
 
-export function normalizeRequiredText(fieldName: string, value: unknown): string {
+export function normalizeRequiredText(fieldName: string, value: unknown, maxLength?: number): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw validationError(`${fieldName} must be a non-blank string.`, { field: fieldName });
   }
-
-  return value.trim();
+  const normalized = value.trim();
+  if (typeof maxLength === 'number' && normalized.length > maxLength) {
+    throw validationError(`${fieldName} must not exceed ${maxLength} characters.`, {
+      field: fieldName
+    });
+  }
+  return normalized;
 }
 
-export function normalizeNullableText(fieldName: string, value: unknown): string | null {
+export function normalizeNullableText(fieldName: string, value: unknown, maxLength?: number): string | null {
   if (typeof value === 'undefined' || value === null) return null;
   if (typeof value !== 'string') {
     throw validationError(`${fieldName} must be a string or null.`, { field: fieldName });
   }
 
   const normalized = value.trim();
+  if (typeof maxLength === 'number' && normalized.length > maxLength) {
+    throw validationError(`${fieldName} must not exceed ${maxLength} characters.`, {
+      field: fieldName
+    });
+  }
   return normalized === '' ? null : normalized;
 }
 
 export function normalizeNullableEmail(value: unknown): string | null {
-  const normalized = normalizeNullableText('email', value);
+  const normalized = normalizeNullableText('email', value, 128);
   if (!normalized) {
     return null;
   }
@@ -80,7 +93,7 @@ export function normalizeNullableEmail(value: unknown): string | null {
   return email;
 }
 
-export function validationError(message: string, details?: Record<string, unknown>): AppError {
+function validationError(message: string, details?: Record<string, unknown>): AppError {
   return new AppError({
     code: ErrorCodes.VALIDATION_ERROR,
     message,

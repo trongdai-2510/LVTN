@@ -38,28 +38,30 @@ export function LoginForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-slate-700" htmlFor={emailId}>
+        <label className="mb-2 block text-sm font-medium text-[var(--login-ink)]" htmlFor={emailId}>
           Email
         </label>
         <Input
           id={emailId}
+          className="h-12 rounded-md border-[var(--login-border)] bg-white px-4 text-base focus:border-[var(--login-brand)] focus:ring-blue-100"
           autoFocus
           autoComplete="username"
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="admin@songthanh.local"
+          placeholder="Nhập email của bạn"
           disabled={loading}
           required
         />
       </div>
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-slate-700" htmlFor={passwordId}>
+        <label className="mb-2 block text-sm font-medium text-[var(--login-ink)]" htmlFor={passwordId}>
           Mật khẩu
         </label>
         <div className="relative">
           <Input
             id={passwordId}
+            className="h-12 rounded-md border-[var(--login-border)] bg-white px-4 pr-12 text-base focus:border-[var(--login-brand)] focus:ring-blue-100"
             aria-describedby={error ? errorId : undefined}
             aria-invalid={error ? true : undefined}
             autoComplete="current-password"
@@ -72,7 +74,7 @@ export function LoginForm() {
           />
           <button
             type="button"
-            className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             onClick={() => setShowPassword((value) => !value)}
             aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
           >
@@ -80,22 +82,21 @@ export function LoginForm() {
           </button>
         </div>
       </div>
-      <div className="min-h-10" aria-live="polite">
-        {error ? (
-          <div
-            id={errorId}
-            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-            role="alert"
-          >
-            {error}
-          </div>
-        ) : null}
-      </div>
-      <Button className="w-full" type="submit" disabled={loading}>
+      {error ? (
+        <div
+          id={errorId}
+          className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          role="alert"
+          aria-live="polite"
+        >
+          {error}
+        </div>
+      ) : null}
+      <Button className="!mt-7 h-12 w-full rounded-md bg-[var(--login-brand)] text-base font-semibold hover:bg-[#003c92] focus:ring-[var(--login-brand)]" type="submit" disabled={loading}>
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         Đăng nhập
       </Button>
-      <p className="text-center text-xs text-slate-500">
+      <p className="border-t border-[var(--login-border)] pt-5 text-sm leading-6 text-[var(--login-muted)]">
         Nếu không vào được, liên hệ quản trị viên hệ thống.
       </p>
     </form>

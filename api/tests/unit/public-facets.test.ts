@@ -57,3 +57,33 @@ test('selected legacy raw facets remain visible even when unselected raw groups 
   assert.equal(groups[0].options[0].label, '24 tháng');
   assert.equal(groups[0].options[0].count, 0);
 });
+
+test('power factor is not mislabeled as wattage', () => {
+  const groups = buildPublicSpecFacetGroups([
+    {
+      product_group_id: 'group-a',
+      spec_name: 'Công suất',
+      spec_value: '10W'
+    },
+    {
+      product_group_id: 'group-b',
+      spec_name: 'Công suất định mức',
+      spec_value: '20 W'
+    },
+    {
+      product_group_id: 'group-c',
+      spec_name: 'Hệ số công suất (PF)',
+      spec_value: '0.5'
+    }
+  ]);
+  const powerGroup = groups.find((group) => group.key === 'power');
+
+  assert.deepEqual(
+    powerGroup?.options.map((option) => option.label),
+    ['10W', '20W']
+  );
+  assert.equal(
+    powerGroup?.options.some((option) => option.label === '0.5W'),
+    false
+  );
+});

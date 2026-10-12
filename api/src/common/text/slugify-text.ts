@@ -13,14 +13,23 @@ export function slugifyText(value: string): string {
 
 export async function resolveAvailableSlug(
   sourceValue: string,
-  exists: (candidate: string) => Promise<boolean>
+  exists: (candidate: string) => Promise<boolean>,
+  maxLength?: number
 ): Promise<string> {
-  const base = slugifyText(sourceValue);
+  const rawBase = slugifyText(sourceValue);
+  const base =
+    typeof maxLength === 'number'
+      ? rawBase.slice(0, maxLength).replace(/-+$/g, '') || 'item'.slice(0, maxLength)
+      : rawBase;
   let candidate = base;
   let suffix = 2;
 
   while (await exists(candidate)) {
-    candidate = `${base}-${suffix}`;
+    const suffixText = `-${suffix}`;
+    const availableBaseLength =
+      typeof maxLength === 'number' ? maxLength - suffixText.length : base.length;
+    const candidateBase = base.slice(0, availableBaseLength).replace(/-+$/g, '');
+    candidate = `${candidateBase || 'item'.slice(0, availableBaseLength)}${suffixText}`;
     suffix += 1;
   }
 

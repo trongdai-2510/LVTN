@@ -6,7 +6,8 @@
     "next.config.{js,ts}",
     "tailwind.config.{js,ts}",
     "postcss.config.{js,cjs,mjs}",
-    "scripts/**/*.{js,mjs,ts}"
+    "scripts/**/*.{js,mjs,ts}",
+    "tests/**/*.{ts,tsx}"
   ],
   "project": [
     "src/**/*.{ts,tsx}"
@@ -22,5 +23,6 @@
     "postcss",
     "autoprefixer",
     "eslint-config-next"
-  ]
+  ],
+  "playwright": false
 }

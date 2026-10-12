@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Archive,
@@ -14,17 +14,13 @@ import {
   Eye,
   EyeOff,
   FileText,
-  FolderTree,
   GripVertical,
-  Info,
   Package,
   Pencil,
   Plus,
   RefreshCcw,
   Save,
-  Search,
   Star,
-  Tag,
   X
 } from '@/components/icons';
 
@@ -34,6 +30,58 @@ import {
 } from '@/components/feedback/ActionResultDialog';
 import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
 import { ProductImageGalleryCard } from './ProductImageGalleryCard';
+import {
+  ProductGroupFilterToolbar
+} from './ProductGroupListControls';
+import { ProductWorkspaceHeader } from './ProductWorkspaceHeader';
+import {
+  countProductsMissingPrimaryImage,
+  ProductListSummary
+} from './ProductListSummary';
+import { ProductCatalogWorkspace } from './ProductCatalogWorkspace';
+import { ProductPicker } from './ProductPicker';
+import {
+  BUSINESS_CONFIGS,
+  type BusinessConfig
+} from './businessConfig';
+import {
+  activeRootCategories,
+  buildBusinessListHref,
+  buildBusinessListParams,
+  buildDetailHref,
+  defaultBusinessListFilters,
+  filteredActiveLevel2Categories,
+  hasActiveAdvancedBusinessFilters,
+  hasActiveBusinessFilters,
+  normalizeBusinessListFilters,
+  PAGE_SIZE_OPTIONS,
+  parseBusinessListFilters,
+  parsePageSize,
+  parsePositivePage,
+  sanitizeReturnTo,
+  type BusinessListFilters,
+  type BusinessReferenceData as ReferenceData,
+  type DeletedScope
+} from './businessListFilters';
+import {
+  buildBusinessPayload,
+  businessFormFromRecord,
+  createBusinessForm,
+  getDisplayPublishBlockers,
+  optionalText,
+  requiredOrNull,
+  stringValue,
+  stripNulls,
+  validateBusinessForm
+} from './businessForm';
+import {
+  buildDisplayStatusPayload,
+  displayStatusSuccessMessage,
+  optimisticVersionPayload,
+  supportsSimplifiedDisplayStatus,
+  type DisplayStatusAction
+} from './businessStatus';
+import type { BusinessKind, ProductWorkspaceSection } from './businessTypes';
 import { AttributeNameCombobox } from '@/components/form/AttributeNameCombobox';
 import { Field } from '@/components/form/Field';
 import { FileReferencePicker } from '@/components/form/ReferencePickers';
@@ -56,30 +104,11 @@ import { apiClient } from '@/lib/api-client';
 import { consumeAdminFlash, pushAdminFlash } from '@/lib/admin-flash';
 import { byId, endpoints } from '@/lib/api-endpoints';
 import { cn } from '@/lib/cn';
-import { type FileUsageGroup } from '@/lib/file-workflow';
 import { formatDate, formatValue } from '@/lib/formatters';
 import { PERMISSIONS } from '@/lib/permissions';
 import { formatStatusLabel } from '@/lib/status-labels';
 import { useAuthState, usePermissions } from '@/features/auth/useAuthState';
 import { extractItems, extractPagination, extractRecord } from '@/features/shared/extract';
-
-type BusinessKind =
-  | 'category'
-  | 'brand'
-  | 'productGroup'
-  | 'productVariant'
-  | 'technicalDocument';
-
-type DisplayStatusAction =
-  | 'activate'
-  | 'deactivate'
-  | 'submit-review'
-  | 'approve-review'
-  | 'reject-review'
-  | 'publish'
-  | 'unpublish'
-  | 'archive-display'
-  | 'restore-display';
 
 type DetailConfirmAction =
   | 'soft-archive'
@@ -88,25 +117,7 @@ type DetailConfirmAction =
   | null;
 
 type RecordMap = Record<string, unknown>;
-type ValidationIssue = { field: string; message: string };
 type FieldErrors = Record<string, string>;
-
-type BusinessConfig = {
-  title: string;
-  singular: string;
-  subtitle?: string;
-  note?: string;
-  listPath: string;
-  endpoint: string;
-  nestedKey: string;
-  icon: React.ComponentType<{ className?: string }>;
-  createPermission: string;
-  updatePermission: string;
-  archivePermission: string;
-  restorePermission: string;
-  readPermission: string;
-  createLabel: string;
-};
 
 type BulkStatusActionConfig = {
   key: string;
@@ -144,35 +155,6 @@ type BulkStatusRunState = {
   response: BulkStatusResponse;
 };
 
-type ReferenceData = {
-  categories: RecordMap[];
-  brands: RecordMap[];
-  productGroups: RecordMap[];
-  productVariants: RecordMap[];
-};
-
-type DeletedScope = 'active' | 'deleted' | 'all';
-
-type BusinessListFilters = {
-  status: string;
-  publish_status: string;
-  deleted_scope: DeletedScope;
-  updated_on: string;
-  category_level_1_id: string;
-  category_id: string;
-  brand_id: string;
-  product_group_id: string;
-  product_variant_id: string;
-  price_mode: string;
-  document_type: string;
-  is_public: string;
-  logo_state: string;
-  usage_state: string;
-  thumbnail_state: string;
-  variant_state: string;
-  document_state: string;
-};
-
 type BrandStatusValue = 'active' | 'inactive';
 type BrandVisibilityAction = {
   row: RecordMap;
@@ -186,103 +168,14 @@ const EMPTY_REFERENCE_DATA: ReferenceData = {
   productVariants: []
 };
 
-const BUSINESS_KINDS = [
-  'category',
-  'brand',
-  'productGroup',
-  'productVariant',
-  'technicalDocument'
-] as const;
-
-const CONFIGS: Record<BusinessKind, BusinessConfig> = {
-  category: {
-    title: 'Danh mục sản phẩm',
-    singular: 'danh mục',
-    subtitle: 'Phân loại sản phẩm theo danh mục chính và danh mục con.',
-    listPath: '/product-categories',
-    endpoint: endpoints.songThanh.productCategories,
-    nestedKey: 'category',
-    icon: FolderTree,
-    createPermission: PERMISSIONS.productCategoryCreate,
-    updatePermission: PERMISSIONS.productCategoryUpdate,
-    archivePermission: PERMISSIONS.productCategoryArchive,
-    restorePermission: PERMISSIONS.productCategoryRestore,
-    readPermission: PERMISSIONS.productCategoryRead,
-    createLabel: 'Tạo danh mục'
-  },
-  brand: {
-    title: 'Thương hiệu',
-    singular: 'thương hiệu',
-    subtitle: 'Các thương hiệu sản phẩm đang kinh doanh và phân phối.',
-    note: 'Ẩn thương hiệu sẽ làm các sản phẩm gắn thương hiệu đó không hiển thị ngoài website, nhưng dữ liệu vẫn còn trong admin và có thể hiện lại.',
-    listPath: '/brands',
-    endpoint: endpoints.songThanh.brands,
-    nestedKey: 'brand',
-    icon: Tag,
-    createPermission: PERMISSIONS.brandCreate,
-    updatePermission: PERMISSIONS.brandUpdate,
-    archivePermission: PERMISSIONS.brandArchive,
-    restorePermission: PERMISSIONS.brandRestore,
-    readPermission: PERMISSIONS.brandRead,
-    createLabel: 'Tạo thương hiệu'
-  },
-  productGroup: {
-    title: 'Sản phẩm',
-    singular: 'sản phẩm',
-    subtitle: 'Tên, hình ảnh và mô tả của từng sản phẩm.',
-    note: 'Biến thể và tài liệu kỹ thuật chỉnh sửa trong trang chi tiết sản phẩm.',
-    listPath: '/product-groups',
-    endpoint: endpoints.songThanh.productGroups,
-    nestedKey: 'product_group',
-    icon: Boxes,
-    createPermission: PERMISSIONS.productGroupCreate,
-    updatePermission: PERMISSIONS.productGroupUpdate,
-    archivePermission: PERMISSIONS.productGroupArchive,
-    restorePermission: PERMISSIONS.productGroupRestore,
-    readPermission: PERMISSIONS.productGroupRead,
-    createLabel: 'Tạo sản phẩm'
-  },
-  productVariant: {
-    title: 'Biến thể sản phẩm',
-    singular: 'biến thể',
-    subtitle: 'Mã SKU, tên biến thể và thông tin giá của từng sản phẩm.',
-    listPath: '/product-variants',
-    endpoint: endpoints.songThanh.productVariants,
-    nestedKey: 'product_variant',
-    icon: Package,
-    createPermission: PERMISSIONS.productVariantCreate,
-    updatePermission: PERMISSIONS.productVariantUpdate,
-    archivePermission: PERMISSIONS.productVariantArchive,
-    restorePermission: PERMISSIONS.productVariantRestore,
-    readPermission: PERMISSIONS.productVariantRead,
-    createLabel: 'Thêm biến thể thủ công'
-  },
-  technicalDocument: {
-    title: 'Tài liệu kỹ thuật',
-    singular: 'tài liệu kỹ thuật',
-    subtitle: 'Catalogue, datasheet và tài liệu kỹ thuật đính kèm với sản phẩm.',
-    listPath: '/technical-documents',
-    endpoint: endpoints.songThanh.technicalDocuments,
-    nestedKey: 'technical_document',
-    icon: FileText,
-    createPermission: PERMISSIONS.technicalDocumentCreate,
-    updatePermission: PERMISSIONS.technicalDocumentUpdate,
-    archivePermission: PERMISSIONS.technicalDocumentArchive,
-    restorePermission: PERMISSIONS.technicalDocumentRestore,
-    readPermission: PERMISSIONS.technicalDocumentRead,
-    createLabel: 'Thêm thủ công'
-  }
-};
-
-function isBusinessProductKind(kind: string): kind is BusinessKind {
-  return BUSINESS_KINDS.includes(kind as BusinessKind);
-}
-
 export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
-  const config = CONFIGS[kind];
+  const config = BUSINESS_CONFIGS[kind];
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const routeSearch = searchParams.toString();
+  const lastWrittenSearch = useRef<string | null>(null);
+  const skipUrlSync = useRef(false);
   const auth = useAuthState();
   const permissions = auth.permissions;
   const canPrivilegedWorkflow = auth.roles.includes('super_admin');
@@ -385,6 +278,9 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
 
   const items = useMemo(() => extractItems(data), [data]);
   const pagination = extractPagination(data, items.length);
+  const productSearchMode = String(asRecord(asRecord(data).summary).search_match_mode ?? 'none');
+  const productListMissingImageCount =
+    kind === 'productGroup' ? countProductsMissingPrimaryImage(items) : 0;
   const confirmArchiveRow = useMemo(
     () => items.find((row) => String(row.id ?? '') === confirmArchiveId),
     [confirmArchiveId, items]
@@ -414,8 +310,8 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
   const hasActiveFilters = hasActiveBusinessFilters(query, filters);
   const hasAdvancedFilters = hasActiveAdvancedBusinessFilters(kind, filters);
   const currentListHref = useMemo(
-    () => buildBusinessListHref(kind, pathname, query, filters, page, refs),
-    [filters, kind, page, pathname, query, refs]
+    () => buildBusinessListHref(kind, pathname, query, filters, page, pageSize, refs),
+    [filters, kind, page, pageSize, pathname, query, refs]
   );
   const bulkActions = useMemo(() => getBulkStatusActions(kind), [kind]);
   const selectableIds = useMemo(
@@ -433,11 +329,29 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
   const tableColumnCount = listHeaders(kind).length + 1 + (canBulkUpdate ? 1 : 0);
 
   useEffect(() => {
+    if (lastWrittenSearch.current === routeSearch) {
+      lastWrittenSearch.current = null;
+      return;
+    }
+    const params = new URLSearchParams(routeSearch);
+    skipUrlSync.current = true;
+    setQuery(params.get('q') ?? '');
+    setFilters(parseBusinessListFilters(params, kind));
+    setPage(parsePositivePage(params.get('page')));
+    setPageSize(parsePageSize(params.get('page_size')));
+  }, [kind, routeSearch]);
+
+  useEffect(() => {
     if (kind === 'productGroup' && !referencesReady) {
+      return;
+    }
+    if (skipUrlSync.current) {
+      skipUrlSync.current = false;
       return;
     }
     const currentHref = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
     if (currentListHref !== currentHref) {
+      lastWrittenSearch.current = currentListHref.split('?')[1] ?? '';
       router.replace(currentListHref, { scroll: false });
     }
   }, [currentListHref, kind, pathname, referencesReady, router, searchParams]);
@@ -449,13 +363,21 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
   }, [kind, page, query, filters]);
 
   async function archiveRow(id: string) {
+    const row = items.find((item) => String(item.id ?? '') === id);
     try {
       setPendingArchiveId(id);
       setError(null);
       setErrorContext('module-action');
       setMessage('');
-      await apiClient.post<unknown>(`${byId(config.endpoint, id)}/archive`, {});
-      setMessage('Đã xóa bản ghi khỏi danh sách đang dùng.');
+      await apiClient.post<unknown>(
+        `${byId(config.endpoint, id)}/archive`,
+        optimisticVersionPayload(kind, row)
+      );
+      setMessage(
+        kind === 'productGroup'
+          ? 'Đã lưu trữ sản phẩm. Dữ liệu vẫn có thể khôi phục.'
+          : 'Đã lưu trữ bản ghi khỏi danh sách đang dùng.'
+      );
       setPage(1);
       setReloadKey((current) => current + 1);
     } catch (err) {
@@ -487,7 +409,8 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
       setMessage('');
 
       const result = await apiClient.put<unknown>(byId(config.endpoint, rowId), {
-        status: nextStatus
+        status: nextStatus,
+        ...optimisticVersionPayload(kind, row)
       });
       const nextRecord = extractNestedRecord(asRecord(result), config.nestedKey);
       const mergedRecord = mergeRowStatusUpdate(row, nextRecord, nextStatus);
@@ -523,50 +446,6 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
     }
   }
 
-  async function updateProductGroupRowStatus(
-    row: RecordMap,
-    nextStatus: 'active' | 'inactive'
-  ) {
-    if (kind !== 'productGroup' || !canUpdate || !row.id) {
-      return;
-    }
-
-    const rowId = String(row.id);
-    if (String(row.status ?? '') === nextStatus) {
-      return;
-    }
-
-    try {
-      setInlineStatusRowId(rowId);
-      setError(null);
-      setErrorContext('module-action');
-      setMessage('');
-
-      const result = await apiClient.put<unknown>(byId(config.endpoint, rowId), {
-        status: nextStatus
-      });
-      const nextRecord = extractNestedRecord(asRecord(result), config.nestedKey);
-      const mergedRecord = mergeRowStatusUpdate(row, nextRecord, nextStatus);
-      const keepRow = shouldKeepProductGroupListRow(mergedRecord, filters);
-
-      setData((current: unknown) =>
-        patchListRowData(current, rowId, mergedRecord, keepRow)
-      );
-      if (!keepRow) {
-        setSelectedIds((current) => current.filter((id) => id !== rowId));
-      }
-      setMessage(
-        keepRow
-          ? `Đã đổi trạng thái sản phẩm sang “${formatValue(nextStatus)}”.`
-          : `Đã đổi trạng thái sản phẩm sang “${formatValue(nextStatus)}”; sản phẩm không còn khớp bộ lọc hiện tại.`
-      );
-    } catch (err) {
-      setError(err);
-      setErrorContext('module-action');
-    } finally {
-      setInlineStatusRowId(null);
-    }
-  }
 
   async function updateProductGroupRowPublishStatus(
     row: RecordMap,
@@ -592,7 +471,8 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
       setMessage('');
 
       const result = await apiClient.put<unknown>(byId(config.endpoint, rowId), {
-        publish_status: nextPublishStatus
+        publish_status: nextPublishStatus,
+        ...optimisticVersionPayload(kind, row)
       });
       const nextRecord = extractNestedRecord(asRecord(result), config.nestedKey);
       const mergedRecord = mergeRowPublishStatusUpdate(row, nextRecord, nextPublishStatus);
@@ -722,6 +602,12 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
           </div>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
+          {kind === 'productGroup' || kind === 'productVariant' ? (
+            <LinkButton href="/import/new" variant="secondary">
+              <FileText className="h-4 w-4" />
+              Nhập từ Excel
+            </LinkButton>
+          ) : null}
           {isReviewOnlyProductSurface(kind) ? (
             <LinkButton href="/product-groups">
               <Package className="h-4 w-4" />
@@ -740,12 +626,27 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
         </div>
       </div>
 
-      {kind !== 'brand' && config.note ? (
+      {kind !== 'brand' && kind !== 'productGroup' && config.note ? (
         <p className="text-sm text-muted-foreground">{config.note}</p>
       ) : null}
       {renderReviewSurfaceNotice(kind)}
 
-      <Card className="min-h-[420px] overflow-hidden border-[#c4c5d5]">
+      {kind === 'productGroup' && !loading && !error ? (
+        <ProductListSummary
+          total={pagination.total}
+          pageCount={items.length}
+          missingImageCount={productListMissingImageCount}
+          selectedCount={selectedIds.length}
+          rows={items}
+        />
+      ) : null}
+      {kind === 'productGroup' && !loading && !error && pagination.total > 0 && query.trim() && productSearchMode === 'near' ? (
+        <p role="status" className="rounded-md border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
+          Không có kết quả khớp trực tiếp cho “{query.trim()}”. Đang hiển thị sản phẩm có tên hoặc mã gần đúng.
+        </p>
+      ) : null}
+
+      <Card className="min-h-[420px] overflow-hidden border-[#c4c5d5] shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
         <div className="px-4 pt-4">
           <FormFeedback
             successMessage={message}
@@ -801,7 +702,7 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
           </TableToolbar>
         )}
 
-        {canBulkUpdate ? (
+        {canBulkUpdate && (kind !== 'productGroup' || selectedIds.length > 0) ? (
           kind === 'productGroup' || kind === 'productVariant' ? (
             (() => {
               const adminActions =
@@ -876,15 +777,53 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
               }
             />
           </div>
+        ) : kind === 'productGroup' ? (
+          <ProductCatalogWorkspace
+            rows={items}
+            currentListHref={currentListHref}
+            canBulkUpdate={canBulkUpdate}
+            canArchive={canArchive}
+            canRestore={canRestore}
+            canUpdate={canUpdate}
+            selectedIds={selectedIds}
+            selectableIds={selectableIds}
+            allSelectableSelected={allSelectableSelected}
+            pendingArchiveId={pendingArchiveId}
+            inlineStatusRowId={inlineStatusRowId}
+            onToggleSelected={toggleSelected}
+            onToggleSelectAll={toggleSelectAll}
+            onArchive={(id) => setConfirmArchiveId(id)}
+            onPublishStatusChange={(row, nextStatus) =>
+              void updateProductGroupRowPublishStatus(row, nextStatus)
+            }
+            pagination={
+              <Pagination
+                page={pagination.page}
+                pageSize={pagination.page_size}
+                total={pagination.total}
+                onPageChange={setPage}
+                pageSizeOptions={PAGE_SIZE_OPTIONS}
+                onPageSizeChange={(next) => {
+                  setPageSize(next);
+                  setPage(1);
+                  clearSelection();
+                }}
+              />
+            }
+          />
         ) : (
           <>
-            <div className="admin-table-scroll hidden overflow-x-auto md:block">
+            <div
+              className="admin-table-scroll hidden overflow-x-auto md:block"
+              {...(kind === 'productVariant'
+                ? { 'data-variant-catalog-layout': 'compact' }
+                : {})}
+            >
               <table
                 className={cn(
                   'min-w-full table-fixed divide-y divide-border text-sm',
                   kind === 'brand' ? 'min-w-[1040px]' : '',
-                  kind === 'productGroup' ? 'min-w-[1080px]' : '',
-                  kind === 'productVariant' ? 'min-w-[1280px]' : ''
+                  kind === 'productVariant' ? 'min-w-[980px]' : ''
                 )}
               >
                 <thead className="bg-muted">
@@ -923,7 +862,7 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
                 <tbody className="divide-y divide-border bg-panel">
                   {items.map((row, index) => {
                     const rowId = String(row.id ?? '');
-                    const archiveActionLabel = kind === 'brand' ? 'Lưu trữ' : 'Xóa';
+                    const archiveActionLabel = 'Lưu trữ';
 
                     return (
                       <tr
@@ -948,8 +887,7 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
                         ) : null}
                         {renderListRow(kind, row, {
                           canUpdateProductGroupStatus:
-                            (kind === 'productGroup' || kind === 'productVariant') &&
-                            canUpdate,
+                            kind === 'productVariant' && canUpdate,
                           inlineStatusRowId,
                           onProductGroupPublishStatusChange: (nextPublishStatus) =>
                             void updateProductGroupRowPublishStatus(row, nextPublishStatus),
@@ -958,16 +896,16 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
                           onBrandVisibilityChange: (nextStatus) =>
                             setBrandVisibilityAction({ row, nextStatus })
                         })}
-                        <td className="sticky right-0 z-10 whitespace-nowrap border-l border-border bg-panel px-4 py-3 text-right align-top shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.35)] group-hover:bg-muted">
+                        <td className="sticky right-0 z-10 whitespace-nowrap border-l border-border bg-panel px-4 py-3 text-right align-middle shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.35)] group-hover:bg-muted">
                           <div className="flex flex-col items-stretch gap-1.5">
                             <LinkButton
                               href={buildDetailHref(config.listPath, String(row.id), currentListHref)}
                               variant="ghost"
                               size="sm"
                             >
-                              Xem
+                              {kind === 'productVariant' ? 'Mở hồ sơ' : 'Xem'}
                             </LinkButton>
-                            {!row.deleted_at && canArchive ? (
+                            {kind !== 'productVariant' && !row.deleted_at && canArchive ? (
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -1035,13 +973,21 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
 
       <ConfirmDialog
         open={Boolean(confirmArchiveId)}
-        title={kind === 'brand' ? 'Lưu trữ thương hiệu?' : 'Xóa bản ghi'}
+        title={
+          kind === 'brand'
+            ? 'Lưu trữ thương hiệu?'
+            : kind === 'productGroup'
+              ? 'Lưu trữ sản phẩm?'
+              : 'Lưu trữ bản ghi?'
+        }
         description={
           kind === 'brand'
             ? `Lưu trữ thương hiệu "${formatValue(confirmArchiveRow?.name)}" khỏi danh sách đang dùng. Nếu chỉ muốn ẩn khỏi website, dùng nút Ẩn ở cột Hiển thị website.`
-            : 'Thao tác này sẽ lưu trữ bản ghi và ẩn khỏi danh sách đang dùng. Dữ liệu không bị xóa vĩnh viễn.'
+            : kind === 'productGroup'
+              ? `Sản phẩm "${formatValue(confirmArchiveRow?.name)}" sẽ được gỡ khỏi danh sách đang dùng và không còn hiển thị trên website. Dữ liệu, biến thể và tài liệu liên quan không bị xóa vĩnh viễn.`
+              : 'Thao tác này sẽ lưu trữ bản ghi và ẩn khỏi danh sách đang dùng. Dữ liệu không bị xóa vĩnh viễn.'
         }
-        confirmLabel={kind === 'brand' ? 'Lưu trữ' : 'Xóa'}
+        confirmLabel="Lưu trữ"
         onClose={() => setConfirmArchiveId(null)}
         onConfirm={() => (confirmArchiveId ? archiveRow(confirmArchiveId) : Promise.resolve())}
       />
@@ -1092,7 +1038,7 @@ export function ProductBusinessDetailPage({
   kind: BusinessKind;
   id: string;
 }) {
-  const config = CONFIGS[kind];
+  const config = BUSINESS_CONFIGS[kind];
   const isCreate = id === 'new';
   const auth = useAuthState();
   const permissions = auth.permissions;
@@ -1103,11 +1049,15 @@ export function ProductBusinessDetailPage({
   const canRestore = permissions.includes(config.restorePermission);
   const canPrivilegedWorkflow = auth.roles.includes('super_admin');
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const categoryLevelPreset = kind === 'category' && isCreate
+    ? searchParams.get('level')
+    : null;
 
   const [detail, setDetail] = useState<RecordMap>({});
   const [record, setRecord] = useState<RecordMap>({});
-  const [form, setForm] = useState<Record<string, string>>(defaultForm(kind));
+  const [form, setForm] = useState<Record<string, string>>(createBusinessForm(kind));
   const [refs, setRefs] = useState<ReferenceData>({
     categories: [],
     brands: [],
@@ -1116,6 +1066,7 @@ export function ProductBusinessDetailPage({
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const mutationInFlightRef = useRef(false);
   const [error, setError] = useState<unknown>(null);
   const [errorContext, setErrorContext] = useState<
     'module-load' | 'module-save' | 'module-action'
@@ -1124,7 +1075,7 @@ export function ProductBusinessDetailPage({
   const [resultDialog, setResultDialog] =
     useState<ActionResultDialogState | null>(null);
   const [baselineForm, setBaselineForm] = useState<Record<string, string>>(
-    defaultForm(kind)
+    createBusinessForm(kind)
   );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [confirmAction, setConfirmAction] = useState<DetailConfirmAction>(null);
@@ -1142,40 +1093,6 @@ export function ProductBusinessDetailPage({
       );
     }
   }, [config.listPath, id]);
-
-  useEffect(() => {
-    if (kind !== 'category' || !isCreate) {
-      return;
-    }
-
-    const presetLevel = searchParams.get('level');
-    if (presetLevel === 'main') {
-      setForm((current) =>
-        current.category_level === 'level_1' && !current.parent_id
-          ? current
-          : { ...current, category_level: 'level_1', parent_id: '' }
-      );
-      setBaselineForm((current) =>
-        current.category_level === 'level_1' && !current.parent_id
-          ? current
-          : { ...current, category_level: 'level_1', parent_id: '' }
-      );
-      return;
-    }
-
-    if (presetLevel === 'sub') {
-      setForm((current) =>
-        current.category_level === 'level_2'
-          ? current
-          : { ...current, category_level: 'level_2' }
-      );
-      setBaselineForm((current) =>
-        current.category_level === 'level_2'
-          ? current
-          : { ...current, category_level: 'level_2' }
-      );
-    }
-  }, [isCreate, kind, searchParams]);
 
   useEffect(() => {
     let active = true;
@@ -1197,7 +1114,12 @@ export function ProductBusinessDetailPage({
 
     async function loadRecord() {
       if (isCreate) {
-        const nextForm = defaultForm(kind);
+        const baseForm = createBusinessForm(kind);
+        const nextForm = kind === 'category' && categoryLevelPreset === 'sub'
+          ? { ...baseForm, category_level: 'level_2' }
+          : kind === 'category' && categoryLevelPreset === 'main'
+            ? { ...baseForm, category_level: 'level_1', parent_id: '' }
+            : baseForm;
         if (active) {
           setDetail({});
           setRecord({});
@@ -1217,7 +1139,7 @@ export function ProductBusinessDetailPage({
         }
         setDetail(nextDetail);
         setRecord(nextRecord);
-        const nextForm = formFromRecord(kind, nextRecord);
+        const nextForm = businessFormFromRecord(kind, nextRecord);
         setForm(nextForm);
         setBaselineForm(nextForm);
         setFieldErrors({});
@@ -1242,7 +1164,7 @@ export function ProductBusinessDetailPage({
     return () => {
       active = false;
     };
-  }, [config.endpoint, config.nestedKey, id, isCreate, kind]);
+  }, [categoryLevelPreset, config.endpoint, config.nestedKey, id, isCreate, kind]);
 
   const rootCategories = useMemo(
     () =>
@@ -1312,6 +1234,17 @@ export function ProductBusinessDetailPage({
   const showSoftArchiveActions = !isCreate;
   const isDirty = !loading && !formsEqual(form, baselineForm);
   const backHref = sanitizeReturnTo(searchParams.get('returnTo')) || config.listPath;
+  const activeProductSection = resolveProductWorkspaceSection(searchParams.get('view'));
+  const productSectionHrefs = buildProductSectionHrefs(pathname, searchParams.toString());
+  const showProductRecordForm =
+    kind !== 'productGroup' ||
+    isCreate ||
+    (activeProductSection !== 'variants' && activeProductSection !== 'documents');
+  const showProductWorkspaceHeader =
+    kind === 'productGroup' && !isCreate && !loading && !(errorContext === 'module-load' && error);
+  const showRecordArchiveAction =
+    showSoftArchiveActions && (kind !== 'productGroup' || activeProductSection === 'main' || archived);
+  const showSaveButton = canSave;
 
   function focusField(field: string, options: { focus?: boolean } = {}) {
     const shouldFocus = options.focus ?? true;
@@ -1411,7 +1344,7 @@ export function ProductBusinessDetailPage({
   function applyDetailResult(result: unknown, successMessage: string) {
     const nextDetail = asRecord(result);
     const nextRecord = extractNestedRecord(nextDetail, config.nestedKey);
-    const nextForm = formFromRecord(kind, nextRecord);
+    const nextForm = businessFormFromRecord(kind, nextRecord);
     setDetail(nextDetail);
     setRecord(nextRecord);
     setForm(nextForm);
@@ -1423,13 +1356,43 @@ export function ProductBusinessDetailPage({
     setMessage(successMessage);
   }
 
+  async function refreshRelatedPublicationState() {
+    if (kind !== 'productGroup' || isCreate) return;
+    try {
+      const result = await apiClient.get<unknown>(byId(config.endpoint, id));
+      const nextDetail = asRecord(result);
+      const nextRecord = extractNestedRecord(nextDetail, config.nestedKey);
+      const nextForm = businessFormFromRecord(kind, nextRecord);
+      setDetail(nextDetail);
+      setRecord(nextRecord);
+      setForm((current) => ({
+        ...current,
+        review_status: nextForm.review_status,
+        publish_status: nextForm.publish_status
+      }));
+      setBaselineForm((current) => ({
+        ...current,
+        review_status: nextForm.review_status,
+        publish_status: nextForm.publish_status
+      }));
+    } catch {
+      setError(new Error('Thay đổi đã được lưu nhưng chưa tải lại được trạng thái xuất bản. Hãy tải lại trang trước khi chỉnh sửa tiếp.'));
+      setErrorContext('module-action');
+    }
+  }
+
   async function handleSave(event: FormEvent) {
     event.preventDefault();
-    if (!canSave) {
+    if (!canSave || mutationInFlightRef.current) {
       return;
     }
 
-    const validationIssues = validateForm(kind, form);
+    const validationIssues = validateBusinessForm(
+      kind,
+      !canPrivilegedWorkflow && (kind === 'productGroup' || kind === 'productVariant')
+        ? { ...form, publish_status: 'unpublished' }
+        : form
+    );
     if (validationIssues.length > 0) {
       const nextFieldErrors = validationIssues.reduce<FieldErrors>((accumulator, issue) => {
         if (issue.field !== '__form' && !accumulator[issue.field]) {
@@ -1450,6 +1413,7 @@ export function ProductBusinessDetailPage({
       return;
     }
 
+    mutationInFlightRef.current = true;
     setSaving(true);
     setError(null);
     setErrorContext('module-save');
@@ -1457,7 +1421,10 @@ export function ProductBusinessDetailPage({
     setFieldErrors({});
 
     try {
-      const payload = buildPayload(kind, form);
+      const payload = {
+        ...buildBusinessPayload(kind, form, canPrivilegedWorkflow),
+        ...optimisticVersionPayload(kind, record)
+      };
       const result = isCreate
         ? await apiClient.post<unknown>(config.endpoint, payload)
         : await apiClient.put<unknown>(byId(config.endpoint, id), payload);
@@ -1475,17 +1442,25 @@ export function ProductBusinessDetailPage({
         return;
       }
 
-      applyDetailResult(result, 'Đã lưu thay đổi.');
+      applyDetailResult(result,
+        !canPrivilegedWorkflow && String(nextRecord.review_status ?? '') === 'pending_review'
+          ? 'Đã lưu. Bản ghi đang chờ Super Admin duyệt và tạm ẩn khỏi website.'
+          : 'Đã lưu thay đổi.');
     } catch (err) {
       setError(err);
       openErrorDialog(err, 'module-save');
     } finally {
+      mutationInFlightRef.current = false;
       setSaving(false);
     }
   }
 
   async function runDisplayStatusAction(action: DisplayStatusAction) {
-    if (isCreate || !supportsSimplifiedDisplayStatus(kind)) {
+    if (
+      isCreate ||
+      !supportsSimplifiedDisplayStatus(kind) ||
+      mutationInFlightRef.current
+    ) {
       return;
     }
     if (isDirty) {
@@ -1494,6 +1469,7 @@ export function ProductBusinessDetailPage({
       return;
     }
 
+    mutationInFlightRef.current = true;
     setPendingDisplayAction(action);
     setError(null);
     setErrorContext('module-action');
@@ -1502,7 +1478,10 @@ export function ProductBusinessDetailPage({
     try {
       const result = await apiClient.put<unknown>(
         byId(config.endpoint, id),
-        buildDisplayStatusPayload(action, form)
+        {
+          ...buildDisplayStatusPayload(action),
+          ...optimisticVersionPayload(kind, record)
+        }
       );
       applyDetailResult(result, displayStatusSuccessMessage(action));
     } catch (err) {
@@ -1510,6 +1489,7 @@ export function ProductBusinessDetailPage({
       setErrorContext('module-action');
       openErrorDialog(err, 'module-action');
     } finally {
+      mutationInFlightRef.current = false;
       setPendingDisplayAction(null);
     }
   }
@@ -1525,28 +1505,57 @@ export function ProductBusinessDetailPage({
       return;
     }
 
+    if (mutationInFlightRef.current) {
+      return;
+    }
+
+    mutationInFlightRef.current = true;
+
     try {
       setError(null);
       setErrorContext('module-action');
       setMessage('');
       const result = await apiClient.post<unknown>(
         `${byId(config.endpoint, id)}/${confirmAction === 'soft-restore' ? 'restore' : 'archive'}`,
-        {}
+        optimisticVersionPayload(kind, record)
       );
       applyDetailResult(
         result,
         confirmAction === 'soft-restore'
           ? 'Đã khôi phục bản ghi.'
-          : 'Đã xóa bản ghi khỏi danh sách đang dùng.'
+          : kind === 'productGroup'
+            ? 'Đã lưu trữ sản phẩm. Dữ liệu vẫn được giữ để có thể khôi phục.'
+            : 'Đã lưu trữ bản ghi khỏi danh sách đang dùng.'
       );
     } catch (err) {
       setError(err);
       setErrorContext('module-action');
       openErrorDialog(err, 'module-action');
     } finally {
+      mutationInFlightRef.current = false;
       setConfirmAction(null);
     }
   }
+
+  const displayStatusSection = showDisplayStatusCard ? (
+    <DisplayStatusSection
+      id={kind === 'productGroup' ? 'product-group-display' : undefined}
+      inline={kind === 'productGroup'}
+      kind={kind}
+      form={form}
+      canAct={canSave}
+      canPrivilegedWorkflow={canPrivilegedWorkflow}
+      hasUnsavedChanges={isDirty}
+      pendingAction={pendingDisplayAction}
+      onAction={(action) => {
+        if (action === 'archive-display') {
+          setConfirmAction('display-archive');
+          return;
+        }
+        void runDisplayStatusAction(action);
+      }}
+    />
+  ) : null;
 
   return (
     <section
@@ -1555,24 +1564,26 @@ export function ProductBusinessDetailPage({
       data-product-business-mode={isCreate ? 'create' : 'detail'}
     >
       <UnsavedChangesGuard when={isDirty} />
-      <div className="flex min-h-16 flex-col gap-2 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-[20px] font-semibold leading-7 tracking-tight text-text">
-            {title}
-          </h1>
-          {config.subtitle ? (
-            <p className="mt-1 max-w-3xl text-sm text-[#444653]">
-              {config.subtitle}
-            </p>
-          ) : null}
+      {showProductWorkspaceHeader ? null : (
+        <div className="flex min-h-16 flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h1 className="text-[20px] font-semibold leading-7 tracking-tight text-text">
+              {title}
+            </h1>
+            {config.subtitle ? (
+              <p className="mt-1 max-w-3xl text-sm text-[#444653]">
+                {config.subtitle}
+              </p>
+            ) : null}
+          </div>
+          <LinkButton href={backHref} variant="secondary" size="sm">
+            <ChevronLeft className="h-4 w-4" />
+            Quay lại danh sách
+          </LinkButton>
         </div>
-        <LinkButton href={backHref} variant="secondary" size="sm">
-          <ChevronLeft className="h-4 w-4" />
-          Quay lại danh sách
-        </LinkButton>
-      </div>
+      )}
 
-      {config.note ? (
+      {kind !== 'productGroup' && config.note ? (
         <div className="rounded-sm border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
           {config.note}
         </div>
@@ -1584,8 +1595,15 @@ export function ProductBusinessDetailPage({
         </div>
       ) : null}
 
-      {kind === 'productGroup' && !isCreate && !loading ? (
-        <ProductGroupDetailShortcuts record={record} isDirty={isDirty} />
+      {showProductWorkspaceHeader ? (
+        <ProductWorkspaceHeader
+          productGroup={record}
+          dependencies={asRecord(detail.dependency_counts)}
+          isDirty={isDirty}
+          activeSection={activeProductSection}
+          sectionHrefs={productSectionHrefs}
+          backHref={backHref}
+        />
       ) : null}
 
       {errorContext === 'module-load' && error ? (
@@ -1604,15 +1622,16 @@ export function ProductBusinessDetailPage({
         <BusinessDetailSkeleton withRail={showSystemRail} />
       ) : (
         <>
-          <form onSubmit={handleSave}>
-            <Card className="overflow-visible">
+          {showProductRecordForm ? <form onSubmit={handleSave}>
+            <Card className={cn('overflow-visible', kind === 'productGroup' && !isCreate && 'border-0 bg-transparent shadow-none')}>
             <div
               className={cn(
-                'grid gap-5 p-5',
+                'grid gap-5',
+                kind === 'productGroup' && !isCreate ? 'p-0' : 'p-5',
                 showSystemRail ? 'lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]' : 'grid-cols-1'
               )}
             >
-              <div className="mx-auto w-full max-w-5xl space-y-4">
+              <div className="w-full space-y-4">
                 {renderFormSections(kind, {
                   form,
                   setForm,
@@ -1624,27 +1643,13 @@ export function ProductBusinessDetailPage({
                   technicalDocumentVariants,
                   isCreate,
                   canSave,
-                  recordId: id
+                  recordId: id,
+                  activeProductSection,
+                  displayStatusSection,
+                  onRelatedChange: refreshRelatedPublicationState
                 })}
 
-                {showDisplayStatusCard ? (
-                  <DisplayStatusSection
-                    id={kind === 'productGroup' ? 'product-group-display' : undefined}
-                    kind={kind}
-                    form={form}
-                    canAct={canSave}
-                    canPrivilegedWorkflow={canPrivilegedWorkflow}
-                    hasUnsavedChanges={isDirty}
-                    pendingAction={pendingDisplayAction}
-                    onAction={(action) => {
-                      if (action === 'archive-display') {
-                        setConfirmAction('display-archive');
-                        return;
-                      }
-                      void runDisplayStatusAction(action);
-                    }}
-                  />
-                ) : null}
+                {kind !== 'productGroup' ? displayStatusSection : null}
 
               </div>
 
@@ -1655,15 +1660,13 @@ export function ProductBusinessDetailPage({
               ) : null}
             </div>
 
-            <div className="border-t border-border bg-panel px-5 py-4 shadow-[0_-8px_18px_rgb(15_23_42_/_0.04)] md:sticky md:bottom-0 md:z-10">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="text-xs text-muted-foreground">
-                {canSave
-                  ? 'Chỉ hiển thị các trường cần dùng.'
-                  : 'Biểu mẫu đang ở chế độ chỉ đọc.'}
-              </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                {showSoftArchiveActions
+              <div className="border-t border-border bg-panel px-5 py-4 shadow-[0_-8px_18px_rgb(15_23_42_/_0.04)] md:sticky md:bottom-0 md:z-10">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-xs text-muted-foreground">
+                    {!canSave ? 'Biểu mẫu đang ở chế độ chỉ đọc.' : null}
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                {showRecordArchiveAction
                   ? archived
                     ? canRestore
                       ? (
@@ -1684,28 +1687,36 @@ export function ProductBusinessDetailPage({
                           variant="secondary"
                           className="border-red-200 text-red-700 hover:bg-red-50"
                           data-product-delete-button="true"
+                          data-product-archive-action="true"
                           onClick={() => setConfirmAction('soft-archive')}
                         >
                           <Archive className="h-4 w-4" />
-                          Xóa
+                          {kind === 'productGroup' ? 'Lưu trữ sản phẩm' : 'Lưu trữ'}
                         </Button>
                       )
                       : null
                   : null}
-                {canSave ? (
+                {showSaveButton ? (
                   <Button type="submit" disabled={saving}>
                     <Save className="h-4 w-4" />
                     {saving ? 'Đang lưu' : isCreate ? 'Tạo bản ghi' : 'Lưu thay đổi'}
                   </Button>
                 ) : null}
+                  </div>
+                </div>
               </div>
-              </div>
-            </div>
             </Card>
-          </form>
+          </form> : null}
 
-          {kind === 'productGroup' && !isCreate && record.id ? (
-            <ProductGroupWorkspace productGroup={record} />
+          {kind === 'productGroup' &&
+          !isCreate &&
+          record.id &&
+          (activeProductSection === 'variants' || activeProductSection === 'documents') ? (
+            <ProductGroupWorkspace
+              productGroup={record}
+              activeSection={activeProductSection}
+              onRelatedChange={refreshRelatedPublicationState}
+            />
           ) : null}
         </>
       )}
@@ -1717,7 +1728,9 @@ export function ProductBusinessDetailPage({
             ? 'Lưu trữ hiển thị'
             : confirmAction === 'soft-restore'
               ? 'Khôi phục bản ghi'
-              : 'Xóa bản ghi'
+              : kind === 'productGroup'
+                ? 'Lưu trữ sản phẩm'
+                : 'Lưu trữ bản ghi'
         }
         description={
           confirmAction === 'display-archive'
@@ -1731,7 +1744,7 @@ export function ProductBusinessDetailPage({
             ? 'Lưu trữ'
             : confirmAction === 'soft-restore'
               ? 'Khôi phục'
-              : 'Xóa'
+              : 'Lưu trữ'
         }
         tone={
           confirmAction === 'soft-restore'
@@ -1765,6 +1778,9 @@ function renderFormSections(
     isCreate: boolean;
     canSave: boolean;
     recordId: string;
+    activeProductSection: ProductWorkspaceSection;
+    displayStatusSection: ReactNode;
+    onRelatedChange: () => Promise<void>;
   }
 ) {
   switch (kind) {
@@ -1779,6 +1795,37 @@ function renderFormSections(
     case 'technicalDocument':
       return renderTechnicalDocumentSections(context);
   }
+}
+
+const PRODUCT_WORKSPACE_SECTIONS: ProductWorkspaceSection[] = [
+  'main',
+  'content',
+  'variants',
+  'documents'
+];
+
+function resolveProductWorkspaceSection(value: string | null): ProductWorkspaceSection {
+  return PRODUCT_WORKSPACE_SECTIONS.includes(value as ProductWorkspaceSection)
+    ? (value as ProductWorkspaceSection)
+    : 'main';
+}
+
+function buildProductSectionHrefs(
+  pathname: string,
+  currentSearch: string
+): Record<ProductWorkspaceSection, string> {
+  return Object.fromEntries(
+    PRODUCT_WORKSPACE_SECTIONS.map((section) => {
+      const params = new URLSearchParams(currentSearch);
+      if (section === 'main') {
+        params.delete('view');
+      } else {
+        params.set('view', section);
+      }
+      const query = params.toString();
+      return [section, `${pathname}${query ? `?${query}` : ''}`];
+    })
+  ) as Record<ProductWorkspaceSection, string>;
 }
 
 function buildFieldControlId(kind: string, key: string) {
@@ -1946,7 +1993,6 @@ function renderBrandSections({
   form,
   setForm,
   fieldErrors,
-  rootCategories,
   isCreate,
   canSave
 }: {
@@ -2052,136 +2098,6 @@ function renderBrandSections({
   );
 }
 
-function ProductGroupDetailShortcuts({
-  record,
-  isDirty
-}: {
-  record: RecordMap;
-  isDirty: boolean;
-}) {
-  const variantCount = record.variant_count ?? asRecord(record.public_price_summary).public_variant_count ?? 0;
-  const documentCount = record.document_count ?? 0;
-  const shortcutClass =
-    'inline-flex min-h-12 flex-1 min-w-[168px] items-center gap-3 rounded-sm border border-border bg-panel px-3 py-2 text-left text-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1';
-
-  return (
-    <nav
-      aria-label="Điều hướng nhanh chi tiết sản phẩm"
-      className="rounded-sm border border-border bg-surface p-2 shadow-[0_1px_2px_rgb(15_23_42_/_0.04)]"
-    >
-      <div className="flex flex-wrap gap-2">
-        <a href="#product-group-main" className={shortcutClass}>
-          <Package className="h-4 w-4 shrink-0 text-primary" />
-          <span>
-            <span className="block font-semibold text-text">Thông tin</span>
-            <span className="block text-xs text-muted-foreground">Tên, danh mục, ảnh</span>
-          </span>
-        </a>
-        <a href="#product-group-content" className={shortcutClass}>
-          <Tag className="h-4 w-4 shrink-0 text-primary" />
-          <span>
-            <span className="block font-semibold text-text">Nội dung</span>
-            <span className="block text-xs text-muted-foreground">Mô tả và SEO</span>
-          </span>
-        </a>
-        <a href="#product-group-display" className={shortcutClass}>
-          <Info className="h-4 w-4 shrink-0 text-primary" />
-          <span>
-            <span className="block font-semibold text-text">Hiển thị</span>
-            <span className="block text-xs text-muted-foreground">Duyệt, xuất bản</span>
-          </span>
-        </a>
-        <a href="#product-group-variants" className={shortcutClass}>
-          <Boxes className="h-4 w-4 shrink-0 text-primary" />
-          <span>
-            <span className="block font-semibold text-text">Biến thể</span>
-            <span className="block text-xs text-muted-foreground">
-              {formatValue(variantCount)} mã sản phẩm
-            </span>
-          </span>
-        </a>
-        <a href="#product-group-documents" className={shortcutClass}>
-          <FileText className="h-4 w-4 shrink-0 text-primary" />
-          <span>
-            <span className="block font-semibold text-text">Tài liệu</span>
-            <span className="block text-xs text-muted-foreground">
-              {formatValue(documentCount)} tài liệu
-            </span>
-          </span>
-        </a>
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border pt-2">
-        <Badge tone={statusTone(record.status)}>{formatStatusLabel(record.status)}</Badge>
-        <Badge tone={statusTone(record.review_status)}>{formatStatusLabel(record.review_status)}</Badge>
-        <Badge tone={statusTone(record.publish_status)}>{formatStatusLabel(record.publish_status)}</Badge>
-        {isDirty ? <Badge tone="warning">Có thay đổi chưa lưu</Badge> : null}
-      </div>
-    </nav>
-  );
-}
-
-function ProductGroupWorkspaceOverview({
-  loading,
-  variantCount,
-  variantDescriptionCount,
-  variantAttributeCount,
-  highlightSpecCount,
-  documentCount
-}: {
-  loading: boolean;
-  variantCount: number;
-  variantDescriptionCount: number;
-  variantAttributeCount: number;
-  highlightSpecCount: number;
-  documentCount: number;
-}) {
-  const countClass =
-    'inline-flex min-h-10 items-center gap-2 rounded-sm border border-border bg-panel px-3 py-2 text-sm text-text';
-  function renderCount(value: number) {
-    return loading ? '...' : formatValue(value);
-  }
-
-  return (
-    <div className="rounded-sm border border-border bg-panel px-4 py-3 shadow-[0_1px_2px_rgb(15_23_42_/_0.04)]">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-text">Tổng quan vùng làm việc</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            Biến thể, mô tả riêng, thông số và tài liệu của nhóm sản phẩm.
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className={countClass}>
-            <Boxes className="h-4 w-4 text-primary" />
-            {renderCount(variantCount)}
-            <span className="text-xs text-muted-foreground">biến thể</span>
-          </span>
-          <span className={countClass}>
-            <Tag className="h-4 w-4 text-primary" />
-            {renderCount(variantDescriptionCount)}
-            <span className="text-xs text-muted-foreground">có mô tả riêng</span>
-          </span>
-          <span className={countClass}>
-            <FileText className="h-4 w-4 text-primary" />
-            {renderCount(variantAttributeCount)}
-            <span className="text-xs text-muted-foreground">thông số</span>
-          </span>
-          <span className={countClass}>
-            <Star className="h-4 w-4 text-amber-600" />
-            {renderCount(highlightSpecCount)}
-            <span className="text-xs text-muted-foreground">nổi bật</span>
-          </span>
-          <span className={countClass}>
-            <Package className="h-4 w-4 text-primary" />
-            {renderCount(documentCount)}
-            <span className="text-xs text-muted-foreground">tài liệu</span>
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function renderProductGroupSections({
   form,
   setForm,
@@ -2191,7 +2107,10 @@ function renderProductGroupSections({
   filteredBrands,
   isCreate,
   canSave,
-  recordId
+  recordId,
+  activeProductSection,
+  displayStatusSection,
+  onRelatedChange
 }: {
   form: Record<string, string>;
   setForm: (value: Record<string, string>) => void;
@@ -2204,6 +2123,9 @@ function renderProductGroupSections({
   isCreate: boolean;
   canSave: boolean;
   recordId: string;
+  activeProductSection: ProductWorkspaceSection;
+  displayStatusSection: ReactNode;
+  onRelatedChange: () => Promise<void>;
 }) {
   const nameId = buildFieldControlId('product-group', 'name');
   const categoryLevel1Id = buildFieldControlId('product-group', 'category_level_1_id');
@@ -2211,11 +2133,13 @@ function renderProductGroupSections({
 
   return (
     <>
-      <SectionCard
-        id="product-group-main"
-        title="Thông tin sản phẩm"
-        description="Chọn danh mục và thương hiệu."
-      >
+      {isCreate || activeProductSection === 'main' ? (
+        <>
+          <SectionCard
+            id="product-group-main"
+            title="Thông tin sản phẩm"
+          >
+        {displayStatusSection}
         <TwoColumnGrid>
           <Field
             label="Tên sản phẩm"
@@ -2273,11 +2197,6 @@ function renderProductGroupSections({
           </Field>
           <Field
             label="Danh mục con"
-            hint={
-              form.category_level_1_id
-                ? 'Chỉ hiển thị danh mục con thuộc danh mục chính đã chọn.'
-                : 'Chọn danh mục chính trước.'
-            }
             htmlFor={categoryId}
             readOnly={!canSave}
             required
@@ -2288,7 +2207,7 @@ function renderProductGroupSections({
               data-product-group-level2-select="true"
               data-field="category_id"
               aria-invalid={Boolean(fieldErrors.category_id)}
-              aria-describedby={buildFieldDescribedBy(categoryId, true, fieldErrors.category_id)}
+              aria-describedby={buildFieldDescribedBy(categoryId, false, fieldErrors.category_id)}
               aria-required="true"
               value={form.category_id}
               disabled={!canSave || !form.category_level_1_id}
@@ -2296,7 +2215,9 @@ function renderProductGroupSections({
                 setForm({ ...form, category_id: event.target.value })
               }
             >
-              <option value="">Chọn danh mục con</option>
+              <option value="">
+                {form.category_level_1_id ? 'Chọn danh mục con' : 'Chọn danh mục chính trước'}
+              </option>
               {filteredLevel2Categories.map((category) => (
                 <option key={String(category.id)} value={String(category.id)}>
                   {formatValue(category.name)}
@@ -2342,20 +2263,24 @@ function renderProductGroupSections({
             />
           </Field>
         </TwoColumnGrid>
-      </SectionCard>
+          </SectionCard>
 
-      {!isCreate && recordId ? (
-        <ProductImageGalleryCard productGroupId={recordId} canEdit={canSave} />
+          {!isCreate && recordId ? (
+            <ProductImageGalleryCard productGroupId={recordId} canEdit={canSave} onSaved={onRelatedChange} />
+          ) : null}
+        </>
       ) : null}
 
-      <DetailsCard
-        id="product-group-content"
-        title="Thông tin bổ sung"
-      >
-        <TwoColumnGrid>
+      {isCreate || activeProductSection === 'content' ? (
+        <>
+          <SectionCard
+            id="product-group-content"
+            title="Nội dung giới thiệu"
+          >
+        <div className="space-y-4">
           <Field label="Mô tả ngắn" readOnly={!canSave}>
             <Textarea
-              className="min-h-28"
+              className="min-h-24"
               value={form.short_description}
               readOnly={!canSave}
               onChange={(event) =>
@@ -2365,7 +2290,7 @@ function renderProductGroupSections({
             </Field>
           <Field label="Mô tả chi tiết" readOnly={!canSave}>
             <Textarea
-              className="min-h-32"
+              className="min-h-48"
               value={form.detailed_description}
               readOnly={!canSave}
               onChange={(event) =>
@@ -2373,15 +2298,15 @@ function renderProductGroupSections({
               }
             />
           </Field>
-        </TwoColumnGrid>
-      </DetailsCard>
+        </div>
+          </SectionCard>
 
-      <DetailsCard
-        id="product-group-seo"
-        title="Mã và SEO nâng cao"
-        defaultOpen={!isCreate && hasAnyValue(form, ['slug', 'seo_title', 'seo_description', 'seo_og_image_file_id'])}
-        dataAttrs={{ 'data-advanced-seo': 'true' }}
-      >
+          <DetailsCard
+            id="product-group-seo"
+            title="Mã và SEO nâng cao"
+            defaultOpen={!isCreate && hasAnyValue(form, ['slug', 'seo_title', 'seo_description', 'seo_og_image_file_id'])}
+            dataAttrs={{ 'data-advanced-seo': 'true' }}
+          >
         <TwoColumnGrid>
           <Field label="Slug" readOnly={!canSave}>
             <Input
@@ -2420,7 +2345,9 @@ function renderProductGroupSections({
             />
           </Field>
         </TwoColumnGrid>
-      </DetailsCard>
+          </DetailsCard>
+        </>
+      ) : null}
 
     </>
   );
@@ -2430,7 +2357,6 @@ function renderProductVariantSections({
   form,
   setForm,
   fieldErrors,
-  refs,
   isCreate,
   canSave
 }: {
@@ -2454,16 +2380,11 @@ function renderProductVariantSections({
     <>
       <SectionCard
         id="product-variant-main"
-        title={isCreate ? 'Thêm biến thể thủ công' : 'Thông tin biến thể'}
-        description={
-          isCreate
-            ? 'Dùng khi cần tạo biến thể riêng.'
-            : 'Dùng để sửa nhanh biến thể.'
-        }
+        title={isCreate ? 'Thêm biến thể / SKU' : 'Thông tin biến thể / SKU'}
       >
         <TwoColumnGrid>
           <Field
-            label="Tên biến thể"
+            label="Tên biến thể / SKU"
             htmlFor={variantNameId}
             readOnly={!canSave}
             required
@@ -2487,38 +2408,27 @@ function renderProductVariantSections({
             />
           </Field>
           <Field
-            label="Thuộc sản phẩm"
+            label="Sản phẩm dùng chung"
             htmlFor={productGroupId}
             readOnly={!canSave}
             required
             error={fieldErrors.product_group_id}
           >
-            <Select
+            <ProductPicker
               id={productGroupId}
-              data-product-variant-group-select="true"
-              data-field="product_group_id"
-              aria-invalid={Boolean(fieldErrors.product_group_id)}
-              aria-describedby={buildFieldDescribedBy(
+              value={form.product_group_id}
+              dataField="product_group_id"
+              disabled={!canSave}
+              invalid={Boolean(fieldErrors.product_group_id)}
+              describedBy={buildFieldDescribedBy(
                 productGroupId,
                 false,
                 fieldErrors.product_group_id
               )}
-              aria-required="true"
-              value={form.product_group_id}
-              disabled={!canSave}
-              onChange={(event) =>
-                setForm({ ...form, product_group_id: event.target.value })
-              }
-            >
-              <option value="">Chọn sản phẩm cha</option>
-              {refs.productGroups.map((group) => (
-                <option key={String(group.id)} value={String(group.id)}>
-                  {formatProductGroupOption(group)}
-                </option>
-              ))}
-            </Select>
+              onChange={(nextValue) => setForm({ ...form, product_group_id: nextValue })}
+            />
           </Field>
-          <Field label="Cách báo giá" readOnly={!canSave}>
+          <Field label="Cách hiển thị giá" readOnly={!canSave}>
             <Select
               data-product-variant-price-mode-select="true"
               value={form.public_price_mode}
@@ -2527,13 +2437,12 @@ function renderProductVariantSections({
                 setForm({ ...form, public_price_mode: event.target.value })
               }
             >
-              <option value="contact_for_quote">Liên hệ để báo giá</option>
-              <option value="public_price">Có giá công khai</option>
+              <option value="contact_for_quote">Yêu cầu báo giá</option>
+              <option value="public_price">Hiển thị giá công khai</option>
             </Select>
           </Field>
           <Field
-            label="Giá công khai"
-            hint="Chỉ dùng khi nhánh giá là Có giá công khai."
+            label="Giá công khai (đồng)"
             htmlFor={publicPriceAmountId}
             readOnly={!canSave}
             error={fieldErrors.public_price_amount}
@@ -2542,10 +2451,14 @@ function renderProductVariantSections({
               id={publicPriceAmountId}
               data-field="public_price_amount"
               type="number"
+              inputMode="numeric"
+              min={1}
+              max={2147483647}
+              step={1}
               aria-invalid={Boolean(fieldErrors.public_price_amount)}
               aria-describedby={buildFieldDescribedBy(
                 publicPriceAmountId,
-                true,
+                false,
                 fieldErrors.public_price_amount
               )}
               value={form.public_price_mode === 'public_price' ? form.public_price_amount : ''}
@@ -2555,11 +2468,16 @@ function renderProductVariantSections({
                 setForm({ ...form, public_price_amount: event.target.value })
               }
             />
+            {form.public_price_mode === 'public_price' && canPreviewPublicPrice(form.public_price_amount) ? (
+              <p className="mt-1 text-sm font-semibold text-primaryStrong">
+                Xem trước: {formatCurrency(form.public_price_amount)}
+              </p>
+            ) : null}
           </Field>
           <div className="md:col-span-2">
             <Field
               label="Ảnh biến thể"
-              hint="Dùng cho mã sản phẩm này. Nếu để trống, website dùng ảnh của sản phẩm cha."
+              hint="Chỉ chọn khi biến thể có ảnh khác sản phẩm dùng chung."
               readOnly={!canSave}
             >
               <FileReferencePicker
@@ -2575,7 +2493,7 @@ function renderProductVariantSections({
           <div className="md:col-span-2">
             <Field
               label="Mô tả chi tiết riêng"
-              hint="Dùng cho mã sản phẩm này. Nếu để trống, website dùng mô tả chi tiết của sản phẩm cha."
+              hint="Để trống nếu biến thể dùng chung mô tả của sản phẩm."
               htmlFor={detailedDescriptionId}
               readOnly={!canSave}
             >
@@ -2601,11 +2519,11 @@ function renderProductVariantSections({
         <TwoColumnGrid>
           <Field
             label="SKU"
-            hint="SKU sẽ được hệ thống tạo tự động nếu để trống."
             readOnly={!canSave}
           >
             <Input
               value={form.sku}
+              placeholder="Tự tạo nếu để trống"
               readOnly={!canSave}
               onChange={(event) => setForm({ ...form, sku: event.target.value })}
             />
@@ -2636,6 +2554,7 @@ function renderProductVariantSections({
 
 function DisplayStatusSection({
   id,
+  inline = false,
   kind,
   form,
   canAct,
@@ -2645,6 +2564,7 @@ function DisplayStatusSection({
   onAction
 }: {
   id?: string;
+  inline?: boolean;
   kind: BusinessKind;
   form: Record<string, string>;
   canAct: boolean;
@@ -2658,19 +2578,31 @@ function DisplayStatusSection({
     status.actions.includes('publish') ? getDisplayPublishBlockers(kind, form) : [];
   const actionDisabled = pendingAction !== null || !canAct || hasUnsavedChanges;
 
-  return (
-    <SectionCard id={id} title="Trạng thái hiển thị">
-      <div className="space-y-3" data-display-status-card="true">
+  const content = (
+    <div className="space-y-3" data-display-status-card="true">
         <div className="flex flex-wrap gap-2" data-display-status-badge="true">
-          <Badge tone={statusTone(form.status)} className="h-7 px-3 text-xs">
-            Sử dụng: {formatStatusLabel(form.status)}
-          </Badge>
-          <Badge tone={statusTone(form.review_status)} className="h-7 px-3 text-xs">
-            Duyệt: {formatStatusLabel(form.review_status)}
-          </Badge>
-          <Badge tone={status.tone} className="h-7 px-3 text-xs">
-            Website: {status.label}
-          </Badge>
+          {inline ? (
+            <>
+              <Badge tone={status.tone} className="h-7 px-3 text-xs">
+                Website: {status.label}
+              </Badge>
+              <p className="self-center text-xs leading-5 text-muted-foreground">
+                Sử dụng: {formatStatusLabel(form.status)} · Duyệt: {formatStatusLabel(form.review_status)}
+              </p>
+            </>
+          ) : (
+            <>
+              <Badge tone={statusTone(form.status)} className="h-7 px-3 text-xs">
+                Sử dụng: {formatStatusLabel(form.status)}
+              </Badge>
+              <Badge tone={statusTone(form.review_status)} className="h-7 px-3 text-xs">
+                Duyệt: {formatStatusLabel(form.review_status)}
+              </Badge>
+              <Badge tone={status.tone} className="h-7 px-3 text-xs">
+                Website: {status.label}
+              </Badge>
+            </>
+          )}
         </div>
         <p className="text-sm text-muted-foreground">{status.description}</p>
 
@@ -2712,7 +2644,17 @@ function DisplayStatusSection({
             ))}
           </div>
         ) : null}
-      </div>
+    </div>
+  );
+
+  return inline ? (
+    <div id={id} className="mb-5 scroll-mt-24 border-b border-border pb-5">
+      <h3 className="mb-3 text-sm font-semibold text-text">Hiển thị website</h3>
+      {content}
+    </div>
+  ) : (
+    <SectionCard id={id} title="Trạng thái hiển thị">
+      {content}
     </SectionCard>
   );
 }
@@ -2800,7 +2742,7 @@ function displayStatusActionLabel(action: DisplayStatusAction) {
     case 'unpublish':
       return 'Ngừng hiển thị';
     case 'archive-display':
-      return 'Lưu trữ';
+      return 'Lưu trữ hiển thị';
     case 'restore-display':
       return 'Khôi phục';
   }
@@ -2947,7 +2889,7 @@ function renderTechnicalDocumentSections({
             </Select>
           </Field>
           <Field
-            label="Biến thể sản phẩm"
+            label="Biến thể / SKU"
             hint="Tùy chọn. Chỉ hiển thị các biến thể thuộc sản phẩm đã chọn."
             readOnly={!canSave}
           >
@@ -2962,7 +2904,7 @@ function renderTechnicalDocumentSections({
               <option value="">Chưa chọn biến thể</option>
               {technicalDocumentVariants.map((variant) => (
                 <option key={String(variant.id)} value={String(variant.id)}>
-                  {formatValue(variant.variant_name)}
+                  {formatVariantOption(variant)}
                 </option>
               ))}
             </Select>
@@ -3088,10 +3030,16 @@ type VariantWorkspaceModalState =
   | { mode: 'edit'; variantId: string }
   | null;
 
+type VariantDetailLoadState = 'loading' | 'ready' | 'error';
+
 function ProductGroupWorkspace({
-  productGroup
+  productGroup,
+  activeSection,
+  onRelatedChange
 }: {
   productGroup: RecordMap;
+  activeSection: ProductWorkspaceSection;
+  onRelatedChange: () => Promise<void>;
 }) {
   const productGroupId = String(productGroup.id ?? '');
   const permissions = usePermissions();
@@ -3119,31 +3067,15 @@ function ProductGroupWorkspace({
     emptyTechnicalDocumentDraft()
   );
   const [variantModal, setVariantModal] = useState<VariantWorkspaceModalState>(null);
+  const [variantDetailStates, setVariantDetailStates] = useState<
+    Record<string, VariantDetailLoadState>
+  >({});
   const [confirmDiscardVariantChanges, setConfirmDiscardVariantChanges] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState('');
+  const workspaceMutationInFlightRef = useRef(false);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState('');
-  const variantDescriptionCount = useMemo(
-    () => variants.filter((variant) => String(variant.detailed_description ?? '').trim()).length,
-    [variants]
-  );
-  const variantAttributeCount = useMemo(
-    () =>
-      Object.values(attributes).reduce(
-        (total, rows) => total + rows.length,
-        0
-      ),
-    [attributes]
-  );
-  const highlightSpecCount = useMemo(
-    () =>
-      Object.values(highlightSpecsByVariantId).reduce(
-        (total, rows) => total + rows.length,
-        0
-      ),
-    [highlightSpecsByVariantId]
-  );
   const activeVariant =
     variantModal?.mode === 'edit'
       ? variants.find((variant) => String(variant.id ?? '') === variantModal.variantId) ?? null
@@ -3187,6 +3119,11 @@ function ProductGroupWorkspace({
     setDocuments(next.documents);
     setAttributes(next.attributes);
     setHighlightSpecsByVariantId(next.highlightSpecs);
+    setVariantDetailStates(
+      Object.fromEntries(
+        Object.keys(next.attributes).map((variantId) => [variantId, 'ready' as const])
+      )
+    );
     setVariantDrafts(
       Object.fromEntries(
         next.variants.map((variant) => [
@@ -3219,6 +3156,17 @@ function ProductGroupWorkspace({
 
   async function reloadWorkspace(successMessage?: string) {
     const next = await loadProductGroupWorkspace(productGroupId);
+    if (
+      activeVariantId &&
+      next.variants.some((variant) => String(variant.id ?? '') === activeVariantId)
+    ) {
+      const detail = await loadProductVariantWorkspaceDetails(
+        productGroupId,
+        activeVariantId
+      );
+      next.attributes[activeVariantId] = detail.attributes;
+      next.highlightSpecs[activeVariantId] = detail.highlightSpecs;
+    }
     applyWorkspaceState(next);
     if (successMessage) setMessage(successMessage);
   }
@@ -3229,10 +3177,48 @@ function ProductGroupWorkspace({
     setVariantModal({ mode: 'create' });
   }
 
-  function openEditVariantModal(variantId: string) {
+  async function openEditVariantModal(variantId: string) {
     setError(null);
     setMessage('');
     setVariantModal({ mode: 'edit', variantId });
+    if (
+      variantDetailStates[variantId] === 'ready' ||
+      variantDetailStates[variantId] === 'loading'
+    ) {
+      return;
+    }
+
+    setVariantDetailStates((current) => ({ ...current, [variantId]: 'loading' }));
+    try {
+      const detail = await loadProductVariantWorkspaceDetails(productGroupId, variantId);
+      setAttributes((current) => ({ ...current, [variantId]: detail.attributes }));
+      setHighlightSpecsByVariantId((current) => ({
+        ...current,
+        [variantId]: detail.highlightSpecs
+      }));
+      setAttributeDrafts((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          detail.attributes.map((attribute) => [
+            String(attribute.id),
+            variantAttributeDraftFromRecord(attribute)
+          ])
+        )
+      }));
+      setHighlightDrafts((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          detail.highlightSpecs.map((highlightSpec) => [
+            String(highlightSpec.id),
+            productHighlightDraftFromRecord(highlightSpec)
+          ])
+        )
+      }));
+      setVariantDetailStates((current) => ({ ...current, [variantId]: 'ready' }));
+    } catch (err) {
+      setError(err);
+      setVariantDetailStates((current) => ({ ...current, [variantId]: 'error' }));
+    }
   }
 
   function closeVariantModal() {
@@ -3335,22 +3321,31 @@ function ProductGroupWorkspace({
     action: () => Promise<void>,
     successMessage: string
   ): Promise<boolean> {
+    if (workspaceMutationInFlightRef.current) {
+      return false;
+    }
+    workspaceMutationInFlightRef.current = true;
     setSavingKey(key);
     setError(null);
     setMessage('');
     try {
       await action();
       await reloadWorkspace(successMessage);
+      await onRelatedChange();
       return true;
     } catch (err) {
       setError(err);
       return false;
     } finally {
+      workspaceMutationInFlightRef.current = false;
       setSavingKey('');
     }
   }
 
   async function createVariant() {
+    if (workspaceMutationInFlightRef.current) {
+      return;
+    }
     const validationError = validateVariantDraft(newVariant);
     if (validationError) {
       setError(new Error(validationError));
@@ -3364,6 +3359,7 @@ function ProductGroupWorkspace({
       return;
     }
 
+    workspaceMutationInFlightRef.current = true;
     setSavingKey('variant:create');
     setError(null);
     setMessage('');
@@ -3387,6 +3383,7 @@ function ProductGroupWorkspace({
       );
 
       await reloadWorkspace();
+      await onRelatedChange();
       if (failedAttributes.length > 0) {
         setError(
           new Error(
@@ -3407,12 +3404,16 @@ function ProductGroupWorkspace({
     } catch (err) {
       setError(err);
     } finally {
+      workspaceMutationInFlightRef.current = false;
       setSavingKey('');
     }
   }
 
   async function updateVariant(variantId: string) {
     const draft = variantDrafts[variantId];
+    const currentVariant = variants.find(
+      (variant) => String(variant.id ?? '') === variantId
+    );
     const validationError = validateVariantDraft(draft);
     if (validationError) {
       setError(new Error(validationError));
@@ -3424,7 +3425,10 @@ function ProductGroupWorkspace({
       async () => {
         await apiClient.put<unknown>(
           byId(endpoints.songThanh.productVariants, variantId),
-          buildVariantDraftPayload(productGroupId, draft)
+          {
+            ...buildVariantDraftPayload(productGroupId, draft),
+            ...optimisticVersionPayload('productVariant', currentVariant)
+          }
         );
       },
       'Đã cập nhật biến thể.'
@@ -3432,12 +3436,15 @@ function ProductGroupWorkspace({
   }
 
   async function archiveVariant(variantId: string) {
+    const currentVariant = variants.find(
+      (variant) => String(variant.id ?? '') === variantId
+    );
     const archived = await runWorkspaceAction(
       `variant:archive:${variantId}`,
       async () => {
         await apiClient.post<unknown>(
           `${byId(endpoints.songThanh.productVariants, variantId)}/archive`,
-          {}
+          optimisticVersionPayload('productVariant', currentVariant)
         );
       },
       'Đã lưu trữ biến thể.'
@@ -3507,7 +3514,7 @@ function ProductGroupWorkspace({
           {}
         );
       },
-      'Đã xóa thông số biến thể.'
+      'Đã lưu trữ thông số biến thể.'
     );
   }
 
@@ -3551,6 +3558,10 @@ function ProductGroupWorkspace({
   }
 
   async function applyHighlightSuggestions(variantId: string) {
+    if (workspaceMutationInFlightRef.current) {
+      return;
+    }
+    workspaceMutationInFlightRef.current = true;
     const actionKey = `highlight:suggest:${variantId}`;
     setSavingKey(actionKey);
     setError(null);
@@ -3583,12 +3594,14 @@ function ProductGroupWorkspace({
           sortOrder += 1;
         }
         await reloadWorkspace('Đã áp dụng gợi ý thông số nổi bật.');
+        await onRelatedChange();
       } catch (err) {
         setError(err);
       }
     } catch (err) {
       setError(err);
     } finally {
+      workspaceMutationInFlightRef.current = false;
       setSavingKey('');
     }
   }
@@ -3694,64 +3707,53 @@ function ProductGroupWorkspace({
   }
 
   async function archiveDocument(documentId: string) {
+    const currentDocument = documents.find(
+      (document) => String(document.id ?? '') === documentId
+    );
     await runWorkspaceAction(
       `document:archive:${documentId}`,
       async () => {
         await apiClient.post<unknown>(
           `${byId(endpoints.songThanh.technicalDocuments, documentId)}/archive`,
-          {}
+          optimisticVersionPayload('technicalDocument', currentDocument)
         );
       },
-      'Đã xóa tài liệu khỏi sản phẩm.'
+      'Đã lưu trữ tài liệu kỹ thuật.'
     );
   }
 
   return (
     <div className="space-y-4" data-product-group-workspace="true">
-      <ProductGroupWorkspaceOverview
-        loading={loading}
-        variantCount={variants.length}
-        variantDescriptionCount={variantDescriptionCount}
-        variantAttributeCount={variantAttributeCount}
-        highlightSpecCount={highlightSpecCount}
-        documentCount={documents.length}
-      />
-
       <FormFeedback successMessage={message} error={error} context="module-action" />
 
-      <SectionCard
-        id="product-group-variants"
-        title="Biến thể trong sản phẩm"
-        description="Nhấn vào từng mã để xem hoặc sửa trong popup, không mở rộng trực tiếp trên trang."
-      >
-        {loading ? (
-          <div className="rounded-sm border border-border bg-muted/40 px-3 py-4 text-sm text-muted-foreground">
-            Đang tải biến thể và thông số.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {canCreateVariant ? (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-blue-200 bg-blue-50/60 px-4 py-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-text">Thêm biến thể mới</div>
-                  <div className="mt-0.5 text-xs text-blue-900/80">
-                    Mở form riêng để nhập mã, ảnh, giá và thông số ban đầu.
-                  </div>
-                </div>
-                <Button type="button" onClick={openCreateVariantModal}>
-                  <Plus className="h-4 w-4" />
-                  Thêm biến thể
-                </Button>
+      {activeSection === 'variants' ? (
+        <>
+          <section id="product-group-variants" className="rounded-sm border border-border bg-panel">
+            <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <div>
+                <h2 className="text-base font-semibold text-text">Biến thể / SKU</h2>
+                {!loading ? <p className="mt-0.5 text-sm text-muted-foreground">{variants.length} cấu hình</p> : null}
               </div>
-            ) : null}
-
-            {variants.length === 0 ? (
-              <EmptyState
-                title="Chưa có biến thể"
-                description="Thêm biến thể cho sản phẩm."
-              />
+              {canCreateVariant ? (
+                <Button type="button" size="sm" onClick={openCreateVariantModal}>
+                  <Plus className="h-4 w-4" />
+                  Thêm biến thể / SKU
+                </Button>
+              ) : null}
+            </div>
+            {loading ? (
+              <div className="px-4 py-6 text-sm text-muted-foreground" role="status">
+                Đang tải biến thể và thông số.
+              </div>
+            ) : variants.length === 0 ? (
+              <div className="p-4 sm:p-5">
+                <EmptyState
+                  title="Chưa có biến thể / SKU"
+                  description="Tạo ít nhất một cấu hình bán được cho sản phẩm."
+                />
+              </div>
             ) : (
-              <div className="grid gap-2">
+              <div className="divide-y divide-border">
                 {variants.map((variant) => {
                   const variantId = String(variant.id);
                   const draft =
@@ -3761,21 +3763,19 @@ function ProductGroupWorkspace({
                       key={variantId}
                       variant={variant}
                       draft={draft}
-                      attributeCount={(attributes[variantId] ?? []).length}
-                      highlightSpecs={highlightSpecsByVariantId[variantId] ?? []}
-                      onOpen={() => openEditVariantModal(variantId)}
+                      attributeCount={recordCount(variant.attribute_count)}
+                      highlightCount={recordCount(variant.highlight_spec_count)}
+                      onOpen={() => void openEditVariantModal(variantId)}
                     />
                   );
                 })}
               </div>
             )}
-          </div>
-        )}
-      </SectionCard>
+          </section>
 
-      <Modal
+          <Modal
         open={variantModal?.mode === 'create'}
-        title="Thêm biến thể"
+        title="Thêm biến thể / SKU"
         onClose={closeVariantModal}
         panelClassName="max-w-[960px]"
         bodyClassName="bg-[#f7f8fb] p-0"
@@ -3791,9 +3791,9 @@ function ProductGroupWorkspace({
           onCreate={createVariant}
           onClose={closeVariantModal}
         />
-      </Modal>
+          </Modal>
 
-      <Modal
+          <Modal
         open={variantModal?.mode === 'edit' && Boolean(activeVariant && activeVariantDraft)}
         title={
           activeVariant
@@ -3804,7 +3804,25 @@ function ProductGroupWorkspace({
         panelClassName="max-w-[960px]"
         bodyClassName="bg-[#f7f8fb] p-0"
       >
-        {activeVariant && activeVariantDraft ? (
+        {variantModal?.mode === 'edit' &&
+        variantDetailStates[variantModal.variantId] === 'loading' ? (
+          <div className="p-6 text-sm text-muted-foreground" role="status">
+            Đang tải thông số và nội dung nổi bật của biến thể.
+          </div>
+        ) : variantModal?.mode === 'edit' &&
+          variantDetailStates[variantModal.variantId] === 'error' ? (
+          <div className="space-y-3 p-6">
+            <ErrorState error={error} context="module-load" />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void openEditVariantModal(variantModal.variantId)}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              Tải lại biến thể
+            </Button>
+          </div>
+        ) : activeVariant && activeVariantDraft ? (
           <VariantEditorPanel
             variant={activeVariant}
             draft={activeVariantDraft}
@@ -3872,29 +3890,33 @@ function ProductGroupWorkspace({
             onClose={closeVariantModal}
           />
         ) : null}
-      </Modal>
+          </Modal>
 
-      <ConfirmDialog
-        open={confirmDiscardVariantChanges}
-        title="Bỏ thay đổi biến thể?"
-        description="Các nội dung chưa lưu trong biểu mẫu biến thể, thông số và thông số nổi bật sẽ bị bỏ."
-        confirmLabel="Bỏ thay đổi"
-        tone="warning"
-        onClose={() => setConfirmDiscardVariantChanges(false)}
-        onConfirm={discardVariantModalChanges}
-      />
+          <ConfirmDialog
+            open={confirmDiscardVariantChanges}
+            title="Bỏ thay đổi biến thể?"
+            description="Các nội dung chưa lưu trong biểu mẫu biến thể, thông số và thông số nổi bật sẽ bị bỏ."
+            confirmLabel="Bỏ thay đổi"
+            tone="warning"
+            onClose={() => setConfirmDiscardVariantChanges(false)}
+            onConfirm={discardVariantModalChanges}
+          />
+        </>
+      ) : null}
 
-      <TechnicalDocumentWorkspace
-        variants={variants}
-        documents={documents}
-        draft={newDocument}
-        canCreate={canCreateDocument}
-        canArchive={canArchiveDocument}
-        savingKey={savingKey}
-        onDraftChange={setNewDocument}
-        onCreate={createDocument}
-        onArchive={archiveDocument}
-      />
+      {activeSection === 'documents' ? (
+        <TechnicalDocumentWorkspace
+          variants={variants}
+          documents={documents}
+          draft={newDocument}
+          canCreate={canCreateDocument}
+          canArchive={canArchiveDocument}
+          savingKey={savingKey}
+          onDraftChange={setNewDocument}
+          onCreate={createDocument}
+          onArchive={archiveDocument}
+        />
+      ) : null}
     </div>
   );
 }
@@ -3934,9 +3956,9 @@ function VariantCreatePanel({
             <Plus className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-text">Tạo mã sản phẩm dưới nhóm hiện tại</div>
+            <div className="text-sm font-semibold text-text">Tạo biến thể / SKU cho sản phẩm</div>
             <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
-              Nhập thông tin riêng của biến thể. Nhóm sản phẩm cha, review và publish vẫn giữ nguyên.
+              Đây là cấu hình bán được cụ thể; tên sản phẩm, danh mục và nội dung chung vẫn được giữ nguyên.
             </p>
           </div>
         </div>
@@ -3981,78 +4003,45 @@ function VariantSummaryCard({
   variant,
   draft,
   attributeCount,
-  highlightSpecs,
+  highlightCount,
   onOpen
 }: {
   variant: RecordMap;
   draft: ProductVariantDraft;
   attributeCount: number;
-  highlightSpecs: RecordMap[];
+  highlightCount: number;
   onOpen: () => void;
 }) {
   const hasVariantDescription = Boolean(draft.detailed_description.trim());
   const hasVariantImage = Boolean(draft.image_file_id.trim());
-  const highlightPreview = highlightSpecs
-    .slice(0, 3)
-    .map((item) => String(item.display_label ?? '').trim())
-    .filter(Boolean);
 
   return (
     <button
       type="button"
       data-variant-workspace-trigger="true"
-      aria-label={`Xem hoặc sửa biến thể ${formatValue(variant.variant_name)}`}
-      className="group flex w-full cursor-pointer items-start gap-3 rounded-sm border border-border bg-panel px-4 py-3 text-left shadow-[0_1px_2px_rgb(15_23_42_/_0.04)] transition-colors hover:border-blue-200 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+      aria-label={`Xem hoặc sửa biến thể ${variantAccessibleIdentity(variant)}`}
+      className="group flex w-full cursor-pointer items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-primary sm:items-center sm:px-5"
       onClick={onOpen}
     >
-      <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-blue-100 bg-blue-50 text-primary">
-        <Boxes className="h-4 w-4" />
-      </span>
       <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold text-text">{formatValue(variant.variant_name)}</span>
-          <Badge tone={hasVariantDescription ? 'info' : 'default'}>
-            {hasVariantDescription ? 'Có mô tả riêng' : 'Dùng mô tả nhóm'}
-          </Badge>
-          <Badge tone={hasVariantImage ? 'info' : 'default'}>
-            {hasVariantImage ? 'Có ảnh riêng' : 'Dùng ảnh nhóm'}
-          </Badge>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold leading-5 text-text sm:text-base">{formatValue(variant.variant_name)}</span>
           <Badge tone={statusTone(variant.status)}>{formatStatusLabel(variant.status)}</Badge>
-          <Badge tone={statusTone(variant.public_price_mode)}>
-            {formatPriceMode(variant.public_price_mode)}
-          </Badge>
-          <Badge tone="default">{attributeCount} thông số</Badge>
-          <Badge tone={highlightSpecs.length > 0 ? 'success' : 'default'}>
-            {highlightSpecs.length} nổi bật
-          </Badge>
         </span>
-        <span className="mt-1 block text-xs text-muted-foreground">
+        <span className="mt-1 block text-sm text-muted-foreground">
           {variantCodeSummary(variant) ?? 'Chưa có mã model hoặc mã ngoài'} ·{' '}
           {variant.public_price_mode === 'public_price'
-            ? formatCurrency(variant.public_price_amount)
-            : 'Liên hệ để báo giá'}
+              ? formatCurrency(variant.public_price_amount)
+              : 'Liên hệ để báo giá'}
         </span>
-        {highlightPreview.length > 0 ? (
-          <span className="mt-2 flex flex-wrap gap-1.5">
-            {highlightPreview.map((label) => (
-              <span
-                className="max-w-[180px] truncate rounded-sm border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800"
-                key={label}
-              >
-                {label}
-              </span>
-            ))}
-            {highlightSpecs.length > highlightPreview.length ? (
-              <span className="rounded-sm border border-border bg-surface px-2 py-1 text-[11px] font-medium text-muted-foreground">
-                +{highlightSpecs.length - highlightPreview.length}
-              </span>
-            ) : null}
-          </span>
-        ) : null}
+        <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+          <span>{attributeCount} thông số</span>
+          <span>{highlightCount} nổi bật</span>
+          {hasVariantImage ? <span>Ảnh riêng</span> : null}
+          {hasVariantDescription ? <span>Mô tả riêng</span> : null}
+        </span>
       </span>
-      <span className="ml-auto inline-flex h-9 shrink-0 items-center gap-1 rounded-sm border border-border bg-surface px-2 text-xs font-medium text-primary transition-colors group-hover:border-blue-200 group-hover:bg-panel sm:px-3">
-        <Eye className="h-4 w-4" />
-        <span className="hidden sm:inline">Xem / sửa</span>
+      <span aria-hidden="true" className="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors group-hover:bg-primary/10 group-hover:text-primary sm:mt-0">
         <ChevronRight className="h-4 w-4" />
       </span>
     </button>
@@ -4090,82 +4079,6 @@ function VariantModalSection({
       </div>
       {children}
     </section>
-  );
-}
-
-function VariantSnapshotRail({
-  variant,
-  draft,
-  attributeCount,
-  hasVariantDescription,
-  hasVariantImage
-}: {
-  variant: RecordMap;
-  draft: ProductVariantDraft;
-  attributeCount: number;
-  hasVariantDescription: boolean;
-  hasVariantImage: boolean;
-}) {
-  const codeSummary = variantCodeSummary(variant) ?? 'Chưa có mã model hoặc mã ngoài';
-  const priceSummary =
-    draft.public_price_mode === 'public_price' && draft.public_price_amount
-      ? formatCurrency(draft.public_price_amount)
-      : 'Liên hệ để báo giá';
-
-  return (
-    <section className="rounded-md border border-border bg-panel p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Tổng quan
-          </div>
-          <h3 className="mt-1 text-sm font-semibold text-text">Dữ liệu hiển thị</h3>
-        </div>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-primary">
-          <Info className="h-4 w-4" />
-        </span>
-      </div>
-
-      <dl className="mt-4 space-y-3 text-sm">
-        <VariantSnapshotRow label="Mã" value={codeSummary} mono />
-        <VariantSnapshotRow label="Giá" value={priceSummary} />
-        <VariantSnapshotRow label="SKU" value={draft.sku || 'Để trống'} mono />
-        <VariantSnapshotRow label="Thông số" value={`${attributeCount} mục`} />
-      </dl>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Badge tone={hasVariantDescription ? 'info' : 'default'}>
-          {hasVariantDescription ? 'Có mô tả riêng' : 'Dùng mô tả nhóm'}
-        </Badge>
-        <Badge tone={hasVariantImage ? 'info' : 'default'}>
-          {hasVariantImage ? 'Có ảnh riêng' : 'Dùng ảnh nhóm'}
-        </Badge>
-      </div>
-    </section>
-  );
-}
-
-function VariantSnapshotRow({
-  label,
-  value,
-  mono = false
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-3 border-b border-border/80 pb-3 last:border-b-0 last:pb-0">
-      <dt className="shrink-0 text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          'min-w-0 break-words text-right text-xs font-medium text-text',
-          mono ? 'font-mono' : null
-        )}
-      >
-        {value}
-      </dd>
-    </div>
   );
 }
 
@@ -4235,8 +4148,6 @@ function VariantEditorPanel({
   onClose: () => void;
 }) {
   const variantId = String(variant.id);
-  const hasVariantDescription = Boolean(draft.detailed_description.trim());
-  const hasVariantImage = Boolean(draft.image_file_id.trim());
 
   return (
     <div data-variant-editor-modal="true">
@@ -4280,14 +4191,6 @@ function VariantEditorPanel({
       </div>
 
       <div className="space-y-4 px-5 py-5">
-        <VariantSnapshotRail
-          variant={variant}
-          draft={draft}
-          attributeCount={attributes.length}
-          hasVariantDescription={hasVariantDescription}
-          hasVariantImage={hasVariantImage}
-        />
-
         <VariantModalSection
           eyebrow="Nội dung biến thể"
           title="Thông tin chính"
@@ -4712,9 +4615,10 @@ function VariantBasicFields({
   draft: ProductVariantDraft;
   onDraftChange: (draft: ProductVariantDraft) => void;
 }) {
+  const publicPriceId = useId();
   return (
     <TwoColumnGrid>
-      <Field label="Tên biến thể">
+      <Field label="Tên biến thể / SKU">
         <Input
           value={draft.variant_name}
           onChange={(event) =>
@@ -4725,7 +4629,7 @@ function VariantBasicFields({
       <div className="md:col-span-2">
         <Field
           label="Ảnh biến thể"
-          hint="Ảnh riêng cho mã sản phẩm này. Nếu để trống, website dùng ảnh của sản phẩm cha."
+          hint="Chỉ chọn khi biến thể có ảnh khác sản phẩm dùng chung."
         >
           <FileReferencePicker
             value={draft.image_file_id}
@@ -4741,7 +4645,7 @@ function VariantBasicFields({
       <div className="md:col-span-2">
         <Field
           label="Mô tả chi tiết riêng"
-          hint="Nội dung này chỉ áp dụng cho mã sản phẩm/biến thể đang sửa."
+          hint="Để trống nếu biến thể dùng chung mô tả của sản phẩm."
         >
           <Textarea
             className="min-h-28"
@@ -4755,7 +4659,7 @@ function VariantBasicFields({
           />
         </Field>
       </div>
-      <Field label="Nhánh giá">
+      <Field label="Cách hiển thị giá">
         <Select
           value={draft.public_price_mode}
           onChange={(event) =>
@@ -4769,23 +4673,35 @@ function VariantBasicFields({
             })
           }
         >
-          <option value="contact_for_quote">Liên hệ để báo giá</option>
-          <option value="public_price">Có giá công khai</option>
+          <option value="contact_for_quote">Yêu cầu báo giá</option>
+          <option value="public_price">Hiển thị giá công khai</option>
         </Select>
       </Field>
-      <Field label="Giá công khai">
-        <Input
-          type="number"
-          value={
-            draft.public_price_mode === 'public_price'
-              ? draft.public_price_amount
-              : ''
-          }
-          disabled={draft.public_price_mode !== 'public_price'}
-          onChange={(event) =>
-            onDraftChange({ ...draft, public_price_amount: event.target.value })
-          }
-        />
+      <Field label="Giá công khai (đồng)" htmlFor={publicPriceId}>
+        <div>
+          <Input
+            id={publicPriceId}
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={2147483647}
+            step={1}
+            value={
+              draft.public_price_mode === 'public_price'
+                ? draft.public_price_amount
+                : ''
+            }
+            disabled={draft.public_price_mode !== 'public_price'}
+            onChange={(event) =>
+              onDraftChange({ ...draft, public_price_amount: event.target.value })
+            }
+          />
+          {draft.public_price_mode === 'public_price' && canPreviewPublicPrice(draft.public_price_amount) ? (
+            <p className="mt-1 text-sm font-semibold text-primaryStrong">
+              Xem trước: {formatCurrency(draft.public_price_amount)}
+            </p>
+          ) : null}
+        </div>
       </Field>
       <Field label="SKU">
         <Input
@@ -4825,8 +4741,8 @@ function VariantBasicFields({
 
 function VariantReadonlyFields({ draft }: { draft: ProductVariantDraft }) {
   const rows: Array<[string, string, boolean?]> = [
-    ['Tên biến thể', draft.variant_name],
-    ['Ảnh biến thể', draft.image_file_id || 'Dùng ảnh nhóm sản phẩm', true],
+    ['Tên biến thể / SKU', draft.variant_name],
+    ['Ảnh biến thể', draft.image_file_id || 'Dùng ảnh sản phẩm', true],
     ['Nhánh giá', formatPriceMode(draft.public_price_mode)],
     [
       'Giá công khai',
@@ -5068,25 +4984,37 @@ function TechnicalDocumentWorkspace({
   onCreate: () => void;
   onArchive: (documentId: string) => void;
 }) {
+  const productDocuments = documents.filter(
+    (document) => !String(document.product_variant_id ?? '').trim()
+  );
+  const variantDocuments = documents.filter((document) =>
+    Boolean(String(document.product_variant_id ?? '').trim())
+  );
+
   return (
-    <SectionCard
-      id="product-group-documents"
-      title="Tài liệu kỹ thuật của sản phẩm"
-      description="Thêm tài liệu đúng biến thể hoặc để theo toàn sản phẩm."
-    >
-      <div className="space-y-4">
+    <section id="product-group-documents" className="rounded-sm border border-border bg-panel">
+      <div className="border-b border-border px-4 py-4 sm:px-5">
+        <h2 className="text-base font-semibold text-text">Tài liệu kỹ thuật</h2>
+      </div>
+      <div className="space-y-4 px-4 py-4 sm:px-5">
+        <div className="flex flex-wrap gap-x-6 gap-y-2 border-b border-border pb-4" aria-label="Phạm vi tài liệu">
+          <DocumentScopeSummary
+            title="Toàn sản phẩm"
+            count={productDocuments.length}
+          />
+          <DocumentScopeSummary
+            title="Theo biến thể"
+            count={variantDocuments.length}
+          />
+        </div>
+
         {canCreate ? (
-          <details className="group rounded-sm border border-dashed border-blue-200 bg-blue-50/40">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-              <div>
-                <div className="text-sm font-semibold text-text">Thêm tài liệu kỹ thuật</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                  Dùng cho datasheet, catalogue, hướng dẫn hoặc chứng nhận.
-                </div>
-              </div>
+          <details className="group rounded-sm border border-border bg-surface">
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-primary hover:bg-primary/5">
+              <span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" />Thêm tài liệu kỹ thuật</span>
               <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
             </summary>
-            <div className="border-t border-blue-200 px-4 pb-4 pt-3">
+            <div className="border-t border-border bg-panel px-4 pb-4 pt-3">
               <TwoColumnGrid>
                 <Field label="Tên tài liệu">
                   <Input
@@ -5110,7 +5038,14 @@ function TechnicalDocumentWorkspace({
                     <option value="certificate">Chứng nhận</option>
                   </Select>
                 </Field>
-                <Field label="Biến thể áp dụng">
+                <Field
+                  label="Phạm vi áp dụng"
+                  hint={
+                    draft.product_variant_id
+                      ? 'Khách chỉ thấy tài liệu trong biến thể đã chọn.'
+                      : 'Tài liệu dùng chung cho toàn bộ sản phẩm và các biến thể.'
+                  }
+                >
                   <Select
                     value={draft.product_variant_id}
                     onChange={(event) =>
@@ -5120,10 +5055,10 @@ function TechnicalDocumentWorkspace({
                       })
                     }
                   >
-                    <option value="">Theo sản phẩm</option>
+                    <option value="">Toàn bộ sản phẩm và mọi biến thể</option>
                     {variants.map((variant) => (
                       <option key={String(variant.id)} value={String(variant.id)}>
-                        {formatValue(variant.variant_name)}
+                        {formatVariantOption(variant)}
                       </option>
                     ))}
                   </Select>
@@ -5144,7 +5079,10 @@ function TechnicalDocumentWorkspace({
                     }
                   />
                 </Field>
-                <Field label="Hiển thị công khai">
+                <Field
+                  label="Hiển thị công khai"
+                  hint="Tài liệu nội bộ vẫn được giữ trong admin nhưng khách hàng không tải được."
+                >
                   <Select
                     value={draft.is_public}
                     onChange={(event) =>
@@ -5176,53 +5114,109 @@ function TechnicalDocumentWorkspace({
             description="Chưa có tài liệu cho sản phẩm."
           />
         ) : (
-          <div className="divide-y divide-border overflow-hidden rounded-sm border border-border">
-            {documents.map((document) => {
-              const documentId = String(document.id);
-              return (
-                <div
-                  key={documentId}
-                  className="flex flex-wrap items-center justify-between gap-3 bg-panel px-3 py-3"
-                >
-                  <div>
-                    <div className="font-medium text-text">
-                      {formatValue(document.document_name)}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {formatValue(document.document_type)} ·{' '}
-                      {document.product_variant_name
-                        ? `Biến thể: ${formatValue(document.product_variant_name)}`
-                        : 'Theo sản phẩm'}{' '}
-                      · {document.is_public ? 'Công khai' : 'Nội bộ'}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Link
-                      className="inline-flex h-8 items-center rounded-sm border border-border px-2.5 text-xs font-medium text-slate-700 hover:bg-muted"
-                      href={`/technical-documents/${documentId}`}
-                    >
-                      Mở tài liệu
-                    </Link>
-                    {canArchive ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-700"
-                        disabled={savingKey === `document:archive:${documentId}`}
-                        onClick={() => onArchive(documentId)}
-                      >
-                        Xóa
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="space-y-3">
+            {productDocuments.length > 0 ? (
+              <DocumentScopeGroup
+                title="Dùng chung cho toàn sản phẩm"
+                documents={productDocuments}
+                canArchive={canArchive}
+                savingKey={savingKey}
+                onArchive={onArchive}
+              />
+            ) : null}
+            {variantDocuments.length > 0 ? (
+              <DocumentScopeGroup
+                title="Chỉ dùng cho biến thể"
+                documents={variantDocuments}
+                canArchive={canArchive}
+                savingKey={savingKey}
+                onArchive={onArchive}
+              />
+            ) : null}
           </div>
         )}
       </div>
-    </SectionCard>
+    </section>
+  );
+}
+
+function DocumentScopeSummary({
+  title,
+  count
+}: {
+  title: string;
+  count: number;
+}) {
+  return (
+    <span className="inline-flex items-center gap-2 text-sm text-slate-600">
+      <strong className="font-semibold text-text">{count}</strong> <span>{title}</span>
+    </span>
+  );
+}
+
+function DocumentScopeGroup({
+  title,
+  documents,
+  canArchive,
+  savingKey,
+  onArchive
+}: {
+  title: string;
+  documents: RecordMap[];
+  canArchive: boolean;
+  savingKey: string;
+  onArchive: (documentId: string) => void;
+}) {
+  return (
+    <section aria-label={title}>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {title}
+      </h3>
+      <div className="divide-y divide-border border-y border-border">
+        {documents.map((document) => {
+          const documentId = String(document.id);
+          return (
+            <div
+              key={documentId}
+              className="flex flex-wrap items-center justify-between gap-3 bg-panel px-3 py-3"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-text">
+                  {formatValue(document.document_name)}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                  {formatValue(document.document_type)} ·{' '}
+                  {document.product_variant_name
+                    ? `Biến thể: ${formatValue(document.product_variant_name)}`
+                    : 'Áp dụng toàn sản phẩm'}{' '}
+                  · {document.is_public ? 'Khách được tải' : 'Chỉ nội bộ'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Link
+                  className="inline-flex h-8 items-center rounded-sm border border-border px-2.5 text-xs font-medium text-slate-700 hover:bg-muted"
+                  href={`/technical-documents/${documentId}`}
+                >
+                  Mở tài liệu
+                </Link>
+                {canArchive ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="text-red-700"
+                    disabled={savingKey === `document:archive:${documentId}`}
+                    onClick={() => onArchive(documentId)}
+                  >
+                    Xóa
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -5232,15 +5226,7 @@ function isReviewOnlyProductSurface(kind: BusinessKind) {
 
 function renderReviewSurfaceNotice(kind: BusinessKind) {
   if (kind === 'productVariant') {
-    return (
-      <div className="flex items-start gap-2 rounded-sm border border-blue-200 bg-blue-50/60 px-3 py-2 text-[13px] leading-5 text-blue-900">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-        <p>
-          <span className="font-medium">Rà soát biến thể toàn hệ thống.</span>{' '}
-          Để thêm nhiều biến thể cho cùng một sản phẩm, nên quản lý trong trang chi tiết sản phẩm.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   if (kind === 'technicalDocument') {
@@ -5276,31 +5262,29 @@ async function loadProductGroupWorkspace(productGroupId: string) {
   ]);
   const variants = extractItems(variantResult);
   const documents = extractItems(documentResult);
-  const attributeEntries = await Promise.all(
-    variants.map(async (variant) => {
-      const variantId = String(variant.id ?? '');
-      if (!variantId) return [variantId, []] as const;
-      const result = await apiClient.get<unknown>(variantAttributesPath(variantId));
-      return [variantId, extractItems(result)] as const;
-    })
-  );
-  const highlightEntries = await Promise.all(
-    variants.map(async (variant) => {
-      const variantId = String(variant.id ?? '');
-      if (!variantId) return [variantId, []] as const;
-      const params = new URLSearchParams({ variant_id: variantId });
-      const result = await apiClient.get<unknown>(
-        `${productHighlightSpecsPath(productGroupId)}?${params.toString()}`
-      );
-      return [variantId, extractItems(result)] as const;
-    })
-  );
 
   return {
     variants,
     documents,
-    attributes: Object.fromEntries(attributeEntries),
-    highlightSpecs: Object.fromEntries(highlightEntries)
+    attributes: {} as Record<string, RecordMap[]>,
+    highlightSpecs: {} as Record<string, RecordMap[]>
+  };
+}
+
+async function loadProductVariantWorkspaceDetails(
+  productGroupId: string,
+  variantId: string
+) {
+  const params = new URLSearchParams({ variant_id: variantId });
+  const [attributeResult, highlightResult] = await Promise.all([
+    apiClient.get<unknown>(variantAttributesPath(variantId)),
+    apiClient.get<unknown>(
+      `${productHighlightSpecsPath(productGroupId)}?${params.toString()}`
+    )
+  ]);
+  return {
+    attributes: extractItems(attributeResult),
+    highlightSpecs: extractItems(highlightResult)
   };
 }
 
@@ -5467,9 +5451,12 @@ function validateVariantDraft(draft?: ProductVariantDraft) {
   if (!draft?.variant_name.trim()) return 'Vui lòng nhập tên biến thể.';
   if (
     draft.public_price_mode === 'public_price' &&
-    (!draft.public_price_amount.trim() || Number(draft.public_price_amount) <= 0)
+    (!draft.public_price_amount.trim() ||
+      !Number.isSafeInteger(Number(draft.public_price_amount)) ||
+      Number(draft.public_price_amount) < 1 ||
+      Number(draft.public_price_amount) > 2_147_483_647)
   ) {
-    return 'Giá công khai phải là số hợp lệ.';
+    return 'Giá công khai phải là số nguyên từ 1 đến 2.147.483.647 đồng.';
   }
   return null;
 }
@@ -5522,9 +5509,18 @@ function renderSummaryCards(kind: BusinessKind, record: RecordMap, detail: Recor
         <CompactInfoCard
           title="Tóm tắt giá"
           items={[
-            ['Chế độ hiển thị', asRecord(record.public_price_summary).display_mode],
-            ['Giá hiển thị', formatCurrency(asRecord(record.public_price_summary).display_amount)],
-            ['Biến thể public', asRecord(record.public_price_summary).public_variant_count]
+            ['Hiển thị ngoài website', (() => {
+              const summary = asRecord(record.public_price_summary);
+              const mode = summary.display_mode;
+              if (mode === 'exact_price') return formatCurrency(summary.display_amount);
+              if (mode === 'from_price') {
+                return Number(summary.priced_public_variant_count ?? 0) < Number(summary.public_variant_count ?? 0)
+                  ? 'Một số biến thể có giá'
+                  : 'Giá theo từng biến thể';
+              }
+              return 'Yêu cầu báo giá';
+            })()],
+            ['Biến thể có giá / đang hiển thị', `${Number(asRecord(record.public_price_summary).priced_public_variant_count ?? 0)} / ${Number(asRecord(record.public_price_summary).public_variant_count ?? 0)}`]
           ]}
         />
       ) : null}
@@ -5566,12 +5562,11 @@ function listHeaders(kind: BusinessKind) {
       ];
     case 'productVariant':
       return [
-        'Biến thể',
-        'Thuộc sản phẩm',
-        'Ảnh',
-        'Mô tả riêng',
+        'Biến thể / SKU',
+        'Sản phẩm',
+        'Nội dung riêng',
         'Báo giá',
-        'Tình trạng'
+        'Hiển thị'
       ];
     case 'technicalDocument':
       return [
@@ -5590,12 +5585,11 @@ function listHeaderWidthClass(kind: BusinessKind, headerIndex: number) {
   if (kind === 'productVariant') {
     return (
       [
-        'w-[260px]',
-        'w-[260px]',
-        'w-[120px]',
-        'w-[280px]',
+        'w-[240px]',
+        'w-[250px]',
+        'w-[210px]',
         'w-[150px]',
-        'w-[250px]'
+        'w-[180px]'
       ][headerIndex] ?? ''
     );
   }
@@ -5684,9 +5678,9 @@ function renderListRow(
           <LinkedTextCell
             href={row.product_group_id ? `/product-groups/${String(row.product_group_id)}` : null}
             value={row.product_group_name || 'Chưa có sản phẩm'}
+            subtitle="Mở hồ sơ sản phẩm dùng chung"
           />
-          <StatusTextCell value={row.image_file_id ? 'Có ảnh riêng' : 'Dùng ảnh nhóm'} />
-          <DescriptionCell value={row.detailed_description} fallback="Dùng mô tả nhóm" />
+          <VariantContentCell row={row} />
           <StackedTextCell
             primary={formatPriceMode(row.public_price_mode)}
             secondary={
@@ -5695,13 +5689,7 @@ function renderListRow(
                 : undefined
             }
           />
-          <ProductGroupStatusCell
-            row={row}
-            kind="productVariant"
-            canUpdate={Boolean(options.canUpdateProductGroupStatus)}
-            updating={options.inlineStatusRowId === String(row.id ?? '')}
-            onChange={options.onProductGroupPublishStatusChange}
-          />
+          <VariantVisibilityCell row={row} />
         </>
       );
     case 'technicalDocument':
@@ -5760,12 +5748,16 @@ function BusinessMobileList({
   ) => void;
 }) {
   return (
-    <div className="space-y-3 px-3 py-3 md:hidden">
+    <div
+      className="space-y-3 px-3 py-3 md:hidden"
+      data-product-mobile-list="true"
+      data-product-mobile-kind={kind}
+    >
       {rows.map((row, index) => {
         const rowId = String(row.id ?? '');
         const archived = Boolean(row.deleted_at);
         const selectable = canBulkUpdate && rowId && isSelectableBulkRow(kind, row);
-        const archiveActionLabel = kind === 'brand' ? 'Lưu trữ' : 'Xóa';
+        const archiveActionLabel = 'Lưu trữ';
 
         return (
           <article
@@ -5828,7 +5820,7 @@ function BusinessMobileList({
               />
             ) : null}
 
-            {kind === 'productGroup' || kind === 'productVariant' ? (
+            {kind === 'productGroup' ? (
               <MobilePublishAction
                 kind={kind}
                 row={row}
@@ -5848,7 +5840,7 @@ function BusinessMobileList({
                 <Eye className="h-4 w-4" />
                 Xem chi tiết
               </LinkButton>
-              {!archived && canArchive ? (
+              {kind !== 'productVariant' && !archived && canArchive ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -6027,13 +6019,21 @@ function mobileCardBadges(kind: BusinessKind, row: RecordMap) {
       });
       break;
     case 'productGroup':
-    case 'productVariant':
       badges.push({ label: formatValue(row.status || 'unknown'), tone: statusTone(row.status) });
       badges.push({
         label: formatValue(row.publish_status ?? 'unpublished'),
         tone: statusTone(row.publish_status ?? 'unpublished')
       });
       break;
+    case 'productVariant': {
+      const active = String(row.status ?? '') === 'active';
+      const published = String(row.publish_status ?? '') === 'published';
+      badges.push({
+        label: active && published ? 'Đang hiển thị' : published ? 'Đang tạm ẩn' : 'Chưa hiển thị',
+        tone: active && published ? 'success' : published ? 'warning' : 'inactive'
+      });
+      break;
+    }
     case 'technicalDocument':
       badges.push({
         label: row.is_public ? 'Công khai' : 'Nội bộ',
@@ -6079,11 +6079,11 @@ function mobileCardMetaRows(kind: BusinessKind, row: RecordMap): Array<[string, 
       ];
     case 'productVariant':
       return [
-        ['Thuộc sản phẩm', formatValue(row.product_group_name || 'Chưa có sản phẩm')],
-        ['Ảnh', formatValue(row.image_file_id ? 'Có ảnh riêng' : 'Dùng ảnh nhóm')],
+        ['Sản phẩm', formatValue(row.product_group_name || 'Chưa có sản phẩm')],
+        ['Ảnh', formatValue(row.image_file_id ? 'Ảnh riêng' : 'Dùng ảnh sản phẩm')],
         [
-          'Mô tả riêng',
-          formatValue(row.detailed_description ? 'Có mô tả riêng' : 'Dùng mô tả nhóm')
+          'Nội dung',
+          formatValue(row.detailed_description ? 'Mô tả riêng' : 'Dùng mô tả sản phẩm')
         ],
         [
           'Báo giá',
@@ -6113,586 +6113,6 @@ function bulkSelectionLabel(row: RecordMap) {
   );
 }
 
-function validateForm(kind: BusinessKind, form: Record<string, string>): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  switch (kind) {
-    case 'category':
-      if (!form.name.trim()) {
-        issues.push({ field: 'name', message: 'Vui lòng nhập tên danh mục.' });
-      }
-      if (form.category_level === 'level_2' && !form.parent_id) {
-        issues.push({
-          field: 'parent_id',
-          message: 'Vui lòng chọn danh mục cấp 1 cha.'
-        });
-      }
-      return issues;
-    case 'brand':
-      if (!form.name.trim()) {
-        issues.push({ field: 'name', message: 'Vui lòng nhập tên thương hiệu.' });
-      }
-      return issues;
-    case 'productGroup':
-      if (!form.name.trim()) {
-        issues.push({ field: 'name', message: 'Vui lòng nhập tên sản phẩm.' });
-      }
-      if (!form.category_level_1_id) {
-        issues.push({
-          field: 'category_level_1_id',
-          message: 'Vui lòng chọn danh mục chính.'
-        });
-      }
-      if (!form.category_id) {
-        issues.push({ field: 'category_id', message: 'Vui lòng chọn danh mục con.' });
-      }
-      if (form.publish_status === 'published') {
-        const publishBlockers = getProductGroupPersistedPublishBlockers(form);
-        if (publishBlockers.length > 0) {
-          issues.push({
-            field: '__form',
-            message: `Chưa thể chuyển sang “Đã xuất bản”: ${publishBlockers.join('; ')}`
-          });
-        }
-      }
-      return issues;
-    case 'productVariant':
-      if (!form.variant_name.trim()) {
-        issues.push({ field: 'variant_name', message: 'Vui lòng nhập tên biến thể.' });
-      }
-      if (!form.product_group_id) {
-        issues.push({ field: 'product_group_id', message: 'Vui lòng chọn sản phẩm.' });
-      }
-      if (
-        form.public_price_mode === 'public_price' &&
-        (!form.public_price_amount.trim() || Number(form.public_price_amount) <= 0)
-      ) {
-        issues.push({
-          field: 'public_price_amount',
-          message: 'Giá công khai phải là số hợp lệ lớn hơn 0.'
-        });
-      }
-      if (form.publish_status === 'published') {
-        const publishBlockers = getProductVariantPersistedPublishBlockers(form);
-        if (publishBlockers.length > 0) {
-          issues.push({
-            field: '__form',
-            message: `Chưa thể chuyển sang “Đã xuất bản”: ${publishBlockers.join('; ')}`
-          });
-        }
-      }
-      return issues;
-    case 'technicalDocument':
-      if (!form.document_name.trim()) {
-        issues.push({ field: 'document_name', message: 'Vui lòng nhập tên tài liệu.' });
-      }
-      if (!form.product_group_id) {
-        issues.push({ field: 'product_group_id', message: 'Vui lòng chọn sản phẩm.' });
-      }
-      if (!form.file_id) {
-        issues.push({ field: 'file_id', message: 'Vui lòng chọn tệp tài liệu.' });
-      }
-      return issues;
-  }
-}
-
-function getProductGroupPersistedPublishBlockers(form: Record<string, string>) {
-  const blockers: string[] = [];
-  if (form.status !== 'active') {
-    blockers.push('Trạng thái sử dụng phải là “Đang hoạt động”.');
-  }
-  if (form.review_status !== 'approved') {
-    blockers.push('Trạng thái duyệt phải là “Đã duyệt”.');
-  }
-  if (!form.thumbnail_file_id.trim()) {
-    blockers.push('Cần chọn “Ảnh chính”.');
-  }
-
-  return blockers;
-}
-
-function getProductVariantPersistedPublishBlockers(form: Record<string, string>) {
-  const blockers: string[] = [];
-  if (form.status !== 'active') {
-    blockers.push('Trạng thái sử dụng phải là “Đang hoạt động”.');
-  }
-  if (form.review_status !== 'approved') {
-    blockers.push('Trạng thái duyệt phải là “Đã duyệt”.');
-  }
-
-  return blockers;
-}
-
-function getDisplayPublishBlockers(
-  kind: BusinessKind,
-  form: Record<string, string>
-) {
-  if (kind === 'productGroup') {
-    const blockers: string[] = [];
-    if (form.status !== 'active') {
-      blockers.push('Trạng thái sử dụng phải là “Đang hoạt động”.');
-    }
-    if (form.review_status !== 'approved') {
-      blockers.push('Trạng thái duyệt phải là “Đã duyệt”.');
-    }
-    if (!form.thumbnail_file_id.trim()) {
-      blockers.push('Cần bổ sung ảnh chính trước khi xuất bản.');
-    }
-    if (!form.short_description.trim()) {
-      blockers.push('Cần bổ sung mô tả ngắn trước khi xuất bản.');
-    }
-    return blockers;
-  }
-
-  if (kind === 'productVariant') {
-    return getProductVariantPersistedPublishBlockers(form);
-  }
-
-  return [] as string[];
-}
-
-function supportsSimplifiedDisplayStatus(kind: BusinessKind) {
-  return kind === 'productGroup' || kind === 'productVariant';
-}
-
-function buildDisplayStatusPayload(
-  action: DisplayStatusAction,
-  form: Record<string, string>
-) {
-  switch (action) {
-    case 'activate':
-      return { status: 'active' };
-    case 'deactivate':
-      return { status: 'inactive' };
-    case 'submit-review':
-      return { review_status: 'pending_review', publish_status: 'unpublished' };
-    case 'approve-review':
-      return { review_status: 'approved' };
-    case 'reject-review':
-      return { review_status: 'rejected', publish_status: 'unpublished' };
-    case 'publish':
-      return {
-        publish_status: 'published'
-      };
-    case 'unpublish':
-      return {
-        publish_status: 'unpublished'
-      };
-    case 'archive-display':
-      return {
-        publish_status: 'archived'
-      };
-    case 'restore-display':
-      return {
-        publish_status: 'unpublished'
-      };
-  }
-}
-
-function displayStatusSuccessMessage(action: DisplayStatusAction) {
-  switch (action) {
-    case 'activate':
-      return 'Đã chuyển sang trạng thái “Đang hoạt động”.';
-    case 'deactivate':
-      return 'Đã chuyển sang trạng thái “Tạm ngưng”.';
-    case 'submit-review':
-      return 'Đã gửi nội dung để duyệt.';
-    case 'approve-review':
-      return 'Đã duyệt nội dung. Có thể xuất bản khi đủ điều kiện.';
-    case 'reject-review':
-      return 'Đã từ chối nội dung và giữ ở trạng thái chưa xuất bản.';
-    case 'publish':
-      return 'Đã chuyển sang trạng thái “Đã xuất bản”.';
-    case 'unpublish':
-      return 'Đã chuyển sang trạng thái “Chưa xuất bản”.';
-    case 'archive-display':
-      return 'Đã chuyển sang trạng thái “Đã lưu trữ”.';
-    case 'restore-display':
-      return 'Đã khôi phục sang trạng thái “Chưa xuất bản”.';
-  }
-}
-
-function buildPayload(kind: BusinessKind, form: Record<string, string>) {
-  switch (kind) {
-    case 'category':
-      return stripNulls({
-        name: requiredOrNull(form.name),
-        slug: optionalText(form.slug),
-        parent_id: form.category_level === 'level_2' ? optionalText(form.parent_id) : null,
-        description: optionalText(form.description),
-        icon_file_id: optionalText(form.icon_file_id),
-        ...(form.sort_order.trim() ? { sort_order: Number(form.sort_order) } : {}),
-        ...(form.status.trim() ? { status: form.status } : {})
-      });
-    case 'brand':
-      return stripNulls({
-        name: requiredOrNull(form.name),
-        slug: optionalText(form.slug),
-        primary_category_id: optionalText(form.primary_category_id),
-        logo_file_id: optionalText(form.logo_file_id),
-        description: optionalText(form.description),
-        website_url: optionalText(form.website_url),
-        ...(form.sort_order.trim() ? { sort_order: Number(form.sort_order) } : {}),
-        ...(form.status.trim() ? { status: form.status } : {})
-      });
-    case 'productGroup':
-      return stripNulls({
-        name: requiredOrNull(form.name),
-        slug: optionalText(form.slug),
-        category_id: optionalText(form.category_id),
-        brand_id: optionalText(form.brand_id),
-        short_description: optionalText(form.short_description),
-        detailed_description: optionalText(form.detailed_description),
-        thumbnail_file_id: optionalText(form.thumbnail_file_id),
-        seo_title: optionalText(form.seo_title),
-        seo_description: optionalText(form.seo_description),
-        seo_og_image_file_id: optionalText(form.seo_og_image_file_id),
-        ...(form.sort_order.trim() ? { sort_order: Number(form.sort_order) } : {}),
-        ...(form.status.trim() ? { status: form.status } : {}),
-        ...(form.review_status.trim() ? { review_status: form.review_status } : {}),
-        ...(form.publish_status.trim()
-          ? { publish_status: form.publish_status }
-          : {})
-      });
-    case 'productVariant':
-      return stripNulls({
-        product_group_id: optionalText(form.product_group_id),
-        variant_name: requiredOrNull(form.variant_name),
-        detailed_description: optionalText(form.detailed_description),
-        image_file_id: optionalText(form.image_file_id),
-        public_price_mode: form.public_price_mode || 'contact_for_quote',
-        public_price_amount:
-          form.public_price_mode === 'public_price' && form.public_price_amount.trim()
-            ? Number(form.public_price_amount)
-            : null,
-        sku: optionalText(form.sku),
-        external_code: optionalText(form.external_code),
-        model_code: optionalText(form.model_code),
-        ...(form.sort_order.trim() ? { sort_order: Number(form.sort_order) } : {}),
-        ...(form.status.trim() ? { status: form.status } : {}),
-        ...(form.review_status.trim() ? { review_status: form.review_status } : {}),
-        ...(form.publish_status.trim()
-          ? { publish_status: form.publish_status }
-          : {})
-      });
-    case 'technicalDocument':
-      return stripNulls({
-        product_group_id: optionalText(form.product_group_id),
-        product_variant_id: optionalText(form.product_variant_id),
-        document_name: requiredOrNull(form.document_name),
-        document_type: form.document_type || 'other',
-        file_id: optionalText(form.file_id),
-        version: optionalText(form.version),
-        is_public: form.is_public === 'true',
-        ...(form.sort_order.trim() ? { sort_order: Number(form.sort_order) } : {}),
-        ...(form.status.trim() ? { status: form.status } : {})
-      });
-  }
-}
-
-function formFromRecord(
-  kind: BusinessKind,
-  record: RecordMap
-): Record<string, string> {
-  switch (kind) {
-    case 'category':
-      return {
-        category_level: record.parent_id ? 'level_2' : 'level_1',
-        name: stringValue(record.name),
-        parent_id: stringValue(record.parent_id),
-        slug: stringValue(record.slug),
-        description: stringValue(record.description),
-        icon_file_id: stringValue(record.icon_file_id),
-        sort_order: stringValue(record.sort_order),
-        status: stringValue(record.status) || 'active'
-      };
-    case 'brand':
-      return {
-        name: stringValue(record.name),
-        primary_category_id: stringValue(record.primary_category_id),
-        logo_file_id: stringValue(record.logo_file_id),
-        slug: stringValue(record.slug),
-        description: stringValue(record.description),
-        website_url: stringValue(record.website_url),
-        sort_order: stringValue(record.sort_order),
-        status: stringValue(record.status) || 'active'
-      };
-    case 'productGroup':
-      return {
-        name: stringValue(record.name),
-        category_level_1_id:
-          stringValue(record.category_level_1_id) || stringValue(record.category_id),
-        category_id:
-          stringValue(record.category_level_2_id) || stringValue(record.category_id),
-        brand_id: stringValue(record.brand_id),
-        thumbnail_file_id: stringValue(record.thumbnail_file_id),
-        slug: stringValue(record.slug),
-        short_description: stringValue(record.short_description),
-        detailed_description: stringValue(record.detailed_description),
-        seo_title: stringValue(record.seo_title),
-        seo_description: stringValue(record.seo_description),
-        seo_og_image_file_id: stringValue(record.seo_og_image_file_id),
-        sort_order: stringValue(record.sort_order),
-        status: stringValue(record.status) || 'active',
-        review_status: stringValue(record.review_status) || 'draft',
-        publish_status: stringValue(record.publish_status) || 'unpublished'
-      };
-    case 'productVariant':
-      return {
-        product_group_id: stringValue(record.product_group_id),
-        variant_name: stringValue(record.variant_name),
-        detailed_description: stringValue(record.detailed_description),
-        image_file_id: stringValue(record.image_file_id),
-        public_price_mode: stringValue(record.public_price_mode) || 'contact_for_quote',
-        public_price_amount: stringValue(record.public_price_amount),
-        sku: stringValue(record.sku),
-        external_code: stringValue(record.external_code),
-        model_code: stringValue(record.model_code),
-        sort_order: stringValue(record.sort_order),
-        status: stringValue(record.status) || 'active',
-        review_status: stringValue(record.review_status) || 'draft',
-        publish_status: stringValue(record.publish_status) || 'unpublished'
-      };
-    case 'technicalDocument':
-      return {
-        product_group_id: stringValue(record.product_group_id),
-        product_variant_id: stringValue(record.product_variant_id),
-        document_name: stringValue(record.document_name),
-        document_type: stringValue(record.document_type) || 'other',
-        file_id: stringValue(record.file_id),
-        version: stringValue(record.version),
-        is_public: String(Boolean(record.is_public)),
-        sort_order: stringValue(record.sort_order),
-        status: stringValue(record.status) || 'active'
-      };
-  }
-}
-
-function defaultForm(kind: BusinessKind): Record<string, string> {
-  switch (kind) {
-    case 'category':
-      return {
-        category_level: 'level_1',
-        name: '',
-        parent_id: '',
-        slug: '',
-        description: '',
-        icon_file_id: '',
-        sort_order: '',
-        status: 'active'
-      };
-    case 'brand':
-      return {
-        name: '',
-        primary_category_id: '',
-        logo_file_id: '',
-        slug: '',
-        description: '',
-        website_url: '',
-        sort_order: '',
-        status: 'active'
-      };
-    case 'productGroup':
-      return {
-        name: '',
-        category_level_1_id: '',
-        category_id: '',
-        brand_id: '',
-        thumbnail_file_id: '',
-        slug: '',
-        short_description: '',
-        detailed_description: '',
-        seo_title: '',
-        seo_description: '',
-        seo_og_image_file_id: '',
-        sort_order: '',
-        status: 'active',
-        review_status: '',
-        publish_status: ''
-      };
-    case 'productVariant':
-      return {
-        product_group_id: '',
-        variant_name: '',
-        detailed_description: '',
-        image_file_id: '',
-        public_price_mode: 'contact_for_quote',
-        public_price_amount: '',
-        sku: '',
-        external_code: '',
-        model_code: '',
-        sort_order: '',
-        status: 'active',
-        review_status: '',
-        publish_status: ''
-      };
-    case 'technicalDocument':
-      return {
-        product_group_id: '',
-        product_variant_id: '',
-        document_name: '',
-        document_type: 'other',
-        file_id: '',
-        version: '',
-        is_public: 'false',
-        sort_order: '',
-        status: 'active'
-      };
-  }
-}
-
-function defaultBusinessListFilters(): BusinessListFilters {
-  return {
-    status: '',
-    publish_status: '',
-    deleted_scope: 'active',
-    updated_on: '',
-    category_level_1_id: '',
-    category_id: '',
-    brand_id: '',
-    product_group_id: '',
-    product_variant_id: '',
-    price_mode: '',
-    document_type: '',
-    is_public: '',
-    logo_state: '',
-    usage_state: '',
-    thumbnail_state: '',
-    variant_state: '',
-    document_state: ''
-  };
-}
-
-function parseBusinessListFilters(
-  searchParams: { get(name: string): string | null },
-  kind: BusinessKind
-) {
-  const defaults = defaultBusinessListFilters();
-  return {
-    ...defaults,
-    status: searchParams.get('status') ?? defaults.status,
-    publish_status: searchParams.get('publish_status') ?? defaults.publish_status,
-    deleted_scope:
-      (searchParams.get('deleted_scope') as BusinessListFilters['deleted_scope']) ??
-      defaults.deleted_scope,
-    updated_on:
-      kind === 'productGroup'
-        ? defaults.updated_on
-        : searchParams.get('updated_on') ?? defaults.updated_on,
-    category_level_1_id:
-      searchParams.get('parent') ??
-      searchParams.get('category_level_1_id') ??
-      defaults.category_level_1_id,
-    category_id:
-      searchParams.get('categories') ??
-      searchParams.get('category_ids') ??
-      searchParams.get('category_id') ??
-      defaults.category_id,
-    brand_id: searchParams.get('brands') ?? searchParams.get('brand_id') ?? defaults.brand_id,
-    product_group_id: searchParams.get('product_group_id') ?? defaults.product_group_id,
-    product_variant_id:
-      searchParams.get('product_variant_id') ?? defaults.product_variant_id,
-    price_mode: searchParams.get('price_mode') ?? defaults.price_mode,
-    document_type: searchParams.get('document_type') ?? defaults.document_type,
-    is_public: searchParams.get('is_public') ?? defaults.is_public,
-    logo_state: searchParams.get('logo_state') ?? defaults.logo_state,
-    usage_state: searchParams.get('usage_state') ?? defaults.usage_state,
-    thumbnail_state: searchParams.get('thumbnail_state') ?? defaults.thumbnail_state,
-    variant_state: searchParams.get('variant_state') ?? defaults.variant_state,
-    document_state: searchParams.get('document_state') ?? defaults.document_state
-  };
-}
-
-function buildBusinessListHref(
-  kind: BusinessKind,
-  pathname: string,
-  query: string,
-  filters: BusinessListFilters,
-  page: number,
-  refs: ReferenceData
-) {
-  const params = new URLSearchParams();
-  if (query.trim()) {
-    params.set('q', query.trim());
-  }
-
-  if (kind === 'productGroup') {
-    if (filters.deleted_scope) {
-      params.set('deleted_scope', filters.deleted_scope);
-    }
-    const parentId = resolveCategoryRecordId(filters.category_level_1_id, refs.categories);
-    if (parentId) {
-      params.set('category_level_1_id', parentId);
-    }
-    const childId = resolveCategoryRecordId(filters.category_id, refs.categories);
-    if (childId) {
-      params.set('category_id', childId);
-    }
-    const brandId = resolveBrandRecordId(filters.brand_id, refs.brands);
-    if (brandId) {
-      params.set('brand_id', brandId);
-    }
-    if (filters.status.trim()) {
-      params.set('status', filters.status.trim());
-    }
-    if (filters.publish_status.trim()) {
-      params.set('publish_status', filters.publish_status.trim());
-    }
-    if (filters.thumbnail_state.trim()) {
-      params.set('thumbnail_state', filters.thumbnail_state.trim());
-    }
-    if (filters.variant_state.trim()) {
-      params.set('variant_state', filters.variant_state.trim());
-    }
-    if (filters.document_state.trim()) {
-      params.set('document_state', filters.document_state.trim());
-    }
-  } else {
-    for (const [key, value] of Object.entries(filters)) {
-      if (value.trim()) {
-        params.set(key, value);
-      }
-    }
-  }
-
-  if (page > 1) {
-    params.set('page', String(page));
-  }
-  const queryString = params.toString();
-  return queryString ? `${pathname}?${queryString}` : pathname;
-}
-
-function buildDetailHref(basePath: string, id: string, returnTo: string) {
-  const params = new URLSearchParams();
-  if (returnTo) {
-    params.set('returnTo', returnTo);
-  }
-  const queryString = params.toString();
-  return queryString ? `${basePath}/${id}?${queryString}` : `${basePath}/${id}`;
-}
-
-function sanitizeReturnTo(value: string | null) {
-  if (!value || !value.startsWith('/')) {
-    return null;
-  }
-  return value;
-}
-
-function parsePositivePage(value: string | null) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
-}
-
-const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
-const DEFAULT_PAGE_SIZE = 20;
-function parsePageSize(value: string | null): number {
-  const parsed = Number(value);
-  if (Number.isInteger(parsed) && PAGE_SIZE_OPTIONS.includes(parsed as (typeof PAGE_SIZE_OPTIONS)[number])) {
-    return parsed;
-  }
-  return DEFAULT_PAGE_SIZE;
-}
-
 async function fetchListReferences(kind: BusinessKind): Promise<ReferenceData> {
   switch (kind) {
     case 'productGroup': {
@@ -6703,11 +6123,8 @@ async function fetchListReferences(kind: BusinessKind): Promise<ReferenceData> {
       return { categories, brands, productGroups: [], productVariants: [] };
     }
     case 'productVariant': {
-      const [categories, productGroups] = await Promise.all([
-        fetchReferenceList(endpoints.songThanh.productCategories),
-        fetchReferenceList(endpoints.songThanh.productGroups)
-      ]);
-      return { categories, brands: [], productGroups, productVariants: [] };
+      const categories = await fetchReferenceList(endpoints.songThanh.productCategories);
+      return { categories, brands: [], productGroups: [], productVariants: [] };
     }
     case 'technicalDocument': {
       const [productGroups, productVariants] = await Promise.all([
@@ -6729,521 +6146,11 @@ async function fetchDetailReferences(kind: BusinessKind): Promise<ReferenceData>
       return { categories, brands: [], productGroups: [], productVariants: [] };
     }
     case 'productGroup':
-    case 'productVariant':
     case 'technicalDocument':
       return fetchListReferences(kind);
-  }
-}
-
-function activeRootCategories(categories: RecordMap[]) {
-  return categories.filter(
-    (category) =>
-      !category.parent_id &&
-      !category.deleted_at &&
-      String(category.status ?? '') !== 'inactive'
-  );
-}
-
-function filteredActiveLevel2Categories(
-  categories: RecordMap[],
-  level1Id: string | null
-) {
-  const resolvedLevel1Id = resolveCategoryRecordId(level1Id, categories);
-
-  if (!resolvedLevel1Id) {
-    return [];
-  }
-
-  return categories.filter(
-    (category) =>
-      category.parent_id &&
-      !category.deleted_at &&
-      String(category.status ?? '') !== 'inactive' &&
-      String(category.parent_id ?? '') === resolvedLevel1Id
-  );
-}
-
-function firstCsvToken(value: string | null | undefined) {
-  return value
-    ? value
-        .split(',')
-        .map((item) => item.trim())
-        .find(Boolean) ?? ''
-    : '';
-}
-
-function recordSlugOrId(record: RecordMap) {
-  const slug = typeof record.slug === 'string' ? record.slug.trim() : '';
-  if (slug) {
-    return slug;
-  }
-  return record.id == null ? '' : String(record.id);
-}
-
-function findRecordByToken(records: RecordMap[], value: string | null | undefined) {
-  const token = firstCsvToken(value);
-  if (!token) {
-    return null;
-  }
-
-  return (
-    records.find(
-      (record) => String(record.id ?? '') === token || String(record.slug ?? '') === token
-    ) ?? null
-  );
-}
-
-function resolveRecordSlugFromToken(value: string | null | undefined, records: RecordMap[]) {
-  const token = firstCsvToken(value);
-  if (!token) {
-    return '';
-  }
-
-  const record = findRecordByToken(records, token);
-  if (record) {
-    return recordSlugOrId(record);
-  }
-
-  return records.length === 0 ? token : '';
-}
-
-function resolveRecordIdFromToken(value: string | null | undefined, records: RecordMap[]) {
-  const token = firstCsvToken(value);
-  if (!token) {
-    return '';
-  }
-
-  const record = findRecordByToken(records, token);
-  if (record?.id != null) {
-    return String(record.id);
-  }
-
-  return isUuidLike(token) ? token : '';
-}
-
-function resolveCategoryRecordId(value: string | null | undefined, categories: RecordMap[]) {
-  return resolveRecordIdFromToken(value, categories);
-}
-
-function resolveBrandRecordId(value: string | null | undefined, brands: RecordMap[]) {
-  return resolveRecordIdFromToken(value, brands);
-}
-
-function isUuidLike(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-    value
-  );
-}
-
-function buildBusinessListParams(
-  kind: BusinessKind,
-  page: number,
-  pageSize: number,
-  query: string,
-  filters: BusinessListFilters,
-  refs: ReferenceData
-) {
-  const params = new URLSearchParams({
-    page: String(page),
-    page_size: String(pageSize),
-    deleted_scope: filters.deleted_scope || 'active'
-  });
-
-  if (query.trim()) {
-    params.set('q', query.trim());
-  }
-  if (filters.updated_on) {
-    params.set('updated_on', filters.updated_on);
-  }
-    if (filters.status) {
-      params.set('status', filters.status);
-    }
-    if (filters.publish_status) {
-      params.set('publish_status', filters.publish_status);
-    }
-
-    switch (kind) {
-    case 'category':
-      break;
-    case 'brand':
-      if (filters.logo_state) params.set('logo_state', filters.logo_state);
-      if (filters.usage_state) params.set('usage_state', filters.usage_state);
-      break;
-    case 'productGroup':
-      if (filters.category_level_1_id) {
-        const resolvedParentId = resolveCategoryRecordId(filters.category_level_1_id, refs.categories);
-        if (resolvedParentId) {
-          params.set('category_level_1_id', resolvedParentId);
-        }
-      }
-      if (filters.category_id) {
-        const resolvedChildId = resolveCategoryRecordId(filters.category_id, refs.categories);
-        if (resolvedChildId) {
-          params.set('category_id', resolvedChildId);
-        }
-      }
-      if (filters.brand_id) {
-        const resolvedBrandId = resolveBrandRecordId(filters.brand_id, refs.brands);
-        if (resolvedBrandId) {
-          params.set('brand_id', resolvedBrandId);
-        }
-      }
-      if (filters.thumbnail_state) params.set('thumbnail_state', filters.thumbnail_state);
-      if (filters.variant_state) params.set('variant_state', filters.variant_state);
-      if (filters.document_state) params.set('document_state', filters.document_state);
-      break;
     case 'productVariant':
-      if (filters.category_level_1_id) {
-        params.set('category_level_1_id', filters.category_level_1_id);
-      }
-      if (filters.category_id) params.set('category_id', filters.category_id);
-      if (filters.product_group_id) params.set('product_group_id', filters.product_group_id);
-      if (filters.price_mode) params.set('price_mode', filters.price_mode);
-      break;
-    case 'technicalDocument':
-      if (filters.product_group_id) params.set('product_group_id', filters.product_group_id);
-      if (filters.product_variant_id) {
-        params.set('product_variant_id', filters.product_variant_id);
-      }
-      if (filters.document_type) params.set('document_type', filters.document_type);
-      if (filters.is_public) params.set('is_public', filters.is_public);
-      break;
+      return EMPTY_REFERENCE_DATA;
   }
-
-  return params;
-}
-
-function hasActiveBusinessFilters(query: string, filters: BusinessListFilters) {
-  if (query.trim()) {
-    return true;
-  }
-
-  return Object.entries(filters).some(([key, value]) =>
-    key === 'deleted_scope' ? value !== 'active' : Boolean(value)
-  );
-}
-
-function hasActiveAdvancedBusinessFilters(
-  kind: BusinessKind,
-  filters: BusinessListFilters
-) {
-  switch (kind) {
-    case 'category':
-      return false;
-    case 'brand':
-      return Boolean(filters.status || filters.logo_state || filters.usage_state);
-    case 'productGroup':
-      return Boolean(
-        filters.deleted_scope !== 'active' ||
-          filters.status ||
-          filters.publish_status ||
-          filters.thumbnail_state ||
-          filters.variant_state ||
-          filters.document_state
-      );
-    case 'productVariant':
-      return Boolean(
-        filters.deleted_scope !== 'active' ||
-          filters.category_level_1_id ||
-          filters.category_id ||
-          filters.status ||
-          filters.publish_status
-      );
-    case 'technicalDocument':
-      return Boolean(filters.is_public || filters.status);
-  }
-}
-
-function normalizeBusinessListFilters(
-  filters: BusinessListFilters,
-  productVariants: RecordMap[]
-) {
-  const next = { ...filters };
-
-  if (!next.category_level_1_id) {
-    next.category_id = '';
-  }
-
-  if (next.product_variant_id) {
-    const selectedVariant = productVariants.find(
-      (variant) => String(variant.id ?? '') === next.product_variant_id
-    );
-    if (
-      !selectedVariant ||
-      (next.product_group_id &&
-        String(selectedVariant.product_group_id ?? '') !== next.product_group_id)
-    ) {
-      next.product_variant_id = '';
-    }
-  }
-
-  return next;
-}
-
-function ProductGroupFilterToolbar({
-  value,
-  onChange,
-  filters,
-  updateFilters,
-  rootCategories,
-  filteredLevel2Categories,
-  brands,
-  hasActiveFilters,
-  hasAdvancedFilters,
-  onClear
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  filters: BusinessListFilters;
-  updateFilters: (
-    patch:
-      | Partial<BusinessListFilters>
-      | ((current: BusinessListFilters) => BusinessListFilters)
-  ) => void;
-  rootCategories: RecordMap[];
-  filteredLevel2Categories: RecordMap[];
-  brands: RecordMap[];
-  hasActiveFilters: boolean;
-  hasAdvancedFilters: boolean;
-  onClear: () => void;
-}) {
-  const [draftValue, setDraftValue] = useState(value);
-  const [advancedOpen, setAdvancedOpen] = useState(hasAdvancedFilters);
-  const hasMainCategory = Boolean(filters.category_level_1_id);
-  const childCategoryDisabled =
-    !hasMainCategory || filteredLevel2Categories.length === 0;
-  const childCategoryPlaceholder = !hasMainCategory
-    ? 'Chọn danh mục chính trước'
-    : filteredLevel2Categories.length === 0
-      ? 'Không có danh mục con phù hợp'
-      : 'Tất cả danh mục con';
-
-  useEffect(() => {
-    setDraftValue(value);
-  }, [value]);
-
-  useEffect(() => {
-    if (hasAdvancedFilters) {
-      setAdvancedOpen(true);
-    }
-  }, [hasAdvancedFilters]);
-
-  useEffect(() => {
-    if (draftValue === value) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      onChange(draftValue);
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [draftValue, onChange, value]);
-
-  return (
-    <div data-admin-filter-toolbar="true" className="border-b border-border bg-panel px-4 py-4">
-      <div className="space-y-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            value={draftValue}
-            onChange={(event) => setDraftValue(event.target.value)}
-            placeholder="Tìm tên nhóm, mã SP, SKU, mô tả..."
-          />
-        </div>
-
-        <div className="grid gap-3 lg:grid-cols-3">
-          <FilterField label="Danh mục chính" minWidth="0">
-            <Select
-              value={resolveRecordIdFromToken(filters.category_level_1_id, rootCategories)}
-              onChange={(event) =>
-                updateFilters((current) => ({
-                  ...current,
-                  category_level_1_id: event.target.value,
-                  category_id: ''
-                }))
-              }
-            >
-              <option value="">Tất cả danh mục chính</option>
-              {rootCategories.map((category) => (
-                <option key={String(category.id)} value={String(category.id ?? '')}>
-                  {formatValue(category.name)}
-                </option>
-              ))}
-            </Select>
-          </FilterField>
-          <FilterField label="Danh mục con" minWidth="0">
-            <Select
-              value={
-                childCategoryDisabled
-                  ? ''
-                  : resolveRecordIdFromToken(filters.category_id, filteredLevel2Categories)
-              }
-              disabled={childCategoryDisabled}
-              onChange={(event) => updateFilters({ category_id: event.target.value })}
-            >
-              <option value="">{childCategoryPlaceholder}</option>
-              {filteredLevel2Categories.map((category) => (
-                <option key={String(category.id)} value={String(category.id ?? '')}>
-                  {formatValue(category.name)}
-                </option>
-              ))}
-            </Select>
-          </FilterField>
-          <FilterField label="Thương hiệu" minWidth="0">
-            <Select
-              value={resolveRecordIdFromToken(filters.brand_id, brands)}
-              onChange={(event) => updateFilters({ brand_id: event.target.value })}
-            >
-              <option value="">Tất cả thương hiệu</option>
-              {brands.map((brand) => (
-                <option key={String(brand.id)} value={String(brand.id ?? '')}>
-                  {formatValue(brand.name)}
-                </option>
-              ))}
-            </Select>
-          </FilterField>
-        </div>
-
-        <div className="grid gap-3 xl:grid-cols-[minmax(220px,1fr)_auto] xl:items-end">
-          <FilterField label="Bộ lọc nâng cao" minWidth="0">
-            <button
-              type="button"
-              aria-expanded={advancedOpen}
-              className={cn(
-                'flex h-[var(--control-height)] w-full items-center justify-between gap-3 rounded-sm border border-border bg-panel px-3 text-sm font-medium text-text transition-colors hover:bg-muted',
-                hasAdvancedFilters ? 'border-primary/40 bg-primary/5 text-primary' : ''
-              )}
-              onClick={() => setAdvancedOpen((current) => !current)}
-            >
-              <span>Bộ lọc nâng cao</span>
-              {hasAdvancedFilters ? (
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                  Đang lọc
-                </span>
-              ) : null}
-              <ChevronDown
-                className={cn(
-                  'h-4 w-4 text-muted-foreground transition-transform',
-                  advancedOpen ? 'rotate-180' : ''
-                )}
-              />
-            </button>
-          </FilterField>
-          <div className="flex h-full flex-col justify-end">
-            <span
-              aria-hidden="true"
-              className="mb-1 block select-none text-[11px] font-semibold uppercase tracking-[0.06em] text-transparent"
-            >
-              Xóa lọc
-            </span>
-            <Button
-              type="button"
-              className="h-[var(--control-height)] min-w-[120px]"
-              variant="secondary"
-              disabled={!hasActiveFilters}
-              onClick={() => {
-                setAdvancedOpen(false);
-                onClear();
-              }}
-            >
-              Xóa lọc
-            </Button>
-          </div>
-        </div>
-
-        {advancedOpen ? (
-          <ProductGroupAdvancedFilters
-            filters={filters}
-            updateFilters={updateFilters}
-          />
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ProductGroupAdvancedFilters({
-  filters,
-  updateFilters
-}: {
-  filters: BusinessListFilters;
-  updateFilters: (
-    patch:
-      | Partial<BusinessListFilters>
-      | ((current: BusinessListFilters) => BusinessListFilters)
-  ) => void;
-}) {
-  return (
-    <div
-      className="grid gap-3 rounded-sm border border-border bg-muted/30 px-3 py-3 md:grid-cols-2 xl:grid-cols-2"
-      data-product-filter-advanced="true"
-    >
-      <FilterField label="Trạng thái sử dụng" minWidth="0">
-        <Select
-          value={filters.status}
-          onChange={(event) => updateFilters({ status: event.target.value })}
-        >
-          <option value="">Tất cả trạng thái</option>
-          <option value="active">Đang hoạt động</option>
-          <option value="inactive">Tạm ngưng</option>
-        </Select>
-      </FilterField>
-      <FilterField label="Hiển thị website" minWidth="0">
-        <Select
-          value={filters.publish_status}
-          onChange={(event) => updateFilters({ publish_status: event.target.value })}
-        >
-          <option value="">Tất cả</option>
-          <option value="published">Đã xuất bản</option>
-          <option value="unpublished">Chưa xuất bản</option>
-        </Select>
-      </FilterField>
-      <FilterField label="Hiển thị" minWidth="0">
-        <Select
-          value={filters.deleted_scope}
-          onChange={(event) =>
-            updateFilters({
-              deleted_scope: event.target.value as DeletedScope
-            })
-          }
-        >
-          <option value="active">Đang dùng</option>
-          <option value="deleted">Đã lưu trữ</option>
-          <option value="all">Tất cả</option>
-        </Select>
-      </FilterField>
-      <FilterField label="Ảnh chính" minWidth="0">
-        <Select
-          value={filters.thumbnail_state}
-          onChange={(event) => updateFilters({ thumbnail_state: event.target.value })}
-        >
-          <option value="">Tất cả</option>
-          <option value="with_image">Đã có ảnh</option>
-          <option value="without_image">Chưa có ảnh</option>
-        </Select>
-      </FilterField>
-      <FilterField label="Biến thể" minWidth="0">
-        <Select
-          value={filters.variant_state}
-          onChange={(event) => updateFilters({ variant_state: event.target.value })}
-        >
-          <option value="">Tất cả</option>
-          <option value="with_variants">Có biến thể</option>
-          <option value="without_variants">Chưa có biến thể</option>
-        </Select>
-      </FilterField>
-      <FilterField label="Tài liệu" minWidth="0">
-        <Select
-          value={filters.document_state}
-          onChange={(event) => updateFilters({ document_state: event.target.value })}
-        >
-          <option value="">Tất cả</option>
-          <option value="with_documents">Có tài liệu</option>
-          <option value="without_documents">Chưa có tài liệu</option>
-        </Select>
-      </FilterField>
-    </div>
-  );
 }
 
 function renderBusinessListFilterControls(
@@ -7268,7 +6175,6 @@ function renderBusinessListFilterControls(
     updateFilters,
     rootCategories,
     filteredLevel2Categories,
-    brands,
     productGroups,
     productVariants,
     hasAdvancedFilters
@@ -7377,24 +6283,6 @@ function renderBusinessListFilterControls(
 
       {kind === 'productVariant' ? (
         <>
-          <FilterField label="Thuộc sản phẩm">
-            <Select
-              value={filters.product_group_id}
-              onChange={(event) =>
-                updateFilters((current) => ({
-                  ...current,
-                  product_group_id: event.target.value
-                }))
-              }
-            >
-              <option value="">Tất cả sản phẩm cha</option>
-              {productGroups.map((group) => (
-                <option key={String(group.id)} value={String(group.id)}>
-                  {formatProductGroupOption(group)}
-                </option>
-              ))}
-            </Select>
-          </FilterField>
           <FilterField label="Cách báo giá">
             <Select
               value={filters.price_mode}
@@ -7511,7 +6399,7 @@ function renderBusinessListFilterControls(
               <option value="">Tất cả biến thể</option>
               {productVariants.map((variant) => (
                 <option key={String(variant.id)} value={String(variant.id)}>
-                  {formatValue(variant.variant_name)}
+                  {formatVariantOption(variant)}
                 </option>
               ))}
             </Select>
@@ -7790,23 +6678,52 @@ function StatusTextCell({ value }: { value: unknown }) {
   );
 }
 
-function DescriptionCell({
-  value,
-  fallback
-}: {
-  value: unknown;
-  fallback: string;
-}) {
-  const text = String(value || '').trim();
+function VariantContentCell({ row }: { row: RecordMap }) {
+  const hasOwnImage = Boolean(String(row.image_file_id ?? '').trim());
+  const hasOwnDescription = Boolean(String(row.detailed_description ?? '').trim());
+  const attributeCount = Number(row.attribute_count ?? 0);
+
   return (
     <td className="px-4 py-2 align-middle">
-      {text ? (
-        <p className="line-clamp-2 text-[13px] leading-5 text-slate-700">
-          {text}
-        </p>
-      ) : (
-        <span className="text-[12px] text-muted-foreground">{fallback}</span>
-      )}
+      <div className="flex flex-wrap gap-1.5">
+        <Badge tone={hasOwnImage ? 'info' : 'default'}>
+          {hasOwnImage ? 'Ảnh riêng' : 'Dùng ảnh sản phẩm'}
+        </Badge>
+        <Badge tone={hasOwnDescription ? 'info' : 'default'}>
+          {hasOwnDescription ? 'Mô tả riêng' : 'Dùng mô tả sản phẩm'}
+        </Badge>
+      </div>
+      <div className="mt-1.5 text-xs text-muted-foreground">
+        {Number.isFinite(attributeCount) ? attributeCount : 0} thông số riêng
+      </div>
+    </td>
+  );
+}
+
+function VariantVisibilityCell({ row }: { row: RecordMap }) {
+  const active = String(row.status ?? '') === 'active';
+  const approved = String(row.review_status ?? '') === 'approved';
+  const published = String(row.publish_status ?? '') === 'published';
+  const archived = Boolean(row.deleted_at);
+  const visible = active && published && !archived;
+  const label = archived
+    ? 'Đã lưu trữ'
+    : visible
+      ? 'Đang hiển thị'
+      : published && !active
+        ? 'Đang tạm ẩn'
+        : 'Chưa hiển thị';
+
+  return (
+    <td className="px-4 py-2 align-middle" data-variant-visibility-cell="true">
+      <Badge
+        tone={archived ? 'archived' : visible ? 'success' : published ? 'warning' : 'inactive'}
+      >
+        {label}
+      </Badge>
+      <div className="mt-1.5 text-xs text-muted-foreground">
+        {active ? 'Đang dùng' : 'Tạm ngưng'} · {approved ? 'Đã duyệt' : 'Chưa duyệt'}
+      </div>
     </td>
   );
 }
@@ -7980,19 +6897,28 @@ function ProductGroupStatusCell({
         String(row.review_status ?? '') !== 'approved' ||
         !String(row.thumbnail_file_id ?? '').trim()
       : currentStatus !== 'active';
+  const publishBlockedReason =
+    currentStatus !== 'active'
+      ? 'Kích hoạt sản phẩm trước khi xuất bản.'
+      : kind === 'productGroup' && String(row.review_status ?? '') !== 'approved'
+        ? 'Sản phẩm cần được duyệt trước khi xuất bản.'
+        : kind === 'productGroup' && !String(row.thumbnail_file_id ?? '').trim()
+          ? 'Bổ sung ảnh chính trước khi xuất bản.'
+          : '';
   const disabled = !canUpdate || updating || !row.id || Boolean(row.deleted_at);
 
   return (
-    <td className="w-[212px] min-w-[212px] px-4 py-2 align-middle">
-      <div className="flex flex-col items-start gap-1.5 text-[12px] text-text">
-        <div className="flex items-center gap-2">
-          <span className="w-[58px] shrink-0 text-[11px] text-muted-foreground">
+    <td className="w-[264px] min-w-[264px] px-4 py-2 align-middle" data-product-status-cell="true">
+      <div className="text-[12px] text-text">
+        <div className="grid grid-cols-3 gap-1.5">
+        <div className="min-w-0 rounded-sm bg-muted/55 px-2 py-1.5">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
             Quản trị
           </span>
           {row.status ? (
             <Badge
               tone={statusTone(row.status)}
-              className="whitespace-nowrap px-2 py-0.5 text-[11px]"
+              className="max-w-full whitespace-normal px-1.5 py-0.5 text-[10px]"
             >
               {formatValue(row.status)}
             </Badge>
@@ -8000,14 +6926,14 @@ function ProductGroupStatusCell({
             <span className="text-xs text-muted-foreground">—</span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-[58px] shrink-0 text-[11px] text-muted-foreground">
+        <div className="min-w-0 rounded-sm bg-muted/55 px-2 py-1.5">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
             Duyệt
           </span>
           {row.review_status ? (
             <Badge
               tone={statusTone(row.review_status)}
-              className="whitespace-nowrap px-2 py-0.5 text-[11px]"
+              className="max-w-full whitespace-normal px-1.5 py-0.5 text-[10px]"
             >
               {formatValue(row.review_status)}
             </Badge>
@@ -8015,22 +6941,23 @@ function ProductGroupStatusCell({
             <span className="text-xs text-muted-foreground">—</span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-[58px] shrink-0 text-[11px] text-muted-foreground">
+        <div className="min-w-0 rounded-sm bg-muted/55 px-2 py-1.5">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
             Website
           </span>
           <Badge
             tone={statusTone(row.publish_status ?? 'unpublished')}
-            className="max-w-none whitespace-normal break-words px-2 py-0.5 text-[11px]"
+            className="max-w-full whitespace-normal break-words px-1.5 py-0.5 text-[10px]"
           >
             {formatValue(row.publish_status ?? 'unpublished')}
           </Badge>
         </div>
+        </div>
         {isTemporarilyHidden ? (
-          <div className="text-[11px] text-amber-700">Tạm ẩn trên website</div>
+          <div className="mt-1.5 text-[11px] text-amber-700">Tạm ẩn trên website</div>
         ) : null}
         {canUpdate ? (
-          <div className="mt-1">
+          <div className="mt-2">
             {disabled ? (
               <Button
                 type="button"
@@ -8055,6 +6982,7 @@ function ProductGroupStatusCell({
                     type="button"
                     className="flex w-full items-center px-3 py-2 text-left text-xs text-text hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground disabled:opacity-60"
                     disabled={currentPublishStatus === 'published' || publishBlocked || updating}
+                    title={publishBlocked ? publishBlockedReason : undefined}
                     onClick={(event) => {
                       event.currentTarget.closest('details')?.removeAttribute('open');
                       onChange?.('published');
@@ -8079,6 +7007,11 @@ function ProductGroupStatusCell({
             {updating ? (
               <div className="text-xs text-muted-foreground">Đang cập nhật...</div>
             ) : null}
+            {!updating && publishBlockedReason && currentPublishStatus !== 'published' ? (
+              <div className="mt-1 max-w-[232px] text-[10px] leading-4 text-amber-700">
+                {publishBlockedReason}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -8090,14 +7023,6 @@ function DateCell({ value }: { value: unknown }) {
   return (
     <td className="px-4 py-2 align-middle text-[13px] text-slate-700">
       {formatDate(value)}
-    </td>
-  );
-}
-
-function ShortDateCell({ value }: { value: unknown }) {
-  return (
-    <td className="whitespace-nowrap px-4 py-2 align-middle text-[13px] text-slate-700">
-      {formatShortDate(value)}
     </td>
   );
 }
@@ -8217,9 +7142,22 @@ function ProductGroupBulkToolbar(props: {
   onApplyPublish: () => void;
   onClearSelection: () => void;
 }) {
+  if (props.selectedCount === 0) {
+    return (
+      <div className="border-t border-border bg-muted/30 px-4 py-3">
+        <p className="text-[13px] text-muted-foreground">
+          Chọn sản phẩm trong danh sách để cập nhật trạng thái hàng loạt.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="border-t border-border bg-muted/30 px-4 py-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 xl:flex-nowrap">
+    <div
+      data-product-bulk-toolbar="true"
+      className="border-t border-border bg-[#eef6ff] px-4 py-2.5 shadow-[inset_2px_0_0_var(--primary)]"
+    >
+      <div className="flex flex-col items-stretch gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-fit shrink-0 flex-col leading-tight">
           <span className="whitespace-nowrap text-[13px] font-medium text-text">
             Cập nhật hàng loạt
@@ -8227,21 +7165,22 @@ function ProductGroupBulkToolbar(props: {
           {props.selectedCount > 0 ? (
             <button
               type="button"
-              className="w-fit whitespace-nowrap text-[11px] font-medium text-primary hover:underline"
+              data-product-selected-count="true"
+              className="inline-flex min-h-11 w-fit items-center whitespace-nowrap text-[11px] font-medium text-primary hover:underline md:min-h-0"
               onClick={props.onClearSelection}
             >
               Đã chọn {props.selectedCount} {props.selectionLabel} · Bỏ chọn
             </button>
           ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-3 xl:flex-nowrap">
-          <div className="flex items-center gap-2">
+        <div className="grid gap-3 lg:grid-cols-2 xl:flex xl:flex-nowrap xl:items-center">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
             <Select
               aria-label="Cập nhật trạng thái quản trị hàng loạt"
               value={props.adminValue}
               disabled={props.running}
               onChange={(event) => props.onAdminChange(event.target.value)}
-              className="w-[240px]"
+              className="min-w-0 w-full xl:w-[240px]"
             >
               <option value="">Trạng thái quản trị</option>
               {props.adminActions.map((action) => (
@@ -8253,7 +7192,7 @@ function ProductGroupBulkToolbar(props: {
             <Button
               type="button"
               variant="secondary"
-              className="min-w-[96px] whitespace-nowrap"
+              className="min-w-[88px] whitespace-nowrap"
               disabled={!props.adminValue || props.selectedCount === 0 || props.running}
               onClick={props.onApplyAdmin}
             >
@@ -8264,13 +7203,13 @@ function ProductGroupBulkToolbar(props: {
             className="hidden h-6 w-px bg-border xl:inline-block"
             aria-hidden="true"
           />
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
             <Select
               aria-label="Cập nhật hiển thị website hàng loạt"
               value={props.publishValue}
               disabled={props.running}
               onChange={(event) => props.onPublishChange(event.target.value)}
-              className="w-[220px]"
+              className="min-w-0 w-full xl:w-[220px]"
             >
               <option value="">Hiển thị website</option>
               {props.publishActions.map((action) => (
@@ -8282,7 +7221,7 @@ function ProductGroupBulkToolbar(props: {
             <Button
               type="button"
               variant="secondary"
-              className="min-w-[96px] whitespace-nowrap"
+              className="min-w-[88px] whitespace-nowrap"
               disabled={
                 !props.publishValue || props.selectedCount === 0 || props.running
               }
@@ -8716,15 +7655,12 @@ function mergeRowPublishStatusUpdate(
 function shouldKeepStatusListRow(row: RecordMap, filters: BusinessListFilters) {
   const selectedStatus = filters.status.trim();
   if (selectedStatus && selectedStatus !== 'all') {
-    return String(row.status ?? '') === selectedStatus;
+    if (String(row.status ?? '') !== selectedStatus) return false;
   }
-
+  if (filters.review_status && String(row.review_status ?? '') !== filters.review_status) return false;
   return true;
 }
 
-function shouldKeepProductGroupListRow(row: RecordMap, filters: BusinessListFilters) {
-  return shouldKeepStatusListRow(row, filters);
-}
 
 function brandVisibilityDescription(action: BrandVisibilityAction) {
   const brandName = formatValue(action.row.name || action.row.slug || action.row.id);
@@ -8755,14 +7691,9 @@ function asRecord(value: unknown): RecordMap {
     : {};
 }
 
-function optionalText(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function requiredOrNull(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+function recordCount(value: unknown) {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
 function formsEqual(left: Record<string, string>, right: Record<string, string>) {
@@ -8775,18 +7706,6 @@ function formsEqual(left: Record<string, string>, right: Record<string, string>)
   return true;
 }
 
-function stringValue(value: unknown) {
-  return value == null ? '' : String(value);
-}
-
-function stripNulls<T extends Record<string, unknown>>(payload: T) {
-  return Object.fromEntries(
-    Object.entries(payload).filter(
-      ([, value]) => typeof value !== 'undefined' && value !== ''
-    )
-  );
-}
-
 function searchPlaceholder(kind: BusinessKind) {
   switch (kind) {
     case 'category':
@@ -8796,7 +7715,7 @@ function searchPlaceholder(kind: BusinessKind) {
     case 'productGroup':
       return 'Tìm theo tên sản phẩm...';
     case 'productVariant':
-      return 'Tìm tên, mã SP, SKU, mô tả...';
+      return 'Tìm tên biến thể, SKU, model hoặc sản phẩm...';
     case 'technicalDocument':
       return 'Tìm theo tên tài liệu hoặc sản phẩm...';
   }
@@ -8819,7 +7738,38 @@ function variantCodeSummary(row: RecordMap) {
   const externalCode = compactCode(row.external_code);
   if (externalCode) return `Mã ngoài ${externalCode}`;
 
+  const sku = compactCode(row.sku);
+  if (sku) return `SKU ${sku}`;
+
   return undefined;
+}
+
+function formatVariantOption(row: RecordMap) {
+  const name = formatValue(row.variant_name);
+  const modelCode = String(row.model_code ?? '').trim();
+  const externalCode = String(row.external_code ?? '').trim();
+  const sku = String(row.sku ?? '').trim();
+  const identity = modelCode
+    ? `Model ${modelCode}`
+    : externalCode
+      ? `Mã ngoài ${externalCode}`
+      : sku
+        ? `SKU ${sku}`
+        : undefined;
+  return identity ? `${name} · ${identity}` : name;
+}
+
+function variantAccessibleIdentity(row: RecordMap) {
+  const parts = [formatValue(row.variant_name)];
+  const modelCode = String(row.model_code ?? '').trim();
+  const sku = String(row.sku ?? '').trim();
+  const externalCode = String(row.external_code ?? '').trim();
+
+  if (modelCode) parts.push(`model ${modelCode}`);
+  if (sku) parts.push(`SKU ${sku}`);
+  if (externalCode) parts.push(`mã ngoài ${externalCode}`);
+
+  return parts.join(', ');
 }
 
 function compactCode(value: unknown) {
@@ -8831,21 +7781,6 @@ function compactCode(value: unknown) {
 
 function formatPriceMode(value: unknown) {
   return value === 'public_price' ? 'Có giá công khai' : 'Liên hệ để báo giá';
-}
-
-function formatShortDate(value: unknown) {
-  if (!value) return formatValue(value);
-
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) {
-    return formatDate(value);
-  }
-
-  return new Intl.DateTimeFormat('vi-VN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  }).format(date);
 }
 
 function hasAnyValue(form: Record<string, string>, keys: string[]) {
@@ -8876,4 +7811,9 @@ function formatCurrency(value: unknown) {
     currency: 'VND',
     maximumFractionDigits: 0
   }).format(amount);
+}
+
+function canPreviewPublicPrice(value: string) {
+  const amount = Number(value);
+  return value.trim() !== '' && Number.isSafeInteger(amount) && amount > 0 && amount <= 2_147_483_647;
 }

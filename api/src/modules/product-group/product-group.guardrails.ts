@@ -13,9 +13,14 @@ import {
   type ProductGroupStatus
 } from './product-group.types';
 
-export const UUID_PATTERN =
+const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const PRODUCT_GROUP_NAME_MAX_LENGTH = 255;
+export const PRODUCT_GROUP_SLUG_MAX_LENGTH = 255;
+export const PRODUCT_GROUP_SEO_TITLE_MAX_LENGTH = 255;
+export const PRODUCT_GROUP_SEO_DESCRIPTION_MAX_LENGTH = 512;
+export const PRODUCT_HIGHLIGHT_LABEL_MAX_LENGTH = 128;
 
 export function assertUuid(fieldName: string, value: string): string {
   if (!UUID_PATTERN.test(value)) {
@@ -29,7 +34,11 @@ export function assertUuid(fieldName: string, value: string): string {
   return value;
 }
 
-export function normalizeRequiredText(fieldName: string, value: string): string {
+export function normalizeRequiredText(
+  fieldName: string,
+  value: string,
+  maxLength?: number
+): string {
   const normalized = value.trim();
   if (normalized === '') {
     throw new AppError({
@@ -39,11 +48,19 @@ export function normalizeRequiredText(fieldName: string, value: string): string 
       details: { field: fieldName }
     });
   }
+  if (typeof maxLength === 'number' && normalized.length > maxLength) {
+    throw new AppError({
+      code: ErrorCodes.VALIDATION_ERROR,
+      message: `${fieldName} must be ${maxLength} characters or fewer.`,
+      statusCode: HttpStatus.BAD_REQUEST,
+      details: { field: fieldName, max_length: maxLength }
+    });
+  }
   return normalized;
 }
 
 export function normalizeSlug(value: string): string {
-  const normalized = normalizeRequiredText('slug', value);
+  const normalized = normalizeRequiredText('slug', value, PRODUCT_GROUP_SLUG_MAX_LENGTH);
   if (!SLUG_PATTERN.test(normalized)) {
     throw new AppError({
       code: ErrorCodes.VALIDATION_ERROR,
@@ -55,11 +72,27 @@ export function normalizeSlug(value: string): string {
   return normalized;
 }
 
-export function normalizeNullableText(value: string | null | undefined): string | null | undefined {
+export function normalizeNullableText(
+  fieldName: string,
+  value: string | null | undefined,
+  maxLength?: number
+): string | null | undefined {
   if (typeof value === 'undefined') {
     return undefined;
   }
-  return value;
+  if (value === null) {
+    return null;
+  }
+  const normalized = value.trim();
+  if (typeof maxLength === 'number' && normalized.length > maxLength) {
+    throw new AppError({
+      code: ErrorCodes.VALIDATION_ERROR,
+      message: `${fieldName} must be ${maxLength} characters or fewer.`,
+      statusCode: HttpStatus.BAD_REQUEST,
+      details: { field: fieldName, max_length: maxLength }
+    });
+  }
+  return normalized === '' ? null : normalized;
 }
 
 export function normalizeNullableUuid(fieldName: string, value: string | null | undefined): string | null | undefined {

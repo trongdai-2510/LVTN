@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import ExcelJS from 'exceljs';
 
 const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL ||
@@ -21,10 +22,19 @@ type AdminSession = {
   roles: string[];
 };
 
+test('gợi ý tìm kiếm không tự che kết quả khi mở danh sách đã lọc', async ({ page, request }) => {
+  const product = await firstPublishedProduct(request);
+  await page.goto(`${FRONTEND_BASE_URL}/san-pham/danh-sach?q=${encodeURIComponent(String(product.name))}`);
+  await expect(page.locator('[data-product-search-resolved="true"]')).toBeVisible();
+  await expect(page.locator('[data-product-search-suggestions="true"]')).toBeHidden();
+  await page.getByRole('main').getByRole('searchbox').focus();
+  await expect(page.locator('[data-product-search-suggestions="true"]')).toBeVisible();
+});
+
 test('khách tìm sản phẩm, kiểm tra thông tin và gửi báo giá gắn đúng sản phẩm', async ({
   page,
   request
-}) => {
+}, testInfo) => {
   test.setTimeout(120_000);
   assertSafeTarget();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -38,13 +48,12 @@ test('khách tìm sản phẩm, kiểm tra thông tin và gửi báo giá gắn 
   try {
     await test.step('Tìm từ trang danh sách rồi mở đúng chi tiết sản phẩm', async () => {
       await page.goto(`${FRONTEND_BASE_URL}/san-pham/danh-sach`);
-      const search = page
-        .getByRole('main')
-        .getByPlaceholder('Tìm theo tên sản phẩm, model hoặc thương hiệu');
+      const search = page.getByRole('main').getByRole('searchbox');
       await expect(search).toBeVisible();
-      await search.fill(firstSearchToken(String(product.name)));
+      await search.fill(String(product.name));
       await search.press('Enter');
       await expect(page).toHaveURL(/\/san-pham\/danh-sach\?.*q=/);
+      await expect(page.locator('[data-product-search-suggestions="true"]')).toBeHidden();
 
       const detailLink = page.getByRole('link', {
         name: `Xem chi tiết ${String(product.name)}`
@@ -74,24 +83,25 @@ test('khách tìm sản phẩm, kiểm tra thông tin và gửi báo giá gắn 
     });
 
     await test.step('Form báo giá chặn dữ liệu thiếu và giữ sản phẩm đã chọn', async () => {
-      await page
-        .getByRole('button', { name: /Yêu cầu báo giá|Gửi yêu cầu/ })
-        .first()
-        .click();
+      await page.locator('[data-product-primary-actions] [data-quote-action="open"]').click();
 
-      const dialog = page.getByRole('dialog');
-      await expect(dialog).toBeVisible();
-      await assertNoHorizontalOverflow(page, 'mobile quote request dialog');
-      await expect(dialog.getByText(String(product.name), { exact: false })).toBeVisible();
-      const submit = dialog.getByRole('button', { name: 'Gửi yêu cầu', exact: true });
+      await expect(page).toHaveURL(
+        new RegExp(`/san-pham/${escapeRegex(String(product.slug))}$`)
+      );
+      const quoteDialog = page.getByRole('dialog', { name: 'Danh sách yêu cầu' });
+      await expect(quoteDialog).toBeVisible();
+      await assertNoHorizontalOverflow(page, 'mobile quote dialog on product detail');
+      await expect(quoteDialog.getByText(String(product.name), { exact: false })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath('quoteFormRealProductMobile.png') });
+      const submit = quoteDialog.getByRole('button', { name: 'Gửi yêu cầu', exact: true });
       await submit.click();
-      await expect(dialog.getByText('Vui lòng nhập họ và tên.')).toBeVisible();
-      await expect(dialog.getByLabel('Họ và tên')).toBeFocused();
+      await expect(quoteDialog.getByText('Vui lòng nhập họ và tên.')).toBeVisible();
+      await expect(quoteDialog.getByLabel('Họ và tên')).toBeFocused();
 
-      await dialog.getByLabel('Họ và tên').fill(`Khách QA ${runId}`);
-      await dialog.getByLabel('Số điện thoại').fill('0901234567');
-      await dialog.getByLabel('Email').fill(email);
-      await dialog.getByLabel('Nội dung yêu cầu').fill('Cần tư vấn cấu hình phù hợp cho công trình.');
+      await quoteDialog.getByLabel('Họ và tên').fill(`Khách QA ${runId}`);
+      await quoteDialog.getByLabel('Số điện thoại').fill('0901234567');
+      await quoteDialog.getByLabel('Email').fill(email);
+      await quoteDialog.getByLabel('Nội dung yêu cầu').fill('Cần tư vấn cấu hình phù hợp cho công trình.');
     });
 
     await test.step('Gửi thành công và xác minh bản ghi được gắn với sản phẩm đang xem', async () => {
@@ -101,13 +111,17 @@ test('khách tìm sản phẩm, kiểm tra thông tin và gửi báo giá gắn 
           /\/public\/quote-requests(?:\?|$)/.test(response.url()) &&
           response.status() === 201
       );
-      await page.getByRole('dialog').getByRole('button', { name: 'Gửi yêu cầu', exact: true }).click();
+      await page
+        .getByRole('dialog', { name: 'Danh sách yêu cầu' })
+        .getByRole('button', { name: 'Gửi yêu cầu', exact: true })
+        .click();
       const response = await createResponse;
       const body = (await response.json()) as unknown;
       const quote = nestedRecord(body, 'quote_request');
       quoteId = String(quote.id || '');
       expect(quoteId, 'Public quote response must include quote_request.id').not.toBe('');
       await expect(page.getByText('Yêu cầu đã được ghi nhận.')).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Danh sách yêu cầu' }).getByRole('button', { name: 'Đóng', exact: true })).toBeFocused();
 
       session = await login(request);
       const detailResponse = await adminRequest(request, session, 'GET', `/song-thanh/quotes/${quoteId}`);
@@ -185,7 +199,15 @@ test('khách gửi liên hệ, kinh doanh lọc yêu cầu mới, ghi chú và k
       const status = page.getByLabel('Trạng thái');
       await status.selectOption('in_progress');
       await expect(status).toHaveValue('in_progress');
+      const doneResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'PUT' &&
+          response.url().endsWith(`/song-thanh/contacts/${contactId}/status`) &&
+          response.request().postDataJSON()?.status === 'done' &&
+          response.ok()
+      );
       await status.selectOption('done');
+      await doneResponse;
       await expect(status).toHaveValue('done');
     });
 
@@ -196,6 +218,18 @@ test('khách gửi liên hệ, kinh doanh lọc yêu cầu mới, ghi chú và k
       expect(nestedRecord(detail, 'contact').status).toBe('done');
       const notes = arrayFromKeys(detail, ['internal_notes', 'contact_internal_notes', 'notes']);
       expect(notes.some((item) => String(recordOf(item).note_text) === `Đã gọi xác minh nhu cầu, mã QA ${runId}.`)).toBe(true);
+    });
+
+    await test.step('Lưu trữ từ mobile có vùng chạm an toàn và quay về đúng danh sách admin', async () => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const archiveButton = page.getByRole('button', { name: 'Lưu trữ yêu cầu' });
+      const archiveBox = await archiveButton.boundingBox();
+      expect.soft(archiveBox, 'archive action must have a measurable touch target').not.toBeNull();
+      expect.soft(archiveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await archiveButton.click();
+      const dialog = page.getByRole('dialog', { name: 'Lưu trữ yêu cầu này?' });
+      await dialog.getByRole('button', { name: 'Lưu trữ', exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`${escapeRegex(adminPath('/contacts'))}(?:\\?.*)?$`));
     });
   } finally {
     if (contactId && session) {
@@ -336,8 +370,74 @@ test('quản trị sản phẩm tạo bản nháp, thêm biến thể và không
       await expect(successDialog).toBeHidden();
     });
 
+    await test.step('Phiên quản trị cũ bị chặn ghi đè và nhận hướng dẫn tải lại rõ ràng', async () => {
+      const stalePage = await page.context().newPage();
+      try {
+        await seedAuth(stalePage, session);
+        await stalePage.goto(adminPath(`/product-groups/${productId}`));
+        await expect(stalePage.getByLabel('Tên sản phẩm')).toHaveValue(productName);
+
+        const beforeResponse = await adminRequest(
+          request,
+          session,
+          'GET',
+          `/song-thanh/product-groups/${productId}`
+        );
+        expect(beforeResponse.ok()).toBe(true);
+        const before = nestedRecord(await beforeResponse.json(), 'product_group');
+        const expectedUpdatedAt = String(before.updated_at || '');
+        expect(expectedUpdatedAt).not.toBe('');
+
+        const winnerDescription = `Phiên mới ${runId}`;
+        const winnerResponse = await adminRequest(
+          request,
+          session,
+          'PUT',
+          `/song-thanh/product-groups/${productId}`,
+          {
+            seo_description: winnerDescription,
+            expected_updated_at: expectedUpdatedAt
+          }
+        );
+        expect(winnerResponse.ok()).toBe(true);
+
+        await stalePage.getByLabel('Tên sản phẩm').fill(`${productName} bản cũ`);
+        await stalePage.getByRole('button', { name: 'Lưu thay đổi', exact: true }).click();
+        const conflictDialog = stalePage.getByRole('dialog', {
+          name: 'Dữ liệu sản phẩm đã được cập nhật ở nơi khác'
+        });
+        await expect(conflictDialog).toBeVisible();
+        await expect(
+          conflictDialog.getByText(
+            'Bản đang mở không còn là phiên bản mới nhất nên hệ thống đã chặn ghi đè để tránh mất dữ liệu.'
+          )
+        ).toBeVisible();
+        await expect(
+          conflictDialog.getByText(/Tải lại trang để nhận dữ liệu mới nhất/)
+        ).toBeVisible();
+
+        const retainedResponse = await adminRequest(
+          request,
+          session,
+          'GET',
+          `/song-thanh/product-groups/${productId}`
+        );
+        const retained = nestedRecord(await retainedResponse.json(), 'product_group');
+        expect(retained.name).toBe(productName);
+        expect(retained.seo_description).toBe(winnerDescription);
+      } finally {
+        await stalePage.close();
+      }
+
+      await page.reload();
+      await expect(page.getByLabel('Tên sản phẩm')).toHaveValue(productName);
+    });
+
     await test.step('Thêm biến thể có giá công khai bằng form có nhãn truy cập được', async () => {
-      await page.getByRole('button', { name: 'Thêm biến thể', exact: true }).click();
+      await page.getByRole('navigation', { name: 'Khu vực sản phẩm' })
+        .getByRole('link', { name: 'Biến thể / SKU', exact: true }).click();
+      await expect(page).toHaveURL(/(?:\?|&)view=variants(?:&|$)/);
+      await page.getByRole('button', { name: 'Thêm biến thể / SKU', exact: true }).click();
       let dialog = page.getByRole('dialog', { name: 'Thêm biến thể' });
       await expect(dialog).toBeVisible();
 
@@ -348,22 +448,54 @@ test('quản trị sản phẩm tạo bản nháp, thêm biến thể và không
       await discardDialog.getByRole('button', { name: 'Bỏ thay đổi', exact: true }).click();
       await expect(dialog).toBeHidden();
 
-      await page.getByRole('button', { name: 'Thêm biến thể', exact: true }).click();
+      await page.getByRole('button', { name: 'Thêm biến thể / SKU', exact: true }).click();
       dialog = page.getByRole('dialog', { name: 'Thêm biến thể' });
       await expect(dialog).toBeVisible();
       await dialog.getByLabel('Tên biến thể').fill(variantName);
-      await dialog.getByLabel('Nhánh giá').selectOption('public_price');
-      await expect(dialog.getByLabel('Giá công khai')).toBeEnabled();
-      await dialog.getByLabel('Giá công khai').fill('1250000');
+      await dialog.getByLabel('Cách hiển thị giá').selectOption('public_price');
+      await expect(dialog.getByLabel('Giá công khai (đồng)')).toBeEnabled();
+      await dialog.getByLabel('Giá công khai (đồng)').fill('1250000');
+      await expect(dialog.getByText(/Xem trước: 1\.250\.000/)).toBeVisible();
       await dialog.getByLabel('Mã model').fill(`MODEL-${runId}`);
       await dialog.getByRole('button', { name: 'Thêm biến thể', exact: true }).click();
       await expect(dialog).toBeHidden();
+
+      await page.getByRole('button', { name: 'Thêm biến thể / SKU', exact: true }).click();
+      dialog = page.getByRole('dialog', { name: 'Thêm biến thể' });
+      await dialog.getByLabel('Tên biến thể').fill(variantName);
+      await dialog.getByLabel('Mã model').fill(`MODEL-ALT-${runId}`);
+      await dialog.getByRole('button', { name: 'Thêm biến thể', exact: true }).click();
+      await expect(dialog).toBeHidden();
+
+      const variantTriggers = page.locator('[data-variant-workspace-trigger="true"]');
+      await expect(variantTriggers).toHaveCount(2);
+      const accessibleNames = await variantTriggers.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute('aria-label') || '')
+      );
+      expect(new Set(accessibleNames).size).toBe(2);
+      expect(accessibleNames.some((name) => name.includes(`MODEL-${runId}`))).toBe(true);
+      expect(accessibleNames.some((name) => name.includes(`MODEL-ALT-${runId}`))).toBe(true);
+
+      await page.getByRole('link', { name: 'Tài liệu', exact: true }).click();
+      await expect(page).toHaveURL(/(?:\?|&)view=documents(?:&|$)/);
+      const documentDetails = page
+        .locator('details')
+        .filter({ hasText: 'Thêm tài liệu kỹ thuật' });
+      await documentDetails.locator('summary').click();
+      const documentVariantOptions = documentDetails
+        .getByLabel('Phạm vi áp dụng')
+        .locator('option');
       await expect(
-        page.getByRole('button', { name: `Xem hoặc sửa biến thể ${variantName}` })
-      ).toBeVisible();
+        documentVariantOptions.filter({ hasText: `Model MODEL-${runId}` })
+      ).toHaveCount(1);
+      await expect(
+        documentVariantOptions.filter({ hasText: `Model MODEL-ALT-${runId}` })
+      ).toHaveCount(1);
     });
 
     await test.step('Luồng duyệt tách khỏi xuất bản và bản ghi thiếu điều kiện không lộ ra website', async () => {
+      await page.getByRole('link', { name: 'Thông tin', exact: true }).click();
+      await expect(page.locator('#product-group-main #product-group-display')).toBeVisible();
       await page.getByRole('button', { name: 'Gửi duyệt', exact: true }).click();
       await expect(page.getByText('Đã gửi nội dung để duyệt.')).toBeVisible();
 
@@ -388,9 +520,32 @@ test('quản trị sản phẩm tạo bản nháp, thêm biến thể và không
     });
   } finally {
     if (productId) {
-      await adminRequest(request, session, 'POST', `/song-thanh/product-groups/${productId}/archive`, {}).catch(
-        () => undefined
+      const variantsResponse = await adminRequest(
+        request,
+        session,
+        'GET',
+        `/song-thanh/product-variants?product_group_id=${encodeURIComponent(productId)}&deleted_scope=active&page=1&page_size=100`
       );
+      if (variantsResponse.ok()) {
+        const variantItems = arrayFromKeys(unwrap(await variantsResponse.json()), ['items']);
+        for (const variant of variantItems.map(recordOf)) {
+          if (!variant.id) continue;
+          await adminRequest(
+            request,
+            session,
+            'POST',
+            `/song-thanh/product-variants/${String(variant.id)}/archive`,
+            {}
+          ).catch(() => undefined);
+        }
+      }
+      await adminRequest(
+        request,
+        session,
+        'POST',
+        `/song-thanh/product-groups/${productId}/archive`,
+        {}
+      ).catch(() => undefined);
     }
   }
 });
@@ -413,13 +568,30 @@ test('quản lý nhập dữ liệu tải workbook, xác nhận mapping và ch�
 
     await test.step('Tải workbook bằng giao diện và xem trước mapping trước khi có dữ liệu tạm', async () => {
       await page.getByLabel('Tên lô').fill(`Lô QA ${runId}`);
+      await expect(page.locator('[data-import-upload-dropzone="true"]')).toContainText('tối đa 20 MB');
+      await page.locator('[data-import-upload-file="true"]').setInputFiles({
+        name: `catalog-${runId}.txt`,
+        mimeType: 'text/plain',
+        buffer: Buffer.from('not a supported workbook')
+      });
+      await expect(page.getByText(/chỉ chọn Excel \.xlsx hoặc CSV \.csv/i)).toBeVisible();
+      await expect(page.locator('[data-import-upload-submit="true"]')).toBeDisabled();
+
       await page.locator('[data-import-upload-file="true"]').setInputFiles({
         name: `catalog-${runId}.csv`,
         mimeType: 'text/csv',
         buffer: Buffer.from(
           [
-            'Category Main,Category Sub,Product Group,Variant',
-            `QA Main ${runId},QA Sub ${runId},QA Group ${runId},QA Variant ${runId}`
+            [
+              'Category Main', 'Category Sub', 'Product Group', 'Variant',
+              'Thông số mới',
+              ...Array.from({ length: 43 }, (_, index) => `Cột khác ${index + 1}`)
+            ].join(','),
+            [
+              `QA Main ${runId}`, `QA Sub ${runId}`,
+              `QA Group ${runId}`, `QA Variant ${runId}`, '100W',
+              ...Array.from({ length: 43 }, () => 'không nhập')
+            ].join(',')
           ].join('\n')
         )
       });
@@ -435,12 +607,45 @@ test('quản lý nhập dữ liệu tải workbook, xác nhận mapping và ch�
       await expect(page).toHaveURL(new RegExp(`${ADMIN_BASE_PATH}/import/[0-9a-f-]+$`, 'i'));
       batchId = page.url().split('/').at(-1) || '';
       expect(batchId, 'Workbook upload must navigate to the created import batch').not.toBe('');
-      await expect(page.getByRole('heading', { name: 'Chọn cột nào đi vào dữ liệu nào' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Xác nhận cột dữ liệu' })).toBeVisible();
+      await expect(page.getByText('Tên sản phẩm (dùng chung)', { exact: true })).toBeVisible();
+      await expect(page.getByText('Tên biến thể', { exact: true })).toBeVisible();
+      await expect(page.getByText('Mỗi sản phẩm chỉ có một cấu hình', { exact: true })).toBeVisible();
       await expect(page.locator('[data-import-required-role="category_main_column"]')).toHaveValue('Category Main');
       await expect(page.locator('[data-import-required-role="category_sub_column"]')).toHaveValue('Category Sub');
       await expect(page.locator('[data-import-required-role="product_group_column"]')).toHaveValue('Product Group');
       await expect(page.locator('[data-import-required-role="product_variant_column"]')).toHaveValue('Variant');
-      await expect(page.getByText(/chưa tạo dữ liệu tạm/i)).toBeVisible();
+      const flatProductMode = page.locator('[data-import-flat-product-mode="true"]');
+      await flatProductMode.check();
+      await expect(page.locator('[data-import-required-role="product_variant_column"]')).toBeDisabled();
+      await expect(page.locator('[data-import-required-role="product_variant_column"]')).toHaveValue('Product Group');
+      await flatProductMode.uncheck();
+      await expect(page.locator('[data-import-required-role="product_variant_column"]')).toBeEnabled();
+      await page.locator('[data-import-required-role="product_variant_column"]').selectOption('Variant');
+      const categoryMain = page.locator('[data-import-required-role="category_main_column"]');
+      await categoryMain.selectOption('');
+      await page.locator('[data-import-mapping-submit="true"]').click();
+      await expect(page.locator('[data-import-mapping-error="true"]')).toContainText(
+        'Chưa chọn cột “Danh mục chính”'
+      );
+      await expect(categoryMain).toBeFocused();
+      await categoryMain.selectOption('Category Main');
+      await page.locator('[data-import-mapping-submit="true"]').click();
+      await expect(page.locator('[data-import-mapping-error="true"]')).toContainText(
+        'Còn 44 cột chưa xử lý'
+      );
+      await expect(page.locator('[data-import-flexible-column]')).toHaveCount(20);
+      await page.getByRole('button', { name: 'Tiếp' }).click();
+      await expect(page.getByText('Trang 2 / 3')).toBeVisible();
+      await page.locator('[data-import-column-search="true"]').fill('thong so moi');
+      await expect(page.locator('[data-import-flexible-column]')).toHaveCount(1);
+      await page.getByRole('button', { name: 'Giữ 1 cột làm thuộc tính' }).click();
+      await page.locator('[data-import-column-search="true"]').fill('');
+      await expect(page.locator('[data-import-column-view="true"]')).toHaveValue('unmapped');
+      await page.getByRole('button', { name: 'Bỏ qua 43 cột' }).click();
+      await expect(page.locator('[data-import-column-bulk-actions="true"]')).toHaveCount(0);
+      await expect(page.locator('[data-import-mapping-submit="true"]')).toBeVisible();
+      await expect(page.locator('[data-import-review-panel]')).toHaveCount(0);
     });
 
     await test.step('Xác nhận mapping, chuyển sang vùng duyệt và không hiển thị thao tác áp dụng sớm', async () => {
@@ -490,6 +695,64 @@ test('quản lý nhập dữ liệu tải workbook, xác nhận mapping và ch�
   }
 });
 
+test('nhập Excel nhiều sheet giữ đúng sheet đã chọn khi xem trước và tạo dữ liệu tạm', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  assertSafeTarget();
+  const session = await login(request);
+  const runId = uniqueId('import-sheet');
+  let batchId = '';
+  const workbook = new ExcelJS.Workbook();
+  workbook.addWorksheet('Ghi chú').addRows([['Nội dung'], ['Không nhập dòng này']]);
+  workbook.addWorksheet('Sản phẩm').addRows([
+    ['Category Main', 'Category Sub', 'Product Group', 'Variant'],
+    [`QA Main ${runId}`, `QA Sub ${runId}`, `QA Group ${runId}`, `QA Variant ${runId}`]
+  ]);
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+  try {
+    await seedAuth(page, session);
+    await page.goto(adminPath('/import/new'));
+    await page.locator('[data-import-upload-file="true"]').setInputFiles({
+      name: `catalog-${runId}.xlsx`,
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer
+    });
+    const sheetSelect = page.locator('[data-import-sheet-select="true"]');
+    await expect(sheetSelect).toBeVisible();
+    await expect(sheetSelect.locator('option')).toHaveCount(3);
+    await expect(page.locator('[data-import-upload-submit="true"]')).toBeDisabled();
+    await sheetSelect.selectOption('Sản phẩm');
+    await expect(page.locator('[data-import-upload-submit="true"]')).toBeEnabled();
+    await page.locator('[data-import-upload-submit="true"]').click();
+    await expect(page).toHaveURL(new RegExp(`${ADMIN_BASE_PATH}/import/[0-9a-f-]+$`, 'i'));
+    batchId = page.url().split('/').at(-1) || '';
+    await expect(page.locator('[data-import-required-role="product_group_column"]')).toHaveValue('Product Group');
+
+    const detailResponse = await adminRequest(request, session, 'GET', `/song-thanh/import-batches/${batchId}`);
+    expect(detailResponse.ok()).toBe(true);
+    const detail = unwrap(await detailResponse.json());
+    expect(recordOf(detail.batch).source_sheet_name).toBe('Sản phẩm');
+    expect(recordOf(detail.preview).sheet_name).toBe('Sản phẩm');
+    expect(recordOf((recordOf(detail.preview).sample_rows as RecordMap[])[0]).cells).toMatchObject({
+      'Product Group': `QA Group ${runId}`
+    });
+
+    await page.locator('[data-import-mapping-submit="true"]').click();
+    await expect(page.locator('[data-import-review-panel="groups"]')).toBeVisible();
+    const groupsResponse = await adminRequest(
+      request, session, 'GET', `/song-thanh/import-batches/${batchId}/pending-product-groups?page=1&page_size=25`
+    );
+    expect(groupsResponse.ok()).toBe(true);
+    const groups = arrayFromKeys(unwrap(await groupsResponse.json()), ['items']);
+    expect(groups).toHaveLength(1);
+    expect(recordOf(groups[0]).product_name).toBe(`QA Group ${runId}`);
+  } finally {
+    if (batchId) {
+      await adminRequest(request, session, 'DELETE', `/song-thanh/import-batches/${batchId}`).catch(() => undefined);
+    }
+  }
+});
+
 function normalizeAdminBasePath(basePath: string): string {
   const trimmed = basePath.trim().replace(/^\/+|\/+$/g, '');
   return trimmed ? `/${trimmed}` : '';
@@ -502,15 +765,6 @@ function adminPath(pathname: string): string {
 
 function uniqueId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function firstSearchToken(value: string): string {
-  const token = value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .split(/\s+/)
-    .find((part) => part.length >= 3);
-  return token || value;
 }
 
 function escapeRegex(value: string): string {

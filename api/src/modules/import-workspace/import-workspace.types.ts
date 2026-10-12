@@ -18,13 +18,11 @@ export const IMPORT_BATCH_FILE_USAGE_ENTITY_TYPE = 'import_batch';
 export const IMPORT_BATCH_SOURCE_FILE_FIELD_NAME = 'source_file_id';
 
 export const IMPORT_BATCH_STATUSES = ['created', 'validated', 'in_review', 'ready_to_apply', 'applied', 'cancelled'] as const;
-export const RAW_DATA_STATUSES = ['new', 'parsed', 'error', 'ignored'] as const;
 export const PENDING_ROW_STATUSES = ['pending_review', 'approved', 'rejected', 'applied'] as const;
 export const DATA_CONFLICT_STATUSES = ['open', 'resolved', 'skipped'] as const;
 export const DELETED_SCOPES = ['active', 'deleted', 'all'] as const;
 
 export type ImportBatchStatus = (typeof IMPORT_BATCH_STATUSES)[number];
-export type RawDataStatus = (typeof RAW_DATA_STATUSES)[number];
 export type PendingRowStatus = (typeof PENDING_ROW_STATUSES)[number];
 export type DataConflictStatus = (typeof DATA_CONFLICT_STATUSES)[number];
 export type DeletedScope = (typeof DELETED_SCOPES)[number];
@@ -34,6 +32,7 @@ export interface ImportBatchRecord {
   batch_name: string | null;
   source_file_name: string;
   source_file_id: string;
+  source_sheet_name: string | null;
   uploaded_by: number | null;
   status: ImportBatchStatus;
   total_rows: number;
@@ -61,15 +60,6 @@ export interface ImportMappingProfileRecord {
   created_at: Date;
   updated_at: Date;
   deleted_at: Date | null;
-}
-
-export interface ImportBatchSummary extends ImportBatchRecord {
-  raw_data_count: number;
-  pending_product_group_count: number;
-  pending_variant_count: number;
-  open_conflict_count: number;
-  mapping_count: number;
-  error_log_count: number;
 }
 
 export interface ImportBatchStats {

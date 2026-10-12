@@ -5,7 +5,6 @@ import { extname, resolve } from 'node:path';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
 import { FILE_LIBRARY_STORAGE_ROOT } from './file-storage';
-import { isProcessableImage, processImageBuffer } from './image-processor';
 
 export const MAX_FILE_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_ORIGINAL_FILENAME_LENGTH = 255;

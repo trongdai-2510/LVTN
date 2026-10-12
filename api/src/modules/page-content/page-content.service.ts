@@ -8,10 +8,16 @@ import { createPaginationMeta, getPaginationParams } from '../../common/paginati
 import { sanitizeRichTextHtml } from '../../common/sanitize/html-sanitizer';
 import { resolveAvailableSlug } from '../../common/text/slugify-text';
 import { LogicUserReferenceRepository } from '../../common/users/logic-user-reference.repository';
-import { reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
-import { CreatePageContentDto, PageContentListQueryDto, UpdatePageContentDto } from './page-content.dto';
+import { isVisibilityOnlyUnpublish, reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
+import {
+  CreatePageContentDto,
+  PageContentListQueryDto,
+  PageContentVersionDto,
+  UpdatePageContentDto
+} from './page-content.dto';
 import {
   assertUuid,
+  hasRenderableExtraBlockContent,
   normalizeBoolean,
   normalizeContentType,
   normalizeDeletedScope,
@@ -22,7 +28,8 @@ import {
   normalizePublishStatus,
   normalizeRequiredText,
   normalizeReviewStatus,
-  normalizeSlug
+  normalizeSlug,
+  requiresManagedBodyForPublication
 } from './page-content.guardrails';
 import { PageContentRepository } from './page-content.repository';
 import type { PageContentMutationInput, PageContentRecord } from './page-content.types';
@@ -81,15 +88,22 @@ export class PageContentService {
     const existing = await this.pageContentRepository.findById(id);
     if (!existing) throw this.notFound('Page content was not found.');
     if (existing.deleted_at) throw this.conflict('Page content is archived.');
-    const mutation = await this.normalizeUpdateInput(id, input, existing);
+    const mutation = await this.normalizeUpdateInput(id, input, existing, currentUser?.roles.includes('super_admin') ?? false);
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
-    await this.pageContentRepository.update(id, mutation, actorId);
+    const outcome = await this.pageContentRepository.update(
+      id,
+      mutation,
+      actorId,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getPageContentDetail(id);
   }
 
   async archivePageContent(
     pageContentId: string,
+    input: PageContentVersionDto,
     currentUser: CurrentUserContext | null
   ) {
     const id = assertUuid('page_content_id', pageContentId);
@@ -98,12 +112,18 @@ export class PageContentService {
     if (existing.deleted_at) throw this.conflict('Page content is already archived.');
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
-    await this.pageContentRepository.archive(id, actorId);
+    const outcome = await this.pageContentRepository.archive(
+      id,
+      actorId,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getPageContentDetail(id);
   }
 
   async restorePageContent(
     pageContentId: string,
+    input: PageContentVersionDto,
     currentUser: CurrentUserContext | null
   ) {
     const id = assertUuid('page_content_id', pageContentId);
@@ -113,12 +133,41 @@ export class PageContentService {
     await this.assertReferencesUsable(existing);
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
-    await this.pageContentRepository.restore(id, actorId);
+    const outcome = await this.pageContentRepository.restore(
+      id,
+      actorId,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getPageContentDetail(id);
+  }
+
+  private assertWriteOutcome(
+    outcome: Awaited<ReturnType<PageContentRepository['update']>>
+  ): void {
+    if (outcome.status === 'updated') return;
+    if (outcome.status === 'not_found') {
+      throw this.notFound('Page content was not found.');
+    }
+    if (outcome.status === 'stale') {
+      throw new AppError({
+        code: 'PAGE_CONTENT_VERSION_CONFLICT',
+        message:
+          'Nội dung đã được thay đổi bởi một phiên quản trị khác. Hãy tải lại dữ liệu mới trước khi lưu tiếp.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { current_updated_at: outcome.current_updated_at }
+      });
+    }
+    throw this.conflict(
+      outcome.status === 'archived'
+        ? 'Page content is archived.'
+        : 'Page content is not archived.'
+    );
   }
 
   private async normalizeCreateInput(input: CreatePageContentDto) {
     const title = normalizeRequiredText('title', input.title, 255);
+    const contentType = normalizeContentType(input.content_type);
     const slug =
       typeof input.slug === 'string' && input.slug.trim() !== ''
         ? normalizeSlug(input.slug)
@@ -129,7 +178,7 @@ export class PageContentService {
     const mutation = {
       title,
       slug,
-      content_type: normalizeContentType(input.content_type),
+      content_type: contentType,
       excerpt: normalizeNullableText('excerpt', input.excerpt) ?? null,
       content_html: sanitizeRichTextHtml(normalizeNullableText('content_html', input.content_html) ?? null),
       featured_image_file_id: normalizeNullableUuid('featured_image_file_id', input.featured_image_file_id) ?? null,
@@ -138,9 +187,18 @@ export class PageContentService {
       seo_title: normalizeNullableText('seo_title', input.seo_title, 255) ?? null,
       seo_description: normalizeNullableText('seo_description', input.seo_description, 512) ?? null,
       seo_og_image_file_id: normalizeNullableUuid('seo_og_image_file_id', input.seo_og_image_file_id) ?? null,
-      news_category_id: normalizeNullableUuid('news_category_id', input.news_category_id) ?? null,
-      published_at: normalizeNullableDate('published_at', input.published_at) ?? null,
-      is_featured: normalizeBoolean('is_featured', input.is_featured) ?? false,
+      news_category_id:
+        contentType === 'news'
+          ? normalizeNullableUuid('news_category_id', input.news_category_id) ?? null
+          : null,
+      published_at:
+        contentType === 'news'
+          ? normalizeNullableDate('published_at', input.published_at) ?? null
+          : null,
+      is_featured:
+        contentType === 'news'
+          ? normalizeBoolean('is_featured', input.is_featured) ?? false
+          : false,
       extra_blocks: normalizeExtraBlocks(input.extra_blocks) ?? { blocks: [] }
     };
     if (typeof input.slug === 'string' && input.slug.trim() !== '') {
@@ -151,7 +209,7 @@ export class PageContentService {
     return mutation;
   }
 
-  private async normalizeUpdateInput(id: string, input: UpdatePageContentDto, current: PageContentRecord): Promise<PageContentMutationInput> {
+  private async normalizeUpdateInput(id: string, input: UpdatePageContentDto, current: PageContentRecord, actorIsSuperAdmin: boolean): Promise<PageContentMutationInput> {
     const mutation: PageContentMutationInput = {};
     if (typeof input.title !== 'undefined') mutation.title = normalizeRequiredText('title', input.title, 255);
     if (typeof input.slug !== 'undefined') {
@@ -174,6 +232,15 @@ export class PageContentService {
       const normalized = normalizeExtraBlocks(input.extra_blocks);
       if (normalized) mutation.extra_blocks = normalized;
     }
+    // Visibility-only unpublish does not rewrite unrelated fields or validate
+    // old editorial references; publishing again still follows full checks.
+    if (isVisibilityOnlyUnpublish(input, ['expected_updated_at'])) return mutation;
+    const nextContentType = mutation.content_type ?? current.content_type;
+    if (nextContentType === 'page') {
+      mutation.news_category_id = null;
+      mutation.published_at = null;
+      mutation.is_featured = false;
+    }
     reopenPublishedContentAfterMajorEdit(
       current,
       mutation,
@@ -188,7 +255,8 @@ export class PageContentService {
         'published_at',
         'is_featured',
         'extra_blocks'
-      ]
+      ],
+      actorIsSuperAdmin
     );
     const next = { ...current, ...mutation };
     await this.assertReferencesUsable(next);
@@ -210,10 +278,18 @@ export class PageContentService {
     const imageBlockFileIds = (input.extra_blocks?.blocks ?? [])
       .filter((block) => block.type === 'image_card')
       .map((block) => block.image_file_id);
-    for (const fileId of new Set(imageBlockFileIds)) {
-      if (!(await this.pageContentRepository.activeFileExists(fileId))) {
-        throw this.notFound('Referenced extra-block image file was not found.');
-      }
+    if (
+      imageBlockFileIds.length > 0 &&
+      !(await this.pageContentRepository.activeImageFilesExist([...new Set(imageBlockFileIds)]))
+    ) {
+      throw this.notFound('Referenced extra-block image file was not found.');
+    }
+    if (
+      input.content_type === 'news' &&
+      input.news_category_id &&
+      !(await this.pageContentRepository.activeNewsCategoryExists(input.news_category_id))
+    ) {
+      throw this.notFound('Referenced news category was not found.');
     }
   }
 
@@ -224,8 +300,12 @@ export class PageContentService {
       .replace(/<[^>]*>/g, '')
       .replace(/&nbsp;/gi, ' ')
       .trim();
-    const hasStructuredBlocks = (input.extra_blocks?.blocks?.length ?? 0) > 0;
-    if (!meaningfulHtml && !hasStructuredBlocks) {
+    const hasStructuredBlocks = hasRenderableExtraBlockContent(input.extra_blocks);
+    if (
+      requiresManagedBodyForPublication(input.content_type, input.slug) &&
+      !meaningfulHtml &&
+      !hasStructuredBlocks
+    ) {
       throw this.conflict(
         'Page content must have a meaningful body before it can be published.'
       );

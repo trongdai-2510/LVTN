@@ -8,6 +8,7 @@ import { getEnv } from '../../config/env';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
 import type { AccessTokenPayload } from '../../common/auth/auth.types';
+import { assertSingleRole } from '../../common/auth/singleRole';
 import type { ChangePasswordDto, LoginDto, LogoutDto, RefreshDto } from './auth.dto';
 import { AuthRepository, type AdminUserRow } from './auth.repository';
 
@@ -30,6 +31,7 @@ export class AuthService {
     access_token: string;
     refresh_token: string;
     user: SafeAdminUser;
+    roles: string[];
     permissions: string[];
   }> {
     const user = await this.repository.findUserByEmail(dto.email);
@@ -51,24 +53,37 @@ export class AuthService {
       throw this.invalidCredentialsError();
     }
 
-    const access = await this.repository.getUserAccess(user.id);
-    const accessToken = this.signAccessToken(user, access.roles, access.permissions);
     const refreshToken = this.createRefreshToken();
 
-    await Promise.all([
-      this.repository.updateLastLogin(user.id),
-      this.repository.createRefreshSession({
-        id: randomUUID(),
-        userId: user.id,
-        tokenHash: this.hashRefreshToken(refreshToken),
-        expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
-      })
-    ]);
+    const loginResult = await this.repository.finalizeLogin({
+      id: randomUUID(),
+      userId: user.id,
+      expectedPasswordHash: user.password_hash,
+      tokenHash: this.hashRefreshToken(refreshToken),
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS)
+    });
+    if (loginResult.status === 'invalid') {
+      throw this.invalidCredentialsError();
+    }
+    if (loginResult.status === 'disabled') {
+      throw new AppError({
+        code: ErrorCodes.AUTH_USER_DISABLED,
+        message: 'Tài khoản không hoạt động.',
+        statusCode: HttpStatus.FORBIDDEN
+      });
+    }
+
+    const access = await this.repository.getUserAccess(user.id);
+    assertSingleRole(access.roles);
+    const accessToken = this.signAccessToken(
+      loginResult.user, access.roles, access.permissions
+    );
 
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
-      user: this.toSafeUser(user),
+      user: this.toSafeUser(loginResult.user),
+      roles: access.roles,
       permissions: access.permissions
     };
   }
@@ -122,6 +137,7 @@ export class AuthService {
 
     const user = rotation.user;
     const access = await this.repository.getUserAccess(user.id);
+    assertSingleRole(access.roles);
 
     return {
       access_token: this.signAccessToken(user, access.roles, access.permissions),
@@ -148,6 +164,7 @@ export class AuthService {
     }
 
     const access = await this.repository.getUserAccess(user.id);
+    assertSingleRole(access.roles);
 
     return {
       user: this.toSafeUser(user),
@@ -191,8 +208,25 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.new_password, PASSWORD_HASH_ROUNDS);
-    await this.repository.updatePasswordHash(user.id, passwordHash);
-    await this.repository.revokeAllRefreshSessionsForUser(user.id);
+    const result = await this.repository.changePasswordAndRevokeSessions({
+      userId: user.id,
+      expectedPasswordHash: user.password_hash,
+      passwordHash
+    });
+    if (result === 'disabled') {
+      throw new AppError({
+        code: ErrorCodes.AUTH_UNAUTHORIZED,
+        message: 'Phiên đăng nhập không hợp lệ.',
+        statusCode: HttpStatus.UNAUTHORIZED
+      });
+    }
+    if (result === 'stale') {
+      throw new AppError({
+        code: ErrorCodes.AUTH_PASSWORD_INVALID,
+        message: 'Mật khẩu hiện tại không đúng.',
+        statusCode: HttpStatus.BAD_REQUEST
+      });
+    }
 
     return { changed: true, refresh_sessions_revoked: true };
   }
@@ -223,7 +257,8 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       roles,
-      permissions
+      permissions,
+      revision: new Date(user.updated_at).getTime()
     };
 
     return jwt.sign(payload, getEnv().jwt.accessSecret, {

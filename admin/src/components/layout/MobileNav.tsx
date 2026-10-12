@@ -13,7 +13,9 @@ import {
 
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
+import { lockBodyScroll } from '@/lib/bodyScrollLock';
 import { getVisibleSidebarGroups } from '@/lib/route-map';
+import { AdminBrand } from './AdminBrand';
 
 export function MobileNav({
   hydrated,
@@ -37,8 +39,7 @@ export function MobileNav({
       return;
     }
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const releaseScrollLock = lockBodyScroll();
     const previousFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => {
@@ -55,7 +56,7 @@ export function MobileNav({
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
+      releaseScrollLock();
       previousFocus?.focus();
     };
   }, [open]);
@@ -89,10 +90,7 @@ export function MobileNav({
     <>
       <div className="sticky top-0 z-30 border-b border-[#2c2e45] bg-sidebar px-4 py-3 text-white lg:hidden">
         <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold tracking-[0.18em] text-white">SONG THANH</div>
-            <div className="mt-1 text-[11px] text-slate-400">Quản trị nội dung</div>
-          </div>
+          <AdminBrand compact />
           <Button
             ref={triggerRef}
             type="button"
@@ -125,6 +123,20 @@ export function MobileNav({
             onClick={(event) => event.stopPropagation()}
             onKeyDown={handleDrawerKeyDown}
           >
+            <div className="sticky top-0 z-10 -mx-3 -mt-5 mb-4 flex min-h-16 items-center justify-between gap-3 border-b border-[#244158] bg-sidebar px-4 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-white">Điều hướng</div>
+                <div className="mt-0.5 truncate text-[11px] text-slate-400">Khu vực quản trị</div>
+              </div>
+              <button
+                type="button"
+                aria-label="Đóng menu điều hướng"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-200 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sky-200"
+                onClick={() => setOpen(false)}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
             {!hydrated ? <SidebarPlaceholder /> : null}
             {hydrated
               ? visibleGroups.map((group) => (
@@ -142,6 +154,7 @@ export function MobileNav({
                           <div key={item.href}>
                             <Link
                               href={item.href}
+                              aria-current={active ? 'page' : undefined}
                               className={cn(
                                 'flex min-h-12 items-center gap-3 rounded-md px-3.5 py-2.5 text-[14px] transition-colors',
                                 active
@@ -162,6 +175,7 @@ export function MobileNav({
                                       <Link
                                         key={child.href}
                                         href={child.href}
+                                        aria-current={childActive ? 'page' : undefined}
                                         className={cn(
                                           'flex min-h-12 items-center rounded-md px-3 py-2.5 text-[13px] transition-colors',
                                           childActive

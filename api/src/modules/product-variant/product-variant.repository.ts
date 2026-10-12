@@ -1,8 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Knex } from 'knex';
 
+import { AppError } from '../../common/errors/app-error';
+import { ErrorCodes } from '../../common/errors/error-codes';
 import { applyUpdatedOnFilter } from '../../common/validation/date-filter';
 import { KnexService } from '../../db/knex.service';
+import {
+  PRODUCT_HIGHLIGHT_SPEC_TABLE,
+  TECHNICAL_DOCUMENT_TABLE
+} from '../product-group/product-group.types';
+import {
+  assertLockedProductGroupReadyForPublishedVariant,
+  lockUsableProductGroupForChildMutation
+} from '../product-group/productGroupTransactionGuard';
 import {
   FILE_METADATA_TABLE,
   FILE_USAGE_TABLE,
@@ -36,6 +46,15 @@ interface ListFilters {
   price_mode: 'public_price' | 'contact_for_quote' | 'all';
   deleted_scope: ProductVariantDeletedScope;
 }
+
+export type ProductVariantWriteOutcome =
+  | { status: 'updated' }
+  | { status: 'not_found' }
+  | { status: 'archived' }
+  | { status: 'not_archived' }
+  | { status: 'blocked'; dependency_counts: ProductVariantDependencyCounts }
+  | { status: 'move_blocked'; active_documents: number }
+  | { status: 'stale'; current_updated_at: Date | string };
 
 @Injectable()
 export class ProductVariantRepository {
@@ -101,12 +120,18 @@ export class ProductVariantRepository {
       .limit(params.limit);
     const typedRows = rows as ProductVariantAdminRecord[];
     const ids = typedRows.map((row) => row.id);
-    const quoteCounts = await this.countMap(QUOTE_ITEM_TABLE, 'product_variant_id', ids);
+    const [quoteCounts, attributeCounts, highlightSpecCounts] = await Promise.all([
+      this.countMap(QUOTE_ITEM_TABLE, 'product_variant_id', ids),
+      this.countMap(VARIANT_ATTRIBUTE_TABLE, 'product_variant_id', ids),
+      this.countMap(PRODUCT_HIGHLIGHT_SPEC_TABLE, 'product_variant_id', ids)
+    ]);
 
     return {
       items: typedRows.map((row) => ({
         ...row,
-        active_quote_item_count: quoteCounts.get(row.id) ?? 0
+        active_quote_item_count: quoteCounts.get(row.id) ?? 0,
+        attribute_count: attributeCounts.get(row.id) ?? 0,
+        highlight_spec_count: highlightSpecCounts.get(row.id) ?? 0
       })),
       total
     };
@@ -193,6 +218,13 @@ export class ProductVariantRepository {
     imageFileId?: string | null
   ) {
     return this.knexService.db.transaction(async (trx) => {
+      const productGroup = await lockUsableProductGroupForChildMutation(
+        trx,
+        input.product_group_id
+      );
+      if ((input.publish_status ?? 'unpublished') === 'published') {
+        await assertLockedProductGroupReadyForPublishedVariant(trx, productGroup);
+      }
       const [row] = await trx<ProductVariantRecord>(PRODUCT_VARIANT_TABLE)
         .insert({
           product_group_id: input.product_group_id,
@@ -223,14 +255,41 @@ export class ProductVariantRepository {
   async update(
     id: string,
     input: ProductVariantMutationInput,
-    imageFileId?: string | null
-  ): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+    imageFileId?: string | null,
+    expectedUpdatedAt?: string
+  ): Promise<ProductVariantWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<ProductVariantRecord>(PRODUCT_VARIANT_TABLE)
         .where({ id })
         .forUpdate()
         .first();
-      if (!existing) return;
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      const productGroupId = input.product_group_id ?? existing.product_group_id;
+      const productGroup = await lockUsableProductGroupForChildMutation(
+        trx,
+        productGroupId
+      );
+      if ((input.publish_status ?? existing.publish_status) === 'published') {
+        await assertLockedProductGroupReadyForPublishedVariant(trx, productGroup);
+      }
+      if (
+        typeof input.product_group_id !== 'undefined' &&
+        input.product_group_id !== existing.product_group_id
+      ) {
+        const documentCountRow = await trx(TECHNICAL_DOCUMENT_TABLE)
+          .where({ product_variant_id: id })
+          .whereNull('deleted_at')
+          .count({ total: 'product_variant_id' })
+          .first();
+        const activeDocuments = Number(documentCountRow?.total ?? 0);
+        if (activeDocuments > 0) {
+          return { status: 'move_blocked', active_documents: activeDocuments };
+        }
+      }
       const patch: Record<string, unknown> = {};
       for (const field of [
         'product_group_id',
@@ -253,7 +312,6 @@ export class ProductVariantRepository {
       if (Object.keys(patch).length > 0) {
         await trx(PRODUCT_VARIANT_TABLE).where({ id }).whereNull('deleted_at').update(patch);
       }
-      const productGroupId = input.product_group_id ?? existing.product_group_id;
       if (typeof input.product_group_id !== 'undefined') {
         await this.updateVariantImagesProductGroup(trx, id, input.product_group_id);
       }
@@ -264,6 +322,7 @@ export class ProductVariantRepository {
           imageFileId
         });
       }
+      return { status: 'updated' };
     });
   }
 
@@ -372,18 +431,53 @@ export class ProductVariantRepository {
     );
   }
 
-  async archive(id: string): Promise<void> {
-    await this.knexService.db(PRODUCT_VARIANT_TABLE)
-      .where({ id })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now() });
+  async archive(id: string, expectedUpdatedAt?: string): Promise<ProductVariantWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
+      const existing = await trx<ProductVariantRecord>(PRODUCT_VARIANT_TABLE)
+        .where({ id })
+        .forUpdate()
+        .first();
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      const dependencyCounts = await this.dependencyCountsUsing(trx, id);
+      if (dependencyCounts.active_quote_items > 0) {
+        return { status: 'blocked', dependency_counts: dependencyCounts };
+      }
+      await trx(PRODUCT_VARIANT_TABLE)
+        .where({ id })
+        .whereNull('deleted_at')
+        .update({ deleted_at: trx.fn.now() });
+      return { status: 'updated' };
+    });
   }
 
-  async restore(id: string): Promise<void> {
-    await this.knexService.db(PRODUCT_VARIANT_TABLE)
-      .where({ id })
-      .whereNotNull('deleted_at')
-      .update({ deleted_at: null });
+  async restore(id: string, expectedUpdatedAt?: string): Promise<ProductVariantWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
+      const existing = await trx<ProductVariantRecord>(PRODUCT_VARIANT_TABLE)
+        .where({ id })
+        .forUpdate()
+        .first();
+      if (!existing) return { status: 'not_found' };
+      if (!existing.deleted_at) return { status: 'not_archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      const productGroup = await lockUsableProductGroupForChildMutation(
+        trx,
+        existing.product_group_id
+      );
+      if (existing.publish_status === 'published') {
+        await assertLockedProductGroupReadyForPublishedVariant(trx, productGroup);
+      }
+      await trx(PRODUCT_VARIANT_TABLE)
+        .where({ id })
+        .whereNotNull('deleted_at')
+        .update({ deleted_at: null });
+      return { status: 'updated' };
+    });
   }
 
   async listAttributes(productVariantId: string): Promise<VariantAttributeRecord[]> {
@@ -419,23 +513,28 @@ export class ProductVariantRepository {
   async createAttribute(
     productVariantId: string,
     input: Required<Pick<VariantAttributeMutationInput, 'attribute_name' | 'attribute_value'>> &
-      VariantAttributeMutationInput
+      VariantAttributeMutationInput,
+    reopenReview = false
   ): Promise<VariantAttributeRecord> {
-    const [row] = await this.knexService.db<VariantAttributeRecord>(VARIANT_ATTRIBUTE_TABLE)
-      .insert({
+    return this.knexService.db.transaction(async (trx) => {
+      const variant = await this.lockEditableVariant(trx, productVariantId);
+      const [row] = await trx<VariantAttributeRecord>(VARIANT_ATTRIBUTE_TABLE).insert({
         product_variant_id: productVariantId,
         attribute_name: input.attribute_name,
         attribute_value: input.attribute_value,
         display_order: input.display_order ?? 0
       })
       .returning('*');
-    return row;
+      await this.reopenVariantReview(trx, variant, reopenReview);
+      return row;
+    });
   }
 
   async updateAttribute(
     productVariantId: string,
     attributeId: string,
-    input: VariantAttributeMutationInput
+    input: VariantAttributeMutationInput,
+    reopenReview = false
   ): Promise<void> {
     const patch: Record<string, unknown> = {};
     for (const field of ['attribute_name', 'attribute_value', 'display_order'] as const) {
@@ -443,19 +542,49 @@ export class ProductVariantRepository {
         patch[field] = input[field];
       }
     }
-    if (Object.keys(patch).length > 0) {
-      await this.knexService.db(VARIANT_ATTRIBUTE_TABLE)
+    if (Object.keys(patch).length === 0) return;
+    await this.knexService.db.transaction(async (trx) => {
+      const variant = await this.lockEditableVariant(trx, productVariantId);
+      const current = await trx(VARIANT_ATTRIBUTE_TABLE)
         .where({ id: attributeId, product_variant_id: productVariantId })
-        .whereNull('deleted_at')
-        .update(patch);
-    }
+        .whereNull('deleted_at').forUpdate().first();
+      if (!current || Object.entries(patch).every(([key, value]) => current[key] === value)) return;
+      await trx(VARIANT_ATTRIBUTE_TABLE).where({ id: attributeId }).update(patch);
+      await this.reopenVariantReview(trx, variant, reopenReview);
+    });
   }
 
-  async archiveAttribute(productVariantId: string, attributeId: string): Promise<void> {
-    await this.knexService.db(VARIANT_ATTRIBUTE_TABLE)
-      .where({ id: attributeId, product_variant_id: productVariantId })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now() });
+  async archiveAttribute(productVariantId: string, attributeId: string, reopenReview = false): Promise<void> {
+    await this.knexService.db.transaction(async (trx) => {
+      const variant = await this.lockEditableVariant(trx, productVariantId);
+      const count = await trx(VARIANT_ATTRIBUTE_TABLE)
+        .where({ id: attributeId, product_variant_id: productVariantId })
+        .whereNull('deleted_at').update({ deleted_at: trx.fn.now() });
+      if (count) await this.reopenVariantReview(trx, variant, reopenReview);
+    });
+  }
+
+  private async lockEditableVariant(trx: Knex.Transaction, id: string): Promise<{
+    id: string; review_status: string; publish_status: string
+  }> {
+    const row = await trx(PRODUCT_VARIANT_TABLE).where({ id }).forUpdate().first();
+    if (!row || row.deleted_at) throw new AppError({
+      code: ErrorCodes.NOT_FOUND,
+      message: 'Product variant was not found.',
+      statusCode: HttpStatus.NOT_FOUND
+    });
+    return row;
+  }
+
+  private async reopenVariantReview(
+    trx: Knex.Transaction,
+    variant: { id: string; review_status: string; publish_status: string },
+    requested: boolean
+  ): Promise<void> {
+    if (!requested || variant.review_status !== 'approved' || variant.publish_status !== 'published') return;
+    await trx(PRODUCT_VARIANT_TABLE).where({ id: variant.id }).update({
+      review_status: 'pending_review', publish_status: 'unpublished', updated_at: trx.fn.now()
+    });
   }
 
   private applyListFilters(
@@ -588,6 +717,18 @@ export class ProductVariantRepository {
     return Number(row?.total ?? 0);
   }
 
+  private async dependencyCountsUsing(
+    db: Knex | Knex.Transaction,
+    productVariantId: string
+  ): Promise<ProductVariantDependencyCounts> {
+    const row = await db(QUOTE_ITEM_TABLE)
+      .where({ product_variant_id: productVariantId })
+      .whereNull('deleted_at')
+      .count({ total: 'product_variant_id' })
+      .first();
+    return { active_quote_items: Number(row?.total ?? 0) };
+  }
+
   private async countMap(tableName: string, columnName: string, ids: string[]): Promise<Map<string, number>> {
     if (ids.length === 0) return new Map();
     const rows = (await this.knexService.db(tableName)
@@ -605,4 +746,9 @@ export class ProductVariantRepository {
       | undefined;
     return Number(row?.total ?? 0);
   }
+}
+
+function isStaleWrite(actualUpdatedAt: Date | string, expectedUpdatedAt?: string): boolean {
+  if (!expectedUpdatedAt) return false;
+  return new Date(actualUpdatedAt).getTime() !== new Date(expectedUpdatedAt).getTime();
 }

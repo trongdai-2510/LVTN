@@ -96,30 +96,31 @@ export class ProjectController {
   updateGalleryImage(
     @Param('id') id: string,
     @Param('galleryId') galleryId: string,
-    @Body() body: ProjectGalleryUpdateDto
+    @Body() body: ProjectGalleryUpdateDto,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.projectService.updateGalleryImage(id, galleryId, body);
+    return this.projectService.updateGalleryImage(id, galleryId, body, currentUser);
   }
 
   @Delete(':id/gallery/:galleryId')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('project_gallery.archive')
-  archiveGalleryImage(@Param('id') id: string, @Param('galleryId') galleryId: string) {
-    return this.projectService.archiveGalleryImage(id, galleryId);
+  archiveGalleryImage(@Param('id') id: string, @Param('galleryId') galleryId: string, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.projectService.archiveGalleryImage(id, galleryId, currentUser);
   }
 
   @Post(':id/gallery/reorder')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('project_gallery.update')
-  reorderGalleryImages(@Param('id') id: string, @Body() body: ProjectGalleryReorderDto) {
-    return this.projectService.reorderGalleryImages(id, body);
+  reorderGalleryImages(@Param('id') id: string, @Body() body: ProjectGalleryReorderDto, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.projectService.reorderGalleryImages(id, body, currentUser);
   }
 
   @Post(':id/gallery/:galleryId/restore')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('project_gallery.restore')
-  restoreGalleryImage(@Param('id') id: string, @Param('galleryId') galleryId: string) {
-    return this.projectService.restoreGalleryImage(id, galleryId);
+  restoreGalleryImage(@Param('id') id: string, @Param('galleryId') galleryId: string, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.projectService.restoreGalleryImage(id, galleryId, currentUser);
   }
 
   @Post(':id/product-groups')
@@ -140,14 +141,14 @@ export class ProjectController {
   @Delete(':id/product-groups/:productGroupId')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('project_product_group.update')
-  detachProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string) {
-    return this.projectService.detachProductGroup(id, productGroupId);
+  detachProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.projectService.detachProductGroup(id, productGroupId, currentUser);
   }
 
   @Post(':id/product-groups/:productGroupId/restore')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('project_product_group.update')
-  restoreProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string) {
-    return this.projectService.restoreProductGroup(id, productGroupId);
+  restoreProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.projectService.restoreProductGroup(id, productGroupId, currentUser);
   }
 }

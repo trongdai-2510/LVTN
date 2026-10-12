@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Download, type Locator, type Page } from '@playwright/test';
+import ExcelJS from 'exceljs';
 import fs from 'node:fs/promises';
 
 const API_BASE_URL = (
@@ -102,7 +103,7 @@ test('EXP-01, EXP-03, EXP-04, EXP-05: export tab renders in import workspace and
   }
 });
 
-test('EXP-02: missing import.read blocks the export workspace', async ({ page }) => {
+test('EXP-02: an invalid session cannot open the export workspace', async ({ page }) => {
   await seedAuth(page, {
     ...session,
     access_token: 'qa-no-import-read',
@@ -112,12 +113,30 @@ test('EXP-02: missing import.read blocks the export workspace', async ({ page })
   });
 
   await page.goto(adminPath('/import'));
-  await expect(page.getByText(/Không đủ quyền truy cập/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Đăng nhập quản trị' })).toBeVisible();
   await expect(page.locator(EXPORT_PANEL)).toHaveCount(0);
   await expect(page.locator(EXPORT_SUBMIT)).toHaveCount(0);
 });
 
-test('EXP-06, EXP-08, EXP-20: product catalog export uses list endpoints and downloads .xls', async ({
+test('EXP-CUSTOMER: customer workspace downloads a real readable .xlsx workbook', async ({
+  page
+}) => {
+  await seedAuth(page, session);
+  await page.goto(adminPath('/customers'));
+  await expect(page.getByRole('heading', { name: 'Thông tin khách hàng' })).toBeVisible();
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Xuất Excel' }).click()
+  ]);
+  const workbook = await readWorkbook(download);
+
+  expect(download.suggestedFilename()).toMatch(/^song-thanh-khach-hang-\d{4}-\d{2}-\d{2}\.xlsx$/);
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Khách hàng']);
+  expect(workbook.getWorksheet('Khách hàng')?.rowCount).toBeGreaterThan(1);
+});
+
+test('EXP-06, EXP-08, EXP-20: product catalog export downloads a real multi-sheet .xlsx workbook', async ({
   page
 }) => {
   await openExportWorkspace(page);
@@ -125,13 +144,16 @@ test('EXP-06, EXP-08, EXP-20: product catalog export uses list endpoints and dow
 
   const calls = recordSongThanhRequests(page);
   const download = await clickAndWaitForDownload(page);
-  const html = await readDownload(download);
+  const workbook = await readWorkbook(download);
 
-  expect(download.suggestedFilename()).toMatch(/\.xls$/);
+  expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
   expect(download.suggestedFilename()).toContain(filenameToken(recordName(fixture.brandWithData)));
-  expect(html).toContain('<table>');
-  expect(html).toContain('Nhóm sản phẩm');
-  expect(html).toContain('Biến thể');
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+    'Nhóm sản phẩm',
+    'Biến thể'
+  ]);
+  expect(workbook.getWorksheet('Nhóm sản phẩm')?.rowCount).toBeGreaterThan(1);
+  expect(workbook.getWorksheet('Biến thể')?.rowCount).toBeGreaterThan(1);
 
   const groupCalls = calls.filter((call) => call.pathname === '/song-thanh/product-groups');
   const variantCalls = calls.filter((call) => call.pathname === '/song-thanh/product-variants');
@@ -148,8 +170,8 @@ test('EXP-05B: brand filter narrows parent and child category choices', async ({
   await selectBrandFilter(page, recordId(fixture.brandWithData));
 
   const panel = page.locator(EXPORT_PANEL);
-  const parentSelect = panel.locator('select').nth(1);
-  const childSelect = panel.locator('select').nth(2);
+  const parentSelect = panel.getByLabel('Danh mục cha', { exact: true });
+  const childSelect = panel.getByLabel('Danh mục con', { exact: true });
 
   const parentValues = await optionValues(parentSelect);
   const selectedBrandParentValues = parentValues.filter(Boolean);
@@ -176,10 +198,9 @@ test('EXP-07: product catalog can export without variant requests', async ({ pag
 
   const calls = recordSongThanhRequests(page);
   const download = await clickAndWaitForDownload(page);
-  const html = await readDownload(download);
+  const workbook = await readWorkbook(download);
 
-  expect(html).toContain('Nhóm sản phẩm');
-  expect(html).not.toContain('Biến thể</h2>');
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Nhóm sản phẩm']);
   expect(calls.some((call) => call.pathname === '/song-thanh/product-variants')).toBe(false);
   assertNoForbiddenExportCalls(calls);
 });
@@ -195,11 +216,13 @@ test('EXP-09, EXP-11, EXP-12: parent category public-safe export includes child 
 
   const calls = recordSongThanhRequests(page);
   const download = await clickAndWaitForDownload(page);
-  const html = await readDownload(download);
+  const workbook = await readWorkbook(download);
 
-  expect(html).toContain('Nhóm sản phẩm');
-  expect(html).toContain('Biến thể');
-  expect(html).toContain('Tài liệu kỹ thuật');
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+    'Nhóm sản phẩm',
+    'Biến thể',
+    'Tài liệu kỹ thuật'
+  ]);
 
   const groupCalls = calls.filter((call) => call.pathname === '/song-thanh/product-groups');
   expect(groupCalls.some((call) => fixture.childIdsForParent.includes(call.searchParams.get('category_id') || ''))).toBe(
@@ -226,7 +249,7 @@ test('EXP-09, EXP-11, EXP-12: parent category public-safe export includes child 
   assertNoForbiddenExportCalls(calls);
 });
 
-test('EXP-10, EXP-14, EXP-18: taxonomy export uses loaded references and keeps quick format Excel-only', async ({
+test('EXP-10, EXP-14, EXP-18: taxonomy export uses loaded references and creates two real worksheets', async ({
   page
 }) => {
   await openExportWorkspace(page);
@@ -237,22 +260,20 @@ test('EXP-10, EXP-14, EXP-18: taxonomy export uses loaded references and keeps q
   const formatSelect = page.locator(EXPORT_PANEL).locator('select').last();
   await expect(formatSelect).toBeDisabled();
   await expect(formatSelect.locator('option')).toHaveCount(1);
-  await expect(page.getByText(/CSV\/PDF cần lô xuất chính thức/)).toBeVisible();
-  await expect(page.getByLabel(/Kèm thông số chi tiết/)).toBeDisabled();
+  await expect(page.getByLabel(/Kèm thông số chi tiết/)).toHaveCount(0);
 
   const calls = recordSongThanhRequests(page);
   const download = await clickAndWaitForDownload(page);
-  const html = await readDownload(download);
+  const workbook = await readWorkbook(download);
 
-  expect(download.suggestedFilename()).toMatch(/danh-muc-thuong-hieu.*\.xls$/);
-  expect(html).toContain('Danh mục');
-  expect(html).toContain('Thương hiệu');
+  expect(download.suggestedFilename()).toMatch(/danh-muc-thuong-hieu.*\.xlsx$/);
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Danh mục', 'Thương hiệu']);
   expect(calls.some((call) => call.pathname === '/song-thanh/product-groups')).toBe(false);
   expect(calls.some((call) => call.pathname === '/song-thanh/product-variants')).toBe(false);
   assertNoForbiddenExportCalls(calls);
 });
 
-test('EXP-15, EXP-19: technical document export uses public-safe document query and escapes cells', async ({
+test('EXP-15, EXP-19: technical document export keeps special text as a string in a real workbook', async ({
   page
 }) => {
   await openExportWorkspace(page);
@@ -261,13 +282,12 @@ test('EXP-15, EXP-19: technical document export uses public-safe document query 
 
   const calls = recordSongThanhRequests(page);
   const download = await clickAndWaitForDownload(page);
-  const html = await readDownload(download);
+  const workbook = await readWorkbook(download);
+  const sheet = workbook.getWorksheet('Tài liệu kỹ thuật');
 
-  expect(download.suggestedFilename()).toMatch(/tai-lieu-ky-thuat.*\.xls$/);
-  expect(html).toContain('Tài liệu kỹ thuật');
-  expect(html).toContain('QA_EXPORT_DOC');
-  expect(html).toContain('&amp;');
-  expect(html).toContain('&lt;spec&gt;');
+  expect(download.suggestedFilename()).toMatch(/tai-lieu-ky-thuat.*\.xlsx$/);
+  expect(sheet).toBeTruthy();
+  expect(sheetValues(sheet!, 'Tên tài liệu')).toContain(fixture.seededDocumentName);
 
   const documentCalls = calls.filter((call) => call.pathname === '/song-thanh/technical-documents');
   expect(documentCalls.length).toBeGreaterThan(0);
@@ -276,6 +296,24 @@ test('EXP-15, EXP-19: technical document export uses public-safe document query 
     expect(call.searchParams.get('is_public')).toBe('true');
   }
   assertNoForbiddenExportCalls(calls);
+});
+
+test('EXP-21: one-table technical document export supports formula-safe CSV', async ({ page }) => {
+  await openExportWorkspace(page);
+  await page.getByRole('button', { name: /Tài liệu kỹ thuật/ }).click();
+  await page.getByRole('button', { name: /Xuất tất cả/ }).click();
+  await openAdvancedOptions(page);
+
+  const formatSelect = page.locator(EXPORT_PANEL).locator('select').last();
+  await expect(formatSelect).toBeEnabled();
+  await formatSelect.selectOption('csv');
+
+  const download = await clickAndWaitForDownload(page);
+  const csv = await readDownload(download);
+
+  expect(download.suggestedFilename()).toMatch(/tai-lieu-ky-thuat.*\.csv$/);
+  expect(csv).toContain('Tên tài liệu');
+  expect(csv).toContain(`'${fixture.seededDocumentName}`);
 });
 
 test('EXP-16: no matching product data shows an action error and does not download', async ({ page }) => {
@@ -329,26 +367,26 @@ async function openExportWorkspace(page: Page) {
 
 async function waitForExportReferences(page: Page) {
   const panel = page.locator(EXPORT_PANEL);
-  await expect.poll(async () => panel.locator('select').nth(0).locator('option').count()).toBeGreaterThan(1);
-  await expect.poll(async () => panel.locator('select').nth(1).locator('option').count()).toBeGreaterThan(1);
-  await expect(panel.locator('select').nth(0)).toBeEnabled();
-  await expect(panel.locator('select').nth(1)).toBeEnabled();
-  await expect(panel.locator('select').nth(2)).toBeDisabled();
-  await expect(panel.locator('select').nth(3)).toBeEnabled();
+  await expect.poll(async () => panel.getByLabel('Thương hiệu', { exact: true }).locator('option').count()).toBeGreaterThan(1);
+  await expect.poll(async () => panel.getByLabel('Danh mục cha', { exact: true }).locator('option').count()).toBeGreaterThan(1);
+  await expect(panel.getByLabel('Thương hiệu', { exact: true })).toBeEnabled();
+  await expect(panel.getByLabel('Danh mục cha', { exact: true })).toBeEnabled();
+  await expect(panel.getByLabel('Danh mục con', { exact: true })).toBeDisabled();
+  await expect(panel.getByLabel('Trạng thái', { exact: true })).toBeEnabled();
 }
 
 async function selectBrandFilter(page: Page, brandId: string) {
-  await page.locator(EXPORT_PANEL).locator('select').nth(0).selectOption(brandId);
+  await page.locator(EXPORT_PANEL).getByLabel('Thương hiệu', { exact: true }).selectOption(brandId);
   await expect(page.locator(EXPORT_SUBMIT)).toBeEnabled();
 }
 
 async function selectCategoryFilter(page: Page, categoryId: string) {
-  await page.locator(EXPORT_PANEL).locator('select').nth(1).selectOption(categoryId);
+  await page.locator(EXPORT_PANEL).getByLabel('Danh mục cha', { exact: true }).selectOption(categoryId);
   await expect(page.locator(EXPORT_SUBMIT)).toBeEnabled();
 }
 
 async function selectExportStatus(page: Page, status: 'active' | 'inactive') {
-  await page.locator(EXPORT_PANEL).locator('select').nth(3).selectOption(status);
+  await page.locator(EXPORT_PANEL).getByLabel('Trạng thái', { exact: true }).selectOption(status);
   await expect(page.locator(EXPORT_SUBMIT)).toBeEnabled();
 }
 
@@ -381,6 +419,31 @@ async function readDownload(download: Download) {
   const downloadPath = await download.path();
   if (!downloadPath) throw new Error('Download path is not available.');
   return fs.readFile(downloadPath, 'utf8');
+}
+
+async function readWorkbook(download: Download) {
+  const downloadPath = await download.path();
+  if (!downloadPath) throw new Error('Download path is not available.');
+  const buffer = await fs.readFile(downloadPath);
+  const workbookBytes = Uint8Array.from(buffer).buffer;
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(workbookBytes);
+  return workbook;
+}
+
+function sheetValues(sheet: ExcelJS.Worksheet, header: string) {
+  const headerRow = sheet.getRow(1);
+  let column = 0;
+  headerRow.eachCell((cell, columnNumber) => {
+    if (cell.text === header) column = columnNumber;
+  });
+  if (column === 0) return [];
+
+  const values: string[] = [];
+  for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    values.push(sheet.getRow(rowNumber).getCell(column).text);
+  }
+  return values;
 }
 
 function recordSongThanhRequests(page: Page) {
@@ -464,22 +527,36 @@ async function buildExportFixture(request: APIRequestContext, auth: AdminSession
     })
   ]);
 
-  const brandWithData = brands
+  const brandCandidates = brands
     .filter((brand) => recordNumber(brand, 'active_product_group_count') > 0 && recordText(brand, 'status') === 'active')
-    .sort((a, b) => recordNumber(a, 'active_product_group_count') - recordNumber(b, 'active_product_group_count'))[0];
+    .sort((a, b) => recordNumber(a, 'active_product_group_count') - recordNumber(b, 'active_product_group_count'));
+  let brandWithData: RecordMap | undefined;
+  let brandProductGroups: RecordMap[] = [];
+
+  for (const candidate of brandCandidates) {
+    const candidateGroups = await apiListAll(request, auth, '/song-thanh/product-groups', {
+      deleted_scope: 'active',
+      status: 'all',
+      brand_id: recordId(candidate)
+    });
+    if (candidateGroups.some((group) => recordNumber(group, 'variant_count') > 0)) {
+      brandWithData = candidate;
+      brandProductGroups = candidateGroups;
+      break;
+    }
+  }
+  if (!brandWithData) {
+    throw new Error(
+      'Admin export E2E requires one active brand with a product variant.'
+    );
+  }
   const brandWithoutData =
     brands.find((brand) => recordNumber(brand, 'active_product_group_count') === 0 && recordText(brand, 'status') === 'active') ||
     brands.find((brand) => recordId(brand) !== recordId(brandWithData));
 
-  if (!brandWithData || !brandWithoutData) {
-    throw new Error('Admin export E2E requires at least one active brand with data and one without data.');
+  if (!brandWithoutData) {
+    throw new Error('Admin export E2E requires a second brand for the empty-result boundary.');
   }
-
-  const brandProductGroups = await apiListAll(request, auth, '/song-thanh/product-groups', {
-    deleted_scope: 'active',
-    status: 'all',
-    brand_id: recordId(brandWithData)
-  });
   const brandCategoryIds = collectCategoryIdsFromProductGroups(brandProductGroups, categories);
   const brandCategoryIdSet = new Set(brandCategoryIds);
   const activeRootCategories = categories.filter(
@@ -566,7 +643,7 @@ async function buildExportFixture(request: APIRequestContext, auth: AdminSession
     throw new Error('Admin export E2E requires one active file metadata row for the technical document fixture.');
   }
 
-  const seededDocumentName = `QA_EXPORT_DOC_${Date.now()} & <spec>`;
+  const seededDocumentName = `=QA_EXPORT_DOC_${Date.now()} & <spec>`;
   const documentResult = await apiPost(request, auth, '/song-thanh/technical-documents', {
     product_group_id: recordId(productGroupForDocument),
     document_name: seededDocumentName,

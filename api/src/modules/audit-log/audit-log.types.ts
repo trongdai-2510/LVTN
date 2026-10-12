@@ -4,7 +4,7 @@ export const AUDIT_LOG_ACTIONS = ['create', 'update', 'soft_delete', 'restore', 
 
 export type AuditLogAction = (typeof AUDIT_LOG_ACTIONS)[number];
 
-export interface AuditLogRecord {
+interface AuditLogRecord {
   id: string;
   entity_type: string;
   entity_id: string;

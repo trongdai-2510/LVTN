@@ -7,7 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
-  ImageIcon,
+  Image as ImageIcon,
   Layers,
   LayoutGrid,
   ListChecks,
@@ -21,13 +21,20 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { cn } from '@/lib/cn';
+import { isSafeNavigationTarget } from '@/lib/safeNavigationTarget';
+import { parsePageContentPayload, serializePageBlocks } from './pageLayout';
 
 /**
  * Khối phụ (extra_blocks) admin tự quản lý — hiển thị trên trang public giữa
- * nội dung chính và CTA cuối. 2 type được hỗ trợ:
+ * nội dung chính và CTA cuối. 3 type được hỗ trợ:
  *   - bullet_list: dòng có dấu chấm, optional link.
  *   - card_grid: card có tiêu đề + mô tả + optional link CTA. 2/3/4 cột.
+ *   - image_card: ảnh có mô tả, tone, slot key và optional link.
  */
+
+const MAX_BLOCKS = 20;
+const MAX_BULLET_ITEMS = 20;
+const MAX_CARD_ITEMS = 12;
 
 export type ExtraBlocksValue = {
   blocks: ExtraBlock[];
@@ -75,35 +82,31 @@ interface ExtraBlocksCardProps {
   value: string;
   onChange: (next: string) => void;
   readOnly: boolean;
+  error?: string;
 }
 
 function makeId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
   }
-  return `b-${Math.random().toString(36).slice(2, 11)}`;
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = character === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
 }
 
 function parseValue(raw: string): ExtraBlocksValue {
-  if (!raw) return { blocks: [] };
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.blocks)) {
-      return { blocks: parsed.blocks };
-    }
-  } catch {
-    // ignore
-  }
-  return { blocks: [] };
+  return { blocks: parsePageContentPayload<ExtraBlock>(raw).blocks };
 }
 
-export function ExtraBlocksCard({ value, onChange, readOnly }: ExtraBlocksCardProps) {
+export function ExtraBlocksCard({ value, onChange, readOnly, error }: ExtraBlocksCardProps) {
   const blocks = useMemo(() => parseValue(value).blocks, [value]);
   // Collapse state — chỉ giữ id mở. Mặc định tất cả đóng để page gọn lại.
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   function update(next: ExtraBlock[]) {
-    onChange(JSON.stringify({ blocks: next }));
+    onChange(serializePageBlocks(value, next));
   }
 
   function toggleExpand(id: string) {
@@ -133,6 +136,7 @@ export function ExtraBlocksCard({ value, onChange, readOnly }: ExtraBlocksCardPr
   }
 
   function addBlock(type: ExtraBlock['type']) {
+    if (blocks.length >= MAX_BLOCKS) return;
     let newBlock: ExtraBlock;
     if (type === 'bullet_list') {
       newBlock = {
@@ -184,19 +188,20 @@ export function ExtraBlocksCard({ value, onChange, readOnly }: ExtraBlocksCardPr
   }
 
   return (
-    <section className="rounded-sm border border-border bg-panel p-4">
+    <section
+      className="scroll-mt-56 rounded-sm border border-border bg-panel p-5"
+      data-editor-section="true"
+      id="page-section-blocks"
+    >
       <header className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold text-text">Khối nội dung phụ</h2>
+            <h2 className="text-base font-semibold text-text">Khối nội dung phụ</h2>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-              {blocks.length} khối
+              {blocks.length}/{MAX_BLOCKS} khối
             </span>
           </div>
-          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-            Mỗi khối thêm 1 section trên trang public. Bấm vào tiêu đề khối để mở rộng và sửa nội dung.
-          </p>
         </div>
         {blocks.length > 1 ? (
           <div className="flex shrink-0 items-center gap-1 text-[12px]">
@@ -219,12 +224,15 @@ export function ExtraBlocksCard({ value, onChange, readOnly }: ExtraBlocksCardPr
         ) : null}
       </header>
 
+      {error ? (
+        <p role="alert" className="mb-3 rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+        </p>
+      ) : null}
+
       {blocks.length === 0 ? (
-        <div className="rounded-sm border border-dashed border-border bg-muted/30 px-4 py-8 text-center">
-          <p className="text-[13px] text-muted-foreground">Chưa có khối nào.</p>
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            Bấm nút bên dưới để thêm khối mới.
-          </p>
+        <div className="rounded-sm border border-dashed border-border bg-muted/30 px-4 py-5 text-center">
+          <p className="text-sm text-muted-foreground">Chưa có khối nội dung phụ.</p>
         </div>
       ) : (
         <ul className="space-y-2.5">
@@ -249,17 +257,17 @@ export function ExtraBlocksCard({ value, onChange, readOnly }: ExtraBlocksCardPr
 
       {!readOnly ? (
         <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
-          <Button type="button" variant="secondary" onClick={() => addBlock('bullet_list')}>
+          <Button aria-label="Thêm danh sách bullet" type="button" variant="secondary" disabled={blocks.length >= MAX_BLOCKS} onClick={() => addBlock('bullet_list')}>
             <ListChecks className="h-3.5 w-3.5" />
-            Thêm danh sách bullet
+            Thêm danh sách
           </Button>
-          <Button type="button" variant="secondary" onClick={() => addBlock('card_grid')}>
+          <Button aria-label="Thêm grid card" type="button" variant="secondary" disabled={blocks.length >= MAX_BLOCKS} onClick={() => addBlock('card_grid')}>
             <LayoutGrid className="h-3.5 w-3.5" />
-            Thêm grid card
+            Thêm nhóm thẻ
           </Button>
-          <Button type="button" variant="secondary" onClick={() => addBlock('image_card')}>
+          <Button aria-label="Thêm card ảnh" type="button" variant="secondary" disabled={blocks.length >= MAX_BLOCKS} onClick={() => addBlock('image_card')}>
             <ImageIcon className="h-3.5 w-3.5" />
-            Thêm card ảnh
+            Thêm ảnh và mô tả
           </Button>
         </div>
       ) : null}
@@ -298,8 +306,8 @@ function BlockEditor({
     block.type === 'bullet_list'
       ? 'Danh sách'
       : block.type === 'card_grid'
-        ? 'Grid card'
-        : 'Card ảnh';
+        ? 'Nhóm thẻ'
+        : 'Ảnh';
   const TypeIcon =
     block.type === 'bullet_list'
       ? ListChecks
@@ -331,6 +339,7 @@ function BlockEditor({
           onClick={onToggleExpand}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           aria-expanded={expanded}
+          aria-label={`${expanded ? 'Thu gọn' : 'Mở rộng'} ${displayTitle}`}
         >
           <TypeIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
@@ -345,26 +354,27 @@ function BlockEditor({
         </button>
         <div className="flex shrink-0 items-center gap-1">
           <IconButton
-            title="Lên"
+            title={`Di chuyển ${displayTitle} lên`}
             disabled={readOnly || index === 0}
             onClick={onMoveUp}
             icon={<ArrowUp className="h-3 w-3" />}
           />
           <IconButton
-            title="Xuống"
+            title={`Di chuyển ${displayTitle} xuống`}
             disabled={readOnly || index === total - 1}
             onClick={onMoveDown}
             icon={<ArrowDown className="h-3 w-3" />}
           />
           <IconButton
-            title="Xóa khối"
+            title={`Xóa ${displayTitle}`}
             disabled={readOnly}
             onClick={onRemove}
             icon={<Trash2 className="h-3 w-3" />}
             danger
           />
           <button
-            aria-label={expanded ? 'Thu gọn' : 'Mở rộng'}
+            aria-label={`${expanded ? 'Thu gọn' : 'Mở rộng'} ${displayTitle}`}
+            aria-expanded={expanded}
             type="button"
             onClick={onToggleExpand}
             className="inline-flex h-11 w-11 items-center justify-center rounded-sm border border-border bg-white text-muted-foreground hover:border-primary/40 hover:text-text md:h-8 md:w-8"
@@ -380,7 +390,9 @@ function BlockEditor({
         <div className="space-y-3 p-3">
           <FieldRow label="Tiêu đề khối (tùy chọn)">
             <Input
+              aria-label={`Tiêu đề ${displayTitle}`}
               value={block.title ?? ''}
+              maxLength={255}
               disabled={readOnly}
               onChange={(e) => onChange({ title: e.target.value || null })}
               placeholder={block.type === 'bullet_list' ? 'Vd: Hướng phát triển' : 'Vd: Năng lực cốt lõi'}
@@ -395,6 +407,8 @@ function BlockEditor({
                     key={cols}
                     type="button"
                     disabled={readOnly}
+                    aria-label={`Hiển thị ${displayTitle} theo ${cols} cột`}
+                    aria-pressed={block.columns === cols}
                     onClick={() => onChange({ columns: cols as 2 | 3 | 4 })}
                     className={cn(
                       'inline-flex h-11 w-12 items-center justify-center rounded-sm border text-[13px] font-semibold transition-colors md:h-8',
@@ -469,7 +483,9 @@ function ImageCardEditor({
 
       <FieldRow label="Mô tả">
         <Textarea
+          aria-label="Mô tả card ảnh"
           value={block.description ?? ''}
+          maxLength={1000}
           disabled={readOnly}
           rows={2}
           onChange={(e) => onChange({ description: e.target.value || null })}
@@ -477,13 +493,14 @@ function ImageCardEditor({
         />
       </FieldRow>
 
-      <FieldRow label="Tone màu">
+      <FieldRow label="Kiểu nhấn mạnh">
         <div className="flex flex-wrap gap-1.5">
           {TONE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               type="button"
               disabled={readOnly}
+              aria-pressed={block.tone === opt.value}
               onClick={() => onChange({ tone: opt.value })}
               title={opt.description}
               className={cn(
@@ -500,22 +517,30 @@ function ImageCardEditor({
         </div>
       </FieldRow>
 
-      <FieldRow
-        label="Slot key (tùy chọn)"
-        hint='Cho phép trang frontend đọc theo key có nghĩa. Trang Bảo hành: dùng "eligible" cho ảnh "Được" và "ineligible" cho ảnh "Không".'
-      >
-        <Input
-          value={block.slot_key ?? ''}
-          disabled={readOnly}
-          onChange={(e) => onChange({ slot_key: e.target.value || null })}
-          placeholder="vd: eligible, ineligible"
-        />
-      </FieldRow>
+      <details className="rounded-sm border border-border bg-surface">
+        <summary className="flex min-h-10 cursor-pointer list-none items-center px-3 text-sm font-semibold text-slate-700 hover:text-primary">
+          Thiết lập nâng cao
+        </summary>
+        <div className="border-t border-border p-3">
+          <FieldRow label="Mã vị trí trên giao diện (tùy chọn)">
+            <Input
+              aria-label="Slot key của card ảnh"
+              value={block.slot_key ?? ''}
+              maxLength={64}
+              pattern="[A-Za-z0-9][A-Za-z0-9_-]*"
+              disabled={readOnly}
+              onChange={(e) => onChange({ slot_key: e.target.value || null })}
+              placeholder="Ví dụ: eligible"
+            />
+          </FieldRow>
+        </div>
+      </details>
 
       <FieldRow label="Liên kết khi bấm vào ảnh (tùy chọn)">
         <LinkSubEditor
           link={block.link}
           readOnly={readOnly}
+          contextLabel="card ảnh"
           onChange={(link) => onChange({ link })}
         />
       </FieldRow>
@@ -550,6 +575,7 @@ function BulletItemsEditor({
     onChange(items.filter((_, i) => i !== index));
   }
   function add() {
+    if (items.length >= MAX_BULLET_ITEMS) return;
     onChange([...items, { text: '', link: null }]);
   }
 
@@ -561,14 +587,14 @@ function BulletItemsEditor({
             <div className="flex gap-2">
               <div className="flex flex-col gap-1 pt-1">
                 <IconButton
-                  title="Lên"
+                  title={`Di chuyển dòng ${index + 1} lên`}
                   disabled={readOnly || index === 0}
                   onClick={() => move(index, -1)}
                   icon={<ArrowUp className="h-3 w-3" />}
                   size="xs"
                 />
                 <IconButton
-                  title="Xuống"
+                  title={`Di chuyển dòng ${index + 1} xuống`}
                   disabled={readOnly || index === items.length - 1}
                   onClick={() => move(index, 1)}
                   icon={<ArrowDown className="h-3 w-3" />}
@@ -577,7 +603,9 @@ function BulletItemsEditor({
               </div>
               <div className="flex-1 space-y-2">
                 <Input
+                  aria-label={`Nội dung dòng ${index + 1}`}
                   value={item.text}
+                  maxLength={1000}
                   disabled={readOnly}
                   onChange={(e) => updateItem(index, { text: e.target.value })}
                   placeholder="Nội dung dòng"
@@ -585,11 +613,12 @@ function BulletItemsEditor({
                 <LinkSubEditor
                   link={item.link}
                   readOnly={readOnly}
+                  contextLabel={`dòng ${index + 1}`}
                   onChange={(link) => updateItem(index, { link })}
                 />
               </div>
               <IconButton
-                title="Xóa dòng"
+                title={`Xóa dòng ${index + 1}`}
                 disabled={readOnly || items.length <= 1}
                 onClick={() => remove(index)}
                 icon={<X className="h-3 w-3" />}
@@ -602,8 +631,9 @@ function BulletItemsEditor({
         {!readOnly ? (
           <button
             type="button"
+            disabled={items.length >= MAX_BULLET_ITEMS}
             onClick={add}
-            className="inline-flex items-center gap-1 rounded-sm border border-dashed border-border bg-white px-3 py-1.5 text-[12px] font-semibold text-primary hover:border-primary hover:bg-primary/5"
+            className="inline-flex items-center gap-1 rounded-sm border border-dashed border-border bg-white px-3 py-1.5 text-[12px] font-semibold text-primary hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-3 w-3" /> Thêm dòng
           </button>
@@ -640,6 +670,7 @@ function CardItemsEditor({
     onChange(items.filter((_, i) => i !== index));
   }
   function add() {
+    if (items.length >= MAX_CARD_ITEMS) return;
     onChange([...items, { title: '', description: '', link: null }]);
   }
 
@@ -657,21 +688,21 @@ function CardItemsEditor({
               </span>
               <div className="ml-auto flex items-center gap-1">
                 <IconButton
-                  title="Lên"
+                  title={`Di chuyển card ${index + 1} lên`}
                   disabled={readOnly || index === 0}
                   onClick={() => move(index, -1)}
                   icon={<ArrowUp className="h-3 w-3" />}
                   size="xs"
                 />
                 <IconButton
-                  title="Xuống"
+                  title={`Di chuyển card ${index + 1} xuống`}
                   disabled={readOnly || index === items.length - 1}
                   onClick={() => move(index, 1)}
                   icon={<ArrowDown className="h-3 w-3" />}
                   size="xs"
                 />
                 <IconButton
-                  title="Xóa card"
+                  title={`Xóa card ${index + 1}`}
                   disabled={readOnly || items.length <= 1}
                   onClick={() => remove(index)}
                   icon={<X className="h-3 w-3" />}
@@ -682,13 +713,17 @@ function CardItemsEditor({
             </div>
             <div className="space-y-2">
               <Input
+                aria-label={`Tiêu đề card ${index + 1}`}
                 value={item.title}
+                maxLength={255}
                 disabled={readOnly}
                 onChange={(e) => updateItem(index, { title: e.target.value })}
                 placeholder="Tiêu đề card"
               />
               <Textarea
+                aria-label={`Mô tả card ${index + 1}`}
                 value={item.description ?? ''}
+                maxLength={1000}
                 disabled={readOnly}
                 rows={2}
                 onChange={(e) => updateItem(index, { description: e.target.value || null })}
@@ -697,6 +732,7 @@ function CardItemsEditor({
               <LinkSubEditor
                 link={item.link}
                 readOnly={readOnly}
+                contextLabel={`card ${index + 1}`}
                 onChange={(link) => updateItem(index, { link })}
               />
             </div>
@@ -705,8 +741,9 @@ function CardItemsEditor({
         {!readOnly ? (
           <button
             type="button"
+            disabled={items.length >= MAX_CARD_ITEMS}
             onClick={add}
-            className="inline-flex items-center gap-1 rounded-sm border border-dashed border-border bg-white px-3 py-1.5 text-[12px] font-semibold text-primary hover:border-primary hover:bg-primary/5"
+            className="inline-flex items-center gap-1 rounded-sm border border-dashed border-border bg-white px-3 py-1.5 text-[12px] font-semibold text-primary hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-3 w-3" /> Thêm card
           </button>
@@ -737,10 +774,12 @@ const INTERNAL_LINK_SUGGESTIONS: Array<{ label: string; target: string }> = [
 function LinkSubEditor({
   link,
   readOnly,
+  contextLabel,
   onChange
 }: {
   link: { label: string | null; target: string } | null;
   readOnly: boolean;
+  contextLabel: string;
   onChange: (next: { label: string | null; target: string } | null) => void;
 }) {
   const enabled = link !== null;
@@ -749,6 +788,7 @@ function LinkSubEditor({
     return (
       <button
         type="button"
+        aria-label={`Thêm liên kết cho ${contextLabel}`}
         disabled={readOnly}
         onClick={() => onChange({ label: null, target: '' })}
         className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
@@ -758,6 +798,8 @@ function LinkSubEditor({
     );
   }
 
+  const targetInvalid = Boolean(link.target.trim()) && !isSafeNavigationTarget(link.target);
+
   return (
     <div className="rounded-sm border border-primary/30 bg-primary/5 p-2">
       <div className="mb-1.5 flex items-center justify-between">
@@ -766,6 +808,7 @@ function LinkSubEditor({
         </span>
         <button
           type="button"
+          aria-label={`Bỏ liên kết khỏi ${contextLabel}`}
           disabled={readOnly}
           onClick={() => onChange(null)}
           className="text-[11px] text-red-600 hover:underline"
@@ -775,7 +818,9 @@ function LinkSubEditor({
       </div>
       <div className="space-y-1.5">
         <Input
+          aria-label={`Nhãn liên kết của ${contextLabel}`}
           value={link.label ?? ''}
+          maxLength={120}
           disabled={readOnly}
           onChange={(e) => onChange({ ...link, label: e.target.value || null })}
           placeholder="Nhãn nút (vd: Xem chi tiết)"
@@ -783,13 +828,17 @@ function LinkSubEditor({
         />
         <div className="flex gap-1.5">
           <Input
+            aria-label={`Đích liên kết của ${contextLabel}`}
             value={link.target}
+            maxLength={2048}
+            aria-invalid={targetInvalid}
             disabled={readOnly}
             onChange={(e) => onChange({ ...link, target: e.target.value })}
             placeholder="/duong-dan hoặc https://..."
-            className="h-8 flex-1 text-[12px]"
+            className={cn('h-8 flex-1 text-[12px]', targetInvalid && 'border-red-300')}
           />
           <select
+            aria-label={`Chọn nhanh đích liên kết cho ${contextLabel}`}
             disabled={readOnly}
             value=""
             onChange={(e) => {
@@ -806,6 +855,11 @@ function LinkSubEditor({
             ))}
           </select>
         </div>
+        {targetInvalid ? (
+          <p role="alert" className="text-[13px] leading-5 text-red-700">
+            Liên kết chưa hợp lệ. Dùng đường dẫn bắt đầu bằng / hoặc #, hay địa chỉ http/https.
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -826,12 +880,12 @@ function FieldRow({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <label className="mb-1.5 block text-[13px] font-semibold text-slate-700">
         {label}
       </label>
       {children}
       {hint ? (
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{hint}</p>
+        <p className="mt-1 text-[13px] leading-5 text-muted-foreground">{hint}</p>
       ) : null}
     </div>
   );

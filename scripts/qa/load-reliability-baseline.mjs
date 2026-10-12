@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const currentFile = fileURLToPath(import.meta.url);
 const workspaceRoot = path.resolve(path.dirname(currentFile), '..', '..');
-const outputDirectory = path.join(workspaceRoot, 'docs', 'qa', 'generated');
+const outputDirectory = path.join(workspaceRoot, 'tmp', 'qa-artifacts', 'generated');
 const apiBaseUrl = (process.env.API_BASE_URL || 'http://localhost:4000').replace(/\/$/, '');
 const frontendBaseUrl = (process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 const requestTimeoutMs = Number(process.env.LOAD_REQUEST_TIMEOUT_MS || 15_000);

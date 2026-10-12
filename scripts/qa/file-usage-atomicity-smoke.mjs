@@ -23,8 +23,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_QA_PASSWORD || 'ChangeMe123!';
 const QA_CLIENT_IP = '192.0.2.40';
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'file-usage-atomicity-qa-last-run.md'
 );
 const TRIGGER_NAME = 'trg_qa_fail_file_usage';

@@ -1,11 +1,12 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 import { NEWS_CATEGORY_DELETED_SCOPES } from './news-category.types';
 
 export class NewsCategoryListQueryDto {
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   q?: string;
 
   @IsOptional()

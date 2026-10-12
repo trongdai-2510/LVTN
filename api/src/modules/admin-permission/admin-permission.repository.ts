@@ -158,7 +158,9 @@ export class AdminPermissionRepository {
         const templateCodes =
           role.code === params.superAdminRoleCode
             ? [...params.permissions]
-            : [...new Set(role.permission_codes ?? [])];
+            : insertedRoleCodes.includes(role.code)
+              ? [...new Set(role.permission_codes ?? [])]
+              : [];
         const assignedCodes = assignedCodesByRoleId.get(persistedRole.id) ?? new Set<string>();
         const skippedCodes: string[] = [];
         const addedCodes: string[] = [];

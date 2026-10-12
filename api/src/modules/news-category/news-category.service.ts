@@ -19,7 +19,8 @@ export class NewsCategoryService {
   }
 
   async getNewsCategoryDetail(id: string) {
-    const category = await this.newsCategoryRepository.findById(id);
+    const categoryId = this.requireUuid('news_category_id', id);
+    const category = await this.newsCategoryRepository.findById(categoryId);
     if (!category) throw this.notFound('News category was not found.');
     return { news_category: category };
   }
@@ -36,34 +37,40 @@ export class NewsCategoryService {
   }
 
   async updateNewsCategory(id: string, input: UpdateNewsCategoryDto) {
-    const existing = await this.newsCategoryRepository.findById(id);
+    const categoryId = this.requireUuid('news_category_id', id);
+    const existing = await this.newsCategoryRepository.findById(categoryId);
     if (!existing) throw this.notFound('News category was not found.');
     if (existing.deleted_at) throw this.conflict('News category is archived.');
     const patch: { name?: string; slug?: string; sort_order?: number } = {};
     if (typeof input.name !== 'undefined') patch.name = this.requireText('name', input.name, 100);
     if (typeof input.slug !== 'undefined') {
       patch.slug = this.requireSlug(input.slug);
-      await this.assertSlugAvailable(patch.slug, id);
+      await this.assertSlugAvailable(patch.slug, categoryId);
     }
     if (typeof input.sort_order !== 'undefined') patch.sort_order = input.sort_order;
-    await this.newsCategoryRepository.update(id, patch);
-    return this.getNewsCategoryDetail(id);
+    const outcome = await this.newsCategoryRepository.update(categoryId, patch);
+    this.assertWriteOutcome(outcome);
+    return this.getNewsCategoryDetail(categoryId);
   }
 
   async archiveNewsCategory(id: string) {
-    const existing = await this.newsCategoryRepository.findById(id);
+    const categoryId = this.requireUuid('news_category_id', id);
+    const existing = await this.newsCategoryRepository.findById(categoryId);
     if (!existing) throw this.notFound('News category was not found.');
     if (existing.deleted_at) throw this.conflict('News category is already archived.');
-    await this.newsCategoryRepository.archive(id);
-    return this.getNewsCategoryDetail(id);
+    const outcome = await this.newsCategoryRepository.archive(categoryId);
+    this.assertWriteOutcome(outcome);
+    return this.getNewsCategoryDetail(categoryId);
   }
 
   async restoreNewsCategory(id: string) {
-    const existing = await this.newsCategoryRepository.findById(id);
+    const categoryId = this.requireUuid('news_category_id', id);
+    const existing = await this.newsCategoryRepository.findById(categoryId);
     if (!existing) throw this.notFound('News category was not found.');
     if (!existing.deleted_at) throw this.conflict('News category is not archived.');
-    await this.newsCategoryRepository.restore(id);
-    return this.getNewsCategoryDetail(id);
+    const outcome = await this.newsCategoryRepository.restore(categoryId);
+    this.assertWriteOutcome(outcome);
+    return this.getNewsCategoryDetail(categoryId);
   }
 
   private requireText(field: string, value: unknown, maxLength: number): string {
@@ -86,6 +93,39 @@ export class NewsCategoryService {
       throw new AppError({ code: ErrorCodes.VALIDATION_ERROR, message: 'slug must not exceed 100 characters.', statusCode: HttpStatus.BAD_REQUEST });
     }
     return slug;
+  }
+
+  private requireUuid(field: string, value: unknown): string {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) {
+      throw new AppError({
+        code: ErrorCodes.VALIDATION_ERROR,
+        message: `${field} must be a UUID string.`,
+        statusCode: HttpStatus.BAD_REQUEST,
+        details: { field }
+      });
+    }
+    return normalized;
+  }
+
+  private assertWriteOutcome(
+    outcome: Awaited<ReturnType<NewsCategoryRepository['update']>>
+  ): void {
+    if (outcome.status === 'updated') return;
+    if (outcome.status === 'not_found') throw this.notFound('News category was not found.');
+    if (outcome.status === 'linked') {
+      throw new AppError({
+        code: 'NEWS_CATEGORY_IN_USE',
+        message: 'Không thể lưu trữ chuyên mục đang được bài viết sử dụng.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { page_content_id: outcome.page_content_id }
+      });
+    }
+    throw this.conflict(
+      outcome.status === 'archived'
+        ? 'News category is archived.'
+        : 'News category is not archived.'
+    );
   }
 
   private async assertSlugAvailable(slug: string, exceptId?: string): Promise<void> {

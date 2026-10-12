@@ -12,7 +12,6 @@ import {
   normalizeNullableTime,
   normalizeNullableUuid,
   normalizeOptionalEmail,
-  normalizeOptionalRequiredText,
   normalizeRequiredText,
   normalizeSocialLinkStatus,
   normalizeSortOrder,

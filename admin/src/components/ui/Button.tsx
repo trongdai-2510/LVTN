@@ -40,7 +40,7 @@ export function buttonStyles({
   size?: ButtonSize;
 }) {
   return cn(
-    'inline-flex shrink-0 items-center justify-center gap-2 rounded-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-1',
+    'inline-flex shrink-0 items-center justify-center gap-2 rounded-md font-medium transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-1',
     variants[variant],
     sizes[size],
     className

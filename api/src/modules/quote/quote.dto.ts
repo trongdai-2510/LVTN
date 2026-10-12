@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 
+import { POSTGRES_INTEGER_MAX } from '../../common/validation/databaseLimits';
 import { QUOTE_ALLOWED_STATUSES, QUOTE_DELETED_SCOPES } from './quote.types';
 
 const MAX_LOGIC_USER_ID = 2_147_483_647;
@@ -8,6 +9,7 @@ const MAX_LOGIC_USER_ID = 2_147_483_647;
 export class QuoteListQueryDto {
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   q?: string;
 
   @IsOptional()
@@ -45,6 +47,7 @@ export class QuoteListQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(POSTGRES_INTEGER_MAX)
   page?: number;
 
   @IsOptional()
@@ -72,9 +75,11 @@ export class QuoteAssigneeDto {
 export class QuoteInternalNoteDto {
   @IsOptional()
   @IsString()
+  @MaxLength(10_000)
   note_text?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10_000)
   note?: string;
 }

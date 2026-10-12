@@ -9,6 +9,8 @@
     "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
@@ -25,25 +27,20 @@
     "baseUrl": ".",
     "paths": {
       "@/*": [
-        "./*"
+        "./src/*"
       ]
     }
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-preview/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     ".next-qa/types/**/*.ts",
     ".next-qa/dev/types/**/*.ts",
-    ".next-outage-qa/types/**/*.ts",
-    ".next-outage-qa/dev/types/**/*.ts",
-    ".next-repro/types/**/*.ts",
-    ".next-repro/dev/types/**/*.ts",
-    ".next-repro-20260802/types/**/*.ts",
-    ".next-repro-20260802/dev/types/**/*.ts"
+    ".next-header-check/types/**/*.ts",
+    ".next-header-check/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

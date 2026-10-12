@@ -9,6 +9,8 @@ import { Card } from '@/components/ui/Card';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { Input } from '@/components/ui/Input';
 import { Field } from '@/components/form/Field';
+import { ConfirmDialog } from '@/components/feedback/ConfirmDialog';
+import { ActionResultDialog, type ActionResultDialogState } from '@/components/feedback/ActionResultDialog';
 import { authStore } from '@/features/auth/auth.store';
 import type { AuthState } from '@/features/auth/auth.types';
 import { extractItems } from '@/features/shared/extract';
@@ -47,11 +49,12 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState('');
+  const [resultDialog, setResultDialog] = useState<ActionResultDialogState | null>(null);
   const [form, setForm] = useState<CategoryForm>(emptyCategoryForm);
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'deleted'>('all');
   const [expanded, setExpanded] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<NewsCategoryRecord | null>(null);
 
   useEffect(() => {
     setAuthState(authStore.hydrate());
@@ -87,14 +90,16 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
 
   if (!visible || !canRead) return null;
 
-  async function loadCategories() {
+  async function loadCategories(showError = true) {
     setLoading(true);
-    setError(null);
+    if (showError) setError(null);
     try {
       const result = await apiClient.get<unknown>(`${endpoints.songThanh.newsCategories}?deleted_scope=all`);
       setItems(extractItems(result) as NewsCategoryRecord[]);
+      return true;
     } catch (err) {
-      setError(err);
+      if (showError) setError(err);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -117,7 +122,7 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
       slug: item.slug,
       sort_order: String(item.sort_order ?? 0)
     });
-    setMessage('');
+    setResultDialog(null);
     setError(null);
     setEditorOpen(true);
     setExpanded(true);
@@ -125,7 +130,7 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
 
   function startCreate() {
     setForm(emptyCategoryForm);
-    setMessage('');
+    setResultDialog(null);
     setError(null);
     setEditorOpen(true);
     setExpanded(true);
@@ -133,7 +138,7 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
 
   function resetForm() {
     setForm(emptyCategoryForm);
-    setMessage('');
+    setResultDialog(null);
     setError(null);
     setEditorOpen(false);
   }
@@ -148,8 +153,9 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
     }
     setSaving(true);
     setError(null);
-    setMessage('');
+    setResultDialog(null);
     try {
+      const editing = Boolean(form.id);
       const payload = {
         name: form.name.trim(),
         slug: form.slug.trim(),
@@ -160,12 +166,20 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
       } else {
         await apiClient.post(endpoints.songThanh.newsCategories, payload);
       }
-      await loadCategories();
+      const refreshed = await loadCategories(false);
       setForm(emptyCategoryForm);
       setEditorOpen(false);
-      setMessage(form.id ? 'Đã cập nhật chuyên mục.' : 'Đã tạo chuyên mục.');
+      setResultDialog({
+        tone: refreshed ? 'success' : 'warning',
+        title: refreshed
+          ? editing ? 'Đã cập nhật chuyên mục' : 'Đã tạo chuyên mục'
+          : 'Đã lưu, danh sách chưa cập nhật',
+        description: refreshed
+          ? 'Chuyên mục tin tức đã được lưu.'
+          : 'Dữ liệu đã lưu nhưng danh sách chưa tải lại được. Hãy tải lại trang để kiểm tra.'
+      });
     } catch (err) {
-      setError(err);
+      setResultDialog({ tone: 'error', title: 'Không lưu được chuyên mục', error: err });
     } finally {
       setSaving(false);
     }
@@ -175,13 +189,19 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
     if (!canArchive) return;
     setSaving(true);
     setError(null);
-    setMessage('');
+    setResultDialog(null);
     try {
       await apiClient.delete(byId(endpoints.songThanh.newsCategories, item.id));
-      await loadCategories();
-      setMessage('Đã lưu trữ chuyên mục.');
+      const refreshed = await loadCategories(false);
+      setResultDialog({
+        tone: refreshed ? 'success' : 'warning',
+        title: refreshed ? 'Đã lưu trữ chuyên mục' : 'Đã lưu trữ, danh sách chưa cập nhật',
+        description: refreshed
+          ? 'Chuyên mục đã được ẩn khỏi bộ lọc công khai.'
+          : 'Chuyên mục đã được lưu trữ nhưng danh sách chưa tải lại được. Hãy tải lại trang để kiểm tra.'
+      });
     } catch (err) {
-      setError(err);
+      setResultDialog({ tone: 'error', title: 'Không lưu trữ được chuyên mục', error: err });
     } finally {
       setSaving(false);
     }
@@ -191,13 +211,19 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
     if (!canRestore) return;
     setSaving(true);
     setError(null);
-    setMessage('');
+    setResultDialog(null);
     try {
       await apiClient.post(`${byId(endpoints.songThanh.newsCategories, item.id)}/restore`, {});
-      await loadCategories();
-      setMessage('Đã khôi phục chuyên mục.');
+      const refreshed = await loadCategories(false);
+      setResultDialog({
+        tone: refreshed ? 'success' : 'warning',
+        title: refreshed ? 'Đã khôi phục chuyên mục' : 'Đã khôi phục, danh sách chưa cập nhật',
+        description: refreshed
+          ? 'Chuyên mục đã trở lại danh sách đang dùng.'
+          : 'Chuyên mục đã được khôi phục nhưng danh sách chưa tải lại được. Hãy tải lại trang để kiểm tra.'
+      });
     } catch (err) {
-      setError(err);
+      setResultDialog({ tone: 'error', title: 'Không khôi phục được chuyên mục', error: err });
     } finally {
       setSaving(false);
     }
@@ -254,12 +280,6 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
               <ErrorState error={error} context="module-save" />
             </div>
           ) : null}
-          {message ? (
-            <div className="border-b border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700">
-              {message}
-            </div>
-          ) : null}
-
           <div className="flex flex-col gap-3 border-b border-border bg-panel px-4 py-3 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-wrap items-center gap-1 rounded-lg bg-muted p-1">
               {[
@@ -270,6 +290,7 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
                 <button
                   key={value}
                   type="button"
+                  aria-pressed={statusFilter === value}
                   onClick={() => setStatusFilter(value as typeof statusFilter)}
                   className={cn(
                     'rounded-md px-3 py-1.5 text-xs transition-colors',
@@ -307,10 +328,12 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
                     Đóng
                   </Button>
                 </div>
-                <div className="grid gap-3 xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_auto] xl:items-end">
+                <div className="grid gap-3 xl:grid-cols-[minmax(180px,1fr)_minmax(180px,1fr)_120px_auto] xl:items-end">
                   <Field label="Tên chuyên mục">
                     <Input
+                      aria-label="Tên chuyên mục"
                       value={form.name}
+                      maxLength={100}
                       placeholder="Tin kỹ thuật"
                       disabled={saving}
                       onChange={(event) => updateForm('name', event.target.value)}
@@ -318,11 +341,25 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
                   </Field>
                   <Field label="Đường dẫn">
                     <Input
+                      aria-label="Đường dẫn chuyên mục"
                       value={form.slug}
+                      maxLength={100}
                       placeholder="tin-ky-thuat"
                       className="font-mono"
                       disabled={saving}
                       onChange={(event) => updateForm('slug', event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Thứ tự">
+                    <Input
+                      aria-label="Thứ tự chuyên mục"
+                      type="number"
+                      min={0}
+                      max={9999}
+                      step={1}
+                      value={form.sort_order}
+                      disabled={saving}
+                      onChange={(event) => updateForm('sort_order', event.target.value)}
                     />
                   </Field>
                   <div className="flex flex-wrap gap-2">
@@ -368,19 +405,19 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
                   </div>
                   <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
                     {canUpdate && !item.deleted_at ? (
-                      <Button type="button" size="sm" variant="secondary" disabled={saving} onClick={() => editCategory(item)}>
+                      <Button aria-label={`Sửa chuyên mục ${item.name}`} type="button" size="sm" variant="secondary" disabled={saving} onClick={() => editCategory(item)}>
                         <Pencil className="h-3.5 w-3.5" />
                         Sửa
                       </Button>
                     ) : null}
                     {canArchive && !item.deleted_at ? (
-                      <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={() => void archiveCategory(item)}>
+                      <Button aria-label={`Lưu trữ chuyên mục ${item.name}`} type="button" size="sm" variant="ghost" disabled={saving} onClick={() => setArchiveTarget(item)}>
                         <Trash2 className="h-3.5 w-3.5" />
                         Lưu trữ
                       </Button>
                     ) : null}
                     {canRestore && item.deleted_at ? (
-                      <Button type="button" size="sm" variant="secondary" disabled={saving} onClick={() => void restoreCategory(item)}>
+                      <Button aria-label={`Khôi phục chuyên mục ${item.name}`} type="button" size="sm" variant="secondary" disabled={saving} onClick={() => void restoreCategory(item)}>
                         <RotateCcw className="h-3.5 w-3.5" />
                         Khôi phục
                       </Button>
@@ -390,8 +427,26 @@ export function NewsCategoryManagerCard({ visible = true }: { visible?: boolean 
               ))
             )}
           </div>
+          <ConfirmDialog
+            open={Boolean(archiveTarget)}
+            title="Lưu trữ chuyên mục tin tức?"
+            description={
+              archiveTarget
+                ? `Chuyên mục “${archiveTarget.name}” sẽ bị ẩn khỏi bộ lọc website. Hệ thống sẽ chặn thao tác nếu vẫn còn bài viết đang dùng chuyên mục này.`
+                : ''
+            }
+            confirmLabel="Lưu trữ"
+            pending={saving}
+            onConfirm={async () => {
+              if (!archiveTarget) return;
+              await archiveCategory(archiveTarget);
+              setArchiveTarget(null);
+            }}
+            onClose={() => setArchiveTarget(null)}
+          />
         </>
       ) : null}
+      <ActionResultDialog state={resultDialog} onClose={() => setResultDialog(null)} />
     </Card>
   );
 }
@@ -405,6 +460,10 @@ function validateCategoryForm(form: CategoryForm): string | null {
   if (slug.length > 100) return 'Đường dẫn chuyên mục không vượt quá 100 ký tự.';
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
     return 'Đường dẫn chỉ dùng chữ thường, số và dấu gạch ngang.';
+  }
+  const sortOrder = Number(form.sort_order);
+  if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) {
+    return 'Thứ tự phải là số nguyên từ 0 đến 9999.';
   }
   return null;
 }

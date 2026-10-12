@@ -359,9 +359,11 @@ async function main() {
       assert(slug, 'product slug is missing');
       await page.setViewport(1440, 1000, false);
       await page.navigate(`${FRONTEND_BASE_URL}/san-pham/${encodeURIComponent(slug)}`);
-      const state = await inspectBrowserPage(page, ['thong so noi bat', 'yeu cau bao gia']);
+      const state = await inspectBrowserPage(page, ['thong so noi bat']);
       assert(state.no_runtime_overlay, 'Next/runtime overlay is visible');
-      assert(state.has_expected_text, 'detail did not show spec navigation and request action');
+      assert(state.has_expected_text, 'detail did not show quick specs');
+      const hasRequestAction = await page.evaluate(`Boolean(document.querySelector('[data-product-primary-actions] [data-quote-action="open"]'))`);
+      assert(hasRequestAction, 'detail did not show its primary request action');
       assert(state.no_horizontal_overflow, `horizontal overflow ${state.overflow_px}px`);
       return state;
     });
@@ -403,6 +405,7 @@ async function main() {
       await seedAdminAuth(page, context.session);
       await page.setViewport(1440, 1000, false);
       await page.navigate(adminUrl('/dashboard'));
+      await page.waitForCondition(`Boolean(document.querySelector('[data-admin-sidebar]') && document.querySelector('[data-admin-topbar]'))`, NAVIGATION_TIMEOUT_MS, 'dashboard shell did not hydrate');
       const state = await inspectAdminPage(page, ['tong quan']);
       assert(state.no_runtime_overlay, 'Next/runtime overlay is visible');
       assert(state.has_shell, 'admin shell is missing');
@@ -415,7 +418,7 @@ async function main() {
       assert(product?.id, 'product id is missing');
       await page.setViewport(1440, 1100, false);
       page.runtimeErrors.length = 0;
-      await page.navigate(adminUrl(`/product-groups/${product.id}`));
+      await page.navigate(adminUrl(`/product-groups/${product.id}?view=variants`));
       const workspaceStartedAt = Date.now();
       try {
         await page.waitForCondition(
@@ -628,6 +631,7 @@ function extractItems(value) {
 
 function firstSearchToken(value) {
   const token = String(value || 'led')
+    .replace(/[đĐ]/g, 'd')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .split(/\s+/)
@@ -932,7 +936,7 @@ class CdpPage {
 }
 
 function writeReport() {
-  const reportDir = path.join(ROOT, 'docs', 'working-notes');
+  const reportDir = path.join(ROOT, 'tmp', 'qa-artifacts');
   mkdirSync(reportDir, { recursive: true });
   const reportPath = path.join(reportDir, 'end-user-qa-last-run.md');
   const lines = [
@@ -978,7 +982,7 @@ function printSummary() {
     const suffix = result.status === 'PASS' ? '' : ` - ${result.error}`;
     console.log(`${result.status} ${result.id} ${result.title}${suffix}`);
   }
-  console.log(`Report: ${path.join(ROOT, 'docs', 'working-notes', 'end-user-qa-last-run.md')}`);
+  console.log(`Report: ${path.join(ROOT, 'tmp', 'qa-artifacts', 'end-user-qa-last-run.md')}`);
   console.log(`Summary: ${results.length - failed.length}/${results.length} passed`);
 }
 

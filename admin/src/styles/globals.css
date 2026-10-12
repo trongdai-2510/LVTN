@@ -3,28 +3,39 @@
 @tailwind utilities;
 
 :root {
-  --background: #f2f2f6;
-  --surface: #fbfbfd;
-  --panel: #ffffff;
-  --border: #e2e2ea;
-  --primary: #00288e;
-  --primary-hover: #001f70;
-  --primary-foreground: #fbfbfd;
-  --sidebar: #1a1b2e;
-  --sidebar-active: #3b5bdb;
-  --muted: #f4f2fc;
-  --muted-foreground: #526176;
-  --text: #1a1b22;
-  --success: #2f7d55;
-  --warning: #b7791f;
-  --danger: #b42318;
-  --info: #3755c3;
-  --sidebar-width: 260px;
+  --font-admin-sans: "Segoe UI Variable Text";
+  --font-admin-mono: "SFMono-Regular";
+  --background: #f3f6f9;
+  --surface: #f8fafc;
+  --panel: #fcfdff;
+  --border: #dce3ea;
+  --primary: #145f9f;
+  --primary-hover: #0d4b80;
+  --primary-foreground: #f8fbff;
+  --sidebar: #102337;
+  --sidebar-active: #1c456c;
+  --muted: #eef3f7;
+  --muted-foreground: #4f6070;
+  --text: #132238;
+  --success: #24704a;
+  --warning: #9a6514;
+  --danger: #ad332c;
+  --info: #2f66a1;
+  --sidebar-width: 240px;
   --topbar-height: 64px;
-  --content-width: 1440px;
+  --content-width: 1840px;
   --control-height: 44px;
   --radius-sm: 4px;
   --radius-md: 8px;
+}
+
+.admin-login {
+  --login-brand: #004ab4;
+  --login-brand-surface: #eaf1fb;
+  --login-canvas: #f3f6fb;
+  --login-ink: #0b1c30;
+  --login-muted: #536477;
+  --login-border: #d5dfeb;
 }
 
 @media (min-width: 768px) {
@@ -50,6 +61,8 @@ body {
   color: var(--text);
   background: var(--background);
   font-family: var(--font-admin-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
   letter-spacing: 0;
   overflow-x: hidden;
   overflow-y: scroll;
@@ -120,6 +133,42 @@ a {
 .admin-form-stack {
   display: grid;
   gap: 1rem;
+}
+
+.page-studio-fields > .space-y-4 {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.page-studio-fields > .space-y-4 > * {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.page-studio-fields > .space-y-4 > *:last-child {
+  border-bottom: 0;
+}
+
+[data-editor-attention="true"] {
+  animation: editor-attention 1.2s ease-out 2;
+  outline: 3px solid rgb(20 95 159 / 0.35);
+  outline-offset: 4px;
+}
+
+@keyframes editor-attention {
+  0%,
+  100% {
+    outline-color: rgb(20 95 159 / 0.25);
+  }
+  45% {
+    outline-color: rgb(20 95 159 / 0.8);
+  }
 }
 
 .admin-two-column-form {

@@ -163,6 +163,7 @@ test('CSV row numbers preserve physical blank-line positions', async () => {
     workbook.rows.map((row) => row.source_row_number),
     [2, 4]
   );
+  await assert.rejects(() => readWorkbookFixture(workbookPath, [], 'Products'));
 });
 
 test('CSV parsing rejects more than the supported number of data rows', async () => {
@@ -234,6 +235,38 @@ test('XLSX parsing preserves sparse header column positions and rejects unheaded
     { row: 2, cells: { A: 'Lamp', B: 'orphan', C: 'SKU-1' } }
   ]);
   await assert.rejects(() => readWorkbookFixture(unheadedPath, []));
+});
+
+test('XLSX preview reports embedded images that the cell-only import cannot attach', async () => {
+  const workbookPath = path.join(allowedRoot, 'with-embedded-image.xlsx');
+  await writeRawXlsx(
+    workbookPath,
+    '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>name</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Sample</t></is></c></row></sheetData></worksheet>',
+    'worksheets/sheet1.xml',
+    { 'xl/media/image1.png': 'image bytes' }
+  );
+  const workbook = await readWorkbookFixture(workbookPath, []);
+  assert.equal(workbook.embedded_image_count, 1);
+});
+
+test('XLSX reads the selected sheet instead of silently importing the first sheet', async () => {
+  const workbookPath = path.join(allowedRoot, 'multiple-sheets.xlsx');
+  const zip = new JSZip();
+  zip.file('xl/workbook.xml',
+    '<workbook><sheets><sheet name="Overview" r:id="rId1"/><sheet name="Products" r:id="rId2"/></sheets></workbook>');
+  zip.file('xl/_rels/workbook.xml.rels',
+    '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>');
+  zip.file('xl/worksheets/sheet1.xml',
+    '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>note</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Cover</t></is></c></row></sheetData></worksheet>');
+  zip.file('xl/worksheets/sheet2.xml',
+    '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>product</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Lamp</t></is></c></row></sheetData></worksheet>');
+  writeFileSync(workbookPath, await zip.generateAsync({ type: 'nodebuffer' }));
+
+  const selected = await readWorkbookFixture(workbookPath, [], 'Products');
+  assert.equal(selected.sheet_name, 'Products');
+  assert.deepEqual(selected.headers, ['product']);
+  assert.equal(selected.rows[0].cells.product, 'Lamp');
+  await assert.rejects(() => readWorkbookFixture(workbookPath, [], 'Missing'));
 });
 
 test('XLSX parsing rejects blank or normalized-duplicate headers and unsafe relationships', async () => {
@@ -357,7 +390,8 @@ async function writeXlsx(
 async function writeRawXlsx(
   targetPath: string,
   sheetXml: string,
-  relationshipTarget = 'worksheets/sheet1.xml'
+  relationshipTarget = 'worksheets/sheet1.xml',
+  extraEntries: Record<string, string> = {}
 ): Promise<void> {
   const zip = new JSZip();
   zip.file(
@@ -374,6 +408,9 @@ async function writeRawXlsx(
     'xl/worksheets/sheet1.xml',
     sheetXml
   );
+  for (const [entryPath, contents] of Object.entries(extraEntries)) {
+    zip.file(entryPath, contents);
+  }
   writeFileSync(targetPath, await zip.generateAsync({ type: 'nodebuffer' }));
 }
 

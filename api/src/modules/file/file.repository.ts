@@ -66,6 +66,12 @@ interface CreateFileMetadataInput {
   is_orphan: boolean;
 }
 
+export type FileArchiveOutcome =
+  | { status: 'updated' }
+  | { status: 'not_found' }
+  | { status: 'archived' }
+  | { status: 'blocked'; active_usage_count: number };
+
 const FILE_USAGE_GROUP_SQL: Record<Exclude<FileUsageGroup, 'other'>, string> = {
   product_image: `(
     (fu.entity_type = 'product_group' AND fu.field_name IN ('thumbnail_file_id', 'seo_og_image_file_id'))
@@ -307,14 +313,37 @@ export class FileRepository {
     return row;
   }
 
-  async archive(id: string): Promise<void> {
-    await this.knexService.db(FILE_METADATA_TABLE)
-      .where({ id })
-      .whereNull('deleted_at')
-      .update({
-        deleted_at: this.knexService.db.fn.now(),
-        is_orphan: true
-      });
+  async archive(id: string): Promise<FileArchiveOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
+      const file = await trx(FILE_METADATA_TABLE)
+        .where({ id })
+        .forUpdate()
+        .first<{ id: string; deleted_at: Date | string | null }>([
+          'id',
+          'deleted_at'
+        ]);
+      if (!file) return { status: 'not_found' };
+      if (file.deleted_at) return { status: 'archived' };
+
+      const usage = await trx(FILE_USAGE_TABLE)
+        .where({ file_id: id })
+        .whereNull('deleted_at')
+        .count({ total: 'id' })
+        .first();
+      const activeUsageCount = Number(usage?.total ?? 0);
+      if (activeUsageCount > 0) {
+        return { status: 'blocked', active_usage_count: activeUsageCount };
+      }
+
+      await trx(FILE_METADATA_TABLE)
+        .where({ id })
+        .whereNull('deleted_at')
+        .update({
+          deleted_at: trx.fn.now(),
+          is_orphan: true
+        });
+      return { status: 'updated' };
+    });
   }
 
   async restore(id: string): Promise<void> {

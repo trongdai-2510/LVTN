@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3001",
+    "dev:qa": "next dev --webpack --port 3001",
     "build": "next build",
     "start": "next start --port 3001",
     "typecheck": "tsc --noEmit",
@@ -12,19 +13,21 @@
     "dead-code": "knip --reporter compact"
   },
   "dependencies": {
-    "@phosphor-icons/react": "^2.1.10",
-    "@tiptap/extension-link": "3.27.3",
-    "@tiptap/extension-placeholder": "3.27.3",
-    "@tiptap/extension-table": "3.27.3",
-    "@tiptap/extension-table-cell": "3.27.3",
-    "@tiptap/extension-table-header": "3.27.3",
-    "@tiptap/extension-table-row": "3.27.3",
-    "@tiptap/pm": "3.27.3",
-    "@tiptap/react": "3.27.3",
-    "@tiptap/starter-kit": "3.27.3",
+    "@animateicons/react": "^0.4.3",
+    "@tiptap/extension-link": "^3.31.3",
+    "@tiptap/extension-placeholder": "^3.31.3",
+    "@tiptap/extension-table": "^3.31.3",
+    "@tiptap/extension-table-cell": "^3.31.3",
+    "@tiptap/extension-table-header": "^3.31.3",
+    "@tiptap/extension-table-row": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/starter-kit": "^3.31.3",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
-    "next": "^16.2.12",
+    "next": "^16.3.6",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwind-merge": "^2.6.0"
@@ -43,6 +46,7 @@
   },
   "overrides": {
     "postcss": "$postcss",
-    "sharp": "0.35.3"
+    "sharp": "0.35.5",
+    "uuid": "11.1.1"
   }
 }

@@ -16,6 +16,13 @@ export const quickNavRoutes: QuickNavRoute[] = [
     keywords: ['dashboard', 'tong quan', 'home']
   },
   {
+    label: 'Trang chủ',
+    href: '/home-page',
+    group: 'Nội dung website',
+    keywords: ['trang chu', 'home page', 'homepage'],
+    permission: PERMISSIONS.homePageRead
+  },
+  {
     label: 'Cấu hình website',
     href: '/website-settings',
     group: 'Nội dung website',
@@ -23,7 +30,7 @@ export const quickNavRoutes: QuickNavRoute[] = [
     permission: PERMISSIONS.websiteSettingsRead
   },
   {
-    label: 'Menu điều hướng',
+    label: 'Menu website',
     href: '/menu',
     group: 'Nội dung website',
     keywords: ['menu', 'dieu huong', 'navigation'],
@@ -93,7 +100,7 @@ export const quickNavRoutes: QuickNavRoute[] = [
     permission: PERMISSIONS.productGroupRead
   },
   {
-    label: 'Biến thể sản phẩm',
+    label: 'Biến thể / SKU',
     href: '/product-variants',
     group: 'Sản phẩm',
     keywords: ['variant', 'sku', 'bien the', 'model'],
@@ -135,6 +142,13 @@ export const quickNavRoutes: QuickNavRoute[] = [
     permission: PERMISSIONS.quoteRead
   },
   {
+    label: 'Khách hàng',
+    href: '/customers',
+    group: 'Khách gửi vào',
+    keywords: ['customer', 'khach hang', 'cong ty'],
+    permission: PERMISSIONS.customerRead
+  },
+  {
     label: 'Nhập dữ liệu',
     href: '/import',
     group: 'Nhập dữ liệu',
@@ -152,12 +166,14 @@ export const quickNavRoutes: QuickNavRoute[] = [
     label: 'Người dùng',
     href: '/users',
     group: 'Hệ thống',
-    keywords: ['user', 'nguoi dung']
+    keywords: ['user', 'nguoi dung'],
+    permission: PERMISSIONS.adminUserRead
   },
   {
     label: 'Vai trò & quyền',
     href: '/roles',
     group: 'Hệ thống',
-    keywords: ['role', 'vai tro', 'quyen', 'permission']
+    keywords: ['role', 'vai tro', 'quyen', 'permission'],
+    permission: PERMISSIONS.adminRoleRead
   }
 ];

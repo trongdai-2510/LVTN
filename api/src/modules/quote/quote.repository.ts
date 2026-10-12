@@ -50,7 +50,18 @@ export class QuoteRepository {
       .orderByRaw(`CASE WHEN ${alias}.deleted_at IS NULL THEN 0 ELSE 1 END ASC`)
       .orderBy(`${alias}.created_at`, 'desc')
       .offset(params.offset)
-      .limit(params.limit)) as Array<Omit<QuoteRecord, 'address' | 'message' | 'ip_address' | 'user_agent'>>;
+      .limit(params.limit)) as Array<
+        Omit<
+          QuoteRecord,
+          | 'address'
+          | 'message'
+          | 'project_name'
+          | 'project_context'
+          | 'project_requirements'
+          | 'ip_address'
+          | 'user_agent'
+        >
+      >;
     const summaries = await this.buildQuoteItemSummaryMap(rows.map((row) => row.id));
     const labels = await this.logicUsers.labelsByIds(
       rows.map((row) => row.assigned_to)
@@ -82,6 +93,9 @@ export class QuoteRepository {
         'email',
         'address',
         'message',
+        'project_name',
+        'project_context',
+        'project_requirements',
         'status',
         'assigned_to',
         'created_at',
@@ -102,49 +116,79 @@ export class QuoteRepository {
     };
   }
 
-  async archive(id: string): Promise<boolean> {
-    const updated = await this.knexService.db(QUOTE_REQUEST_TABLE)
-      .where({ id })
-      .whereNull('deleted_at')
-      .update({ deleted_at: new Date() });
-    return updated > 0;
+  async archive(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const quote = await this.lockQuote(trx, id);
+      if (!quote) return 'not_found' as const;
+      if (quote.deleted_at) return 'archived' as const;
+      await trx(QUOTE_REQUEST_TABLE).where({ id }).update({ deleted_at: trx.fn.now() });
+      return 'updated' as const;
+    });
   }
 
-  async restore(id: string): Promise<boolean> {
-    const updated = await this.knexService.db(QUOTE_REQUEST_TABLE)
-      .where({ id })
-      .whereNotNull('deleted_at')
-      .update({ deleted_at: null });
-    return updated > 0;
+  async restore(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const quote = await this.lockQuote(trx, id);
+      if (!quote) return 'not_found' as const;
+      if (!quote.deleted_at) return 'active' as const;
+      await trx(QUOTE_REQUEST_TABLE).where({ id }).update({ deleted_at: null });
+      return 'updated' as const;
+    });
   }
 
-  async permanentlyDelete(id: string): Promise<boolean> {
-    const deleted = await this.knexService.db(QUOTE_REQUEST_TABLE)
-      .where({ id })
-      .whereNotNull('deleted_at')
-      .delete();
-    return deleted > 0;
+  async permanentlyDelete(id: string) {
+    return this.knexService.db.transaction(async (trx) => {
+      const quote = await this.lockQuote(trx, id);
+      if (!quote) return 'not_found' as const;
+      if (!quote.deleted_at) return 'active' as const;
+      await trx(QUOTE_REQUEST_TABLE).where({ id }).delete();
+      return 'deleted' as const;
+    });
   }
 
-  async updateStatus(id: string, status: QuoteStatus): Promise<boolean> {
-    const updated = await this.knexService.db(QUOTE_REQUEST_TABLE).where({ id }).whereNull('deleted_at').update({ status });
-    return updated > 0;
+  async updateStatus(id: string, status: QuoteStatus) {
+    return this.knexService.db.transaction(async (trx) => {
+      const quote = await this.lockQuote(trx, id);
+      if (!quote) return 'not_found' as const;
+      if (quote.deleted_at) return 'archived' as const;
+      await trx(QUOTE_REQUEST_TABLE).where({ id }).update({ status });
+      return 'updated' as const;
+    });
   }
 
-  async updateAssignee(id: string, assignedTo: number | null): Promise<boolean> {
-    const updated = await this.knexService.db(QUOTE_REQUEST_TABLE).where({ id }).whereNull('deleted_at').update({ assigned_to: assignedTo });
-    return updated > 0;
+  async updateAssignee(id: string, assignedTo: number | null) {
+    return this.knexService.db.transaction(async (trx) => {
+      const quote = await this.lockQuote(trx, id);
+      if (!quote) return 'not_found' as const;
+      if (quote.deleted_at) return 'archived' as const;
+      if (assignedTo !== null) {
+        const assignee = await trx('admin_user')
+          .select('id')
+          .where({ logic_user_id: assignedTo, status: 'active' })
+          .whereNull('deleted_at')
+          .forUpdate()
+          .first();
+        if (!assignee) return 'assignee_not_found' as const;
+      }
+      await trx(QUOTE_REQUEST_TABLE).where({ id }).update({ assigned_to: assignedTo });
+      return 'updated' as const;
+    });
   }
 
-  async createInternalNote(quoteId: string, noteText: string, addedBy: number | null): Promise<QuoteInternalNoteRecord> {
-    const [row] = await this.knexService.db<QuoteInternalNoteRecord>(QUOTE_INTERNAL_NOTE_TABLE)
-      .insert({
-        quote_id: quoteId,
-        note_text: noteText,
-        added_by: addedBy
-      })
-      .returning('*');
-    return row;
+  async createInternalNote(quoteId: string, noteText: string, addedBy: number | null) {
+    return this.knexService.db.transaction(async (trx) => {
+      const quote = await this.lockQuote(trx, quoteId);
+      if (!quote) return { status: 'not_found' as const };
+      if (quote.deleted_at) return { status: 'archived' as const };
+      const [row] = await trx<QuoteInternalNoteRecord>(QUOTE_INTERNAL_NOTE_TABLE)
+        .insert({
+          quote_id: quoteId,
+          note_text: noteText,
+          added_by: addedBy
+        })
+        .returning('*');
+      return { status: 'created' as const, row };
+    });
   }
 
   async listItems(quoteId: string): Promise<QuoteItem[]> {
@@ -170,6 +214,14 @@ export class QuoteRepository {
 
   async listAssigneeOptions(): Promise<QuoteAssigneeOption[]> {
     return this.logicUsers.listAssignableUsers();
+  }
+
+  private async lockQuote(trx: Knex.Transaction, id: string) {
+    return trx<QuoteRecord>(QUOTE_REQUEST_TABLE)
+      .select('id', 'deleted_at')
+      .where({ id })
+      .forUpdate()
+      .first();
   }
 
   private async buildQuoteItemSummaryMap(quoteIds: string[]): Promise<Map<string, { item_count: number; first_item: QuoteItem | null }>> {
@@ -204,6 +256,10 @@ export class QuoteRepository {
         `${itemAlias}.product_group_id`,
         `${itemAlias}.product_variant_id`,
         `${itemAlias}.quantity`,
+        `${itemAlias}.quantity_raw`,
+        `${itemAlias}.quantity_unit`,
+        `${itemAlias}.quantity_state`,
+        `${itemAlias}.public_price_amount_at_request`,
         `${itemAlias}.notes`,
         `${itemAlias}.created_at`,
         `${itemAlias}.updated_at`,
@@ -235,6 +291,12 @@ export class QuoteRepository {
       product_variant_status: (row.product_variant_status as string | null) ?? null,
       product_variant_deleted_at: (row.product_variant_deleted_at as Date | null) ?? null,
       quantity: row.quantity === null ? null : Number(row.quantity),
+      quantity_raw: (row.quantity_raw as string | null) ?? null,
+      quantity_unit: (row.quantity_unit as string | null) ?? null,
+      quantity_state: row.quantity_state as 'confirmed' | 'unspecified',
+      public_price_amount_at_request: row.public_price_amount_at_request === null
+        ? null
+        : Number(row.public_price_amount_at_request),
       notes: (row.notes as string | null) ?? null,
       created_at: row.created_at as Date,
       updated_at: row.updated_at as Date,

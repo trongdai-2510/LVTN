@@ -18,10 +18,3 @@ export function formatValue(value: unknown): string {
   if (mapped) return mapped;
   return String(value);
 }
-
-function titleFromSlug(value: string) {
-  return value
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}

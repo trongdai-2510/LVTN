@@ -15,8 +15,7 @@ import {
   Newspaper,
   Pencil,
   Save,
-  Search,
-  Trash2
+  Search
 } from '@/components/icons';
 
 import { Badge } from '@/components/ui/Badge';
@@ -33,22 +32,25 @@ import { FileReferencePicker } from '@/components/form/ReferencePickers';
 import { ReadOnlyBanner } from '@/components/form/ReadOnlyBanner';
 import { RichTextEditor } from '@/components/RichTextEditor';
 import { ExtraBlocksCard } from './ExtraBlocksCard';
+import { PageLayoutPanel } from './PageLayoutPanel';
 import type { AdminErrorContext } from '@/lib/admin-error-messages';
 import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
 import { cn } from '@/lib/cn';
-import { formatDate, formatValue } from '@/lib/formatters';
+import { formatValue } from '@/lib/formatters';
 
 import {
-  buildContentWarnings,
   buildPublicPath,
   getTemplateBlocks,
   getPageTemplate,
-  stripHtml,
   type PageTemplateBlock,
-  type PageContentTemplate,
-  type PageContentWarning
+  type PageContentTemplate
 } from './pageContentTemplates';
+import {
+  evaluateContentReadiness,
+  getContentReadinessContext,
+  type ContentReadiness
+} from './contentReadiness';
 
 type RecordMap = Record<string, unknown>;
 type FormErrors = Record<string, string>;
@@ -57,7 +59,7 @@ type ContentPendingAction = {
 };
 type PageReviewStatus = 'draft' | 'pending_review' | 'approved' | 'rejected';
 type PagePublishStatus = 'unpublished' | 'published' | 'archived';
-type PageWorkflowAction = 'submit_review' | 'approve' | 'reject' | 'publish' | 'unpublish';
+type PageWorkflowAction = 'submit_review' | 'reject' | 'publish' | 'unpublish';
 type PageSnapshotState = {
   loading: boolean;
   error: string;
@@ -75,6 +77,11 @@ type PageSnapshotState = {
   productGroups: RecordMap[];
   services: RecordMap[];
   projects: RecordMap[];
+  brandCount: number;
+  productCategoryCount: number;
+  productGroupCount: number;
+  serviceCount: number;
+  projectCount: number;
 };
 type PageTemplateZone = {
   label: string;
@@ -100,6 +107,10 @@ type PageContentPreviewDraft = {
   } | null;
   seo_title: string | null;
   seo_description: string | null;
+  extra_blocks: {
+    blocks: unknown[];
+    layout: { sections: Array<{ id: string; visible: boolean }> } | null;
+  };
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -112,6 +123,72 @@ const PUBLIC_SITE_BASE_URL =
 const PAGE_CONTENT_PREVIEW_ROUTE = `${PUBLIC_SITE_BASE_URL}/admin-preview/page-content`;
 const PAGE_CONTENT_PREVIEW_MESSAGE_TYPE = 'song-thanh:page-content-preview';
 const PAGE_CONTENT_PREVIEW_READY_MESSAGE_TYPE = 'song-thanh:page-content-preview:ready';
+const EDITOR_TARGET_EVENT = 'songthanh:editor-target';
+
+const FIELD_TARGETS: Record<string, string> = {
+  title: '#page-content-title',
+  slug: '#page-content-slug',
+  excerpt: '#page-content-excerpt',
+  content_html: '#page-section-body',
+  featured_image_file_id: '#page-section-media',
+  extra_blocks: '#page-section-blocks',
+  seo_title: '#page-content-seo-title',
+  seo_description: '#page-content-seo-description',
+  seo_og_image_file_id: '#page-section-seo',
+  news_category_id: '#page-content-news-category',
+  published_at: '#page-content-published-at'
+};
+
+function revealEditorTarget(target: string) {
+  if (typeof document === 'undefined') return;
+  const selector = target === 'form' ? `#${FORM_ID}` : target;
+  const reveal = () => {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (!element) return false;
+    document
+      .querySelectorAll<HTMLElement>('[data-editor-attention="true"]')
+      .forEach((current) => current.removeAttribute('data-editor-attention'));
+    const attentionTarget =
+      element.closest<HTMLElement>('[data-field]') ??
+      element.closest<HTMLElement>('[data-editor-section]') ??
+      element;
+    const scrollTarget =
+      element.closest<HTMLElement>('[data-editor-section]') ?? attentionTarget;
+    attentionTarget.setAttribute('data-editor-attention', 'true');
+    const commandBar = document.querySelector<HTMLElement>('[data-page-commandbar="true"]');
+    const sectionNav = document.querySelector<HTMLElement>('[data-page-editor-sections="true"]');
+    const topbarHeight = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--topbar-height')
+    ) || 64;
+    const stickyOffset =
+      window.innerWidth >= 1024
+        ? (commandBar?.offsetHeight ?? 0) + 16
+        : (sectionNav?.offsetHeight ?? 0) + 16;
+    const nextScrollTop =
+      window.scrollY + scrollTarget.getBoundingClientRect().top - topbarHeight - stickyOffset;
+    window.scrollTo({ top: Math.max(0, nextScrollTop), behavior: 'auto' });
+    const focusTarget = element.matches('input, textarea, select, button, [contenteditable="true"]')
+      ? element
+      : element.querySelector<HTMLElement>('[contenteditable="true"]') ??
+        element.querySelector<HTMLElement>(
+          'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])'
+        );
+    window.setTimeout(() => {
+      focusTarget?.focus({ preventScroll: true });
+    }, 250);
+    window.setTimeout(() => attentionTarget.removeAttribute('data-editor-attention'), 2600);
+    window.dispatchEvent(new CustomEvent(EDITOR_TARGET_EVENT, { detail: { target: selector } }));
+    window.history.replaceState(null, '', selector);
+    return true;
+  };
+
+  if (reveal()) return;
+  if (selector.startsWith('#page-content-seo-')) {
+    const seoToggle = document.querySelector<HTMLButtonElement>('#page-section-seo > button');
+    if (seoToggle?.getAttribute('aria-expanded') === 'false') seoToggle.click();
+    window.setTimeout(reveal, 80);
+  }
+}
 
 export function PageContentEditor({
   isCreate,
@@ -125,10 +202,12 @@ export function PageContentEditor({
   saving,
   error,
   errorContext,
-  message,
   id,
+  isDirty,
+  changedFields,
   onFieldChange,
   onSave,
+  onUnpublish,
   onArchive,
   onRestore,
   pendingAction,
@@ -147,10 +226,12 @@ export function PageContentEditor({
   saving: boolean;
   error: unknown;
   errorContext: AdminErrorContext;
-  message: string;
   id: string;
+  isDirty: boolean;
+  changedFields: string[];
   onFieldChange: (key: string, value: string) => void;
   onSave: (event: FormEvent, formOverride?: Record<string, string>) => void;
+  onUnpublish: () => void;
   onArchive: () => void;
   onRestore: () => void;
   pendingAction: ContentPendingAction | null;
@@ -165,46 +246,97 @@ export function PageContentEditor({
   const publishStatus = toPagePublishStatus(form.publish_status);
   const publicPath = buildPublicPath(form);
   const publicUrl = publicPath ? `${PUBLIC_SITE_BASE_URL}${publicPath}` : '';
+  const menuVisibilityNote = template.group === 'system'
+    ? ' Mục menu trỏ trực tiếp tới trang này cũng tạm ẩn.'
+    : '';
   const previewDraft = useMemo(
     () => buildPreviewDraft(form, record, template, publicPath),
     [form, publicPath, record, template]
   );
-  const contentText = useMemo(() => stripHtml(form.content_html ?? ''), [form.content_html]);
-  const warnings = buildContentWarnings(form, template);
-  const publishReady = canPublishContent(form, contentText);
+  const readiness = useMemo(
+    () =>
+      evaluateContentReadiness(
+        {
+          ...form,
+          // A Super Admin can approve in the same confirmed publish request.
+          review_status: canPrivilegedWorkflow && !archived ? 'approved' : form.review_status,
+          deleted_at: record.deleted_at
+        },
+        getContentReadinessContext(template.mode)
+      ),
+    [archived, canPrivilegedWorkflow, form, record.deleted_at, template.mode]
+  );
   const [previewOpen, setPreviewOpen] = useState(false);
   const [seoOpen, setSeoOpen] = useState(false);
+  const [pendingWorkflow, setPendingWorkflow] = useState<PageWorkflowAction | null>(null);
+  const lastFieldError = useRef('');
+  const fieldErrorKey = useMemo(
+    () => Object.keys(fieldErrors).filter((key) => Boolean(fieldErrors[key])).join('|'),
+    [fieldErrors]
+  );
+
+  useEffect(() => {
+    if (!fieldErrorKey) {
+      lastFieldError.current = '';
+      return;
+    }
+    if (fieldErrorKey === lastFieldError.current) return;
+    lastFieldError.current = fieldErrorKey;
+    const firstField = fieldErrorKey.split('|')[0];
+    revealEditorTarget(FIELD_TARGETS[firstField] ?? '#page-section-basic');
+  }, [fieldErrorKey]);
 
   function submitWorkflow(action: PageWorkflowAction) {
+    if (action === 'unpublish') {
+      onUnpublish();
+      return;
+    }
     const nextForm = applyPageWorkflowAction(form, action);
     onSave({ preventDefault: () => undefined } as FormEvent, nextForm);
   }
 
   return (
-    <section className="space-y-4">
+    <section className="page-content-editor space-y-4">
       <PageEditorHeader
         isCreate={isCreate}
         template={template}
         title={formatValue(form.title || record.title || id)}
         publicPath={publicPath}
         publicUrl={publicUrl}
-        reviewStatus={reviewStatus}
         publishStatus={publishStatus}
         archived={archived}
-        saving={saving}
-        canSave={canSave && !archived}
-        canPrivilegedWorkflow={canPrivilegedWorkflow && canSave && !archived}
-        publishReady={publishReady}
-        canPreview={Boolean(publicUrl)}
-        canArchive={canArchive}
-        canRestore={canRestore}
         onBackToHub={onBackToHub}
-        onOpenPreview={() => setPreviewOpen(true)}
-        onWorkflowAction={submitWorkflow}
-        onSave={onSave}
-        onArchive={onArchive}
-        onRestore={onRestore}
       />
+
+      <div
+        className="contents lg:sticky lg:top-[calc(var(--topbar-height)+8px)] lg:z-20 lg:block lg:space-y-2"
+        data-page-commandbar="true"
+      >
+        <PageLifecycleBar
+          isCreate={isCreate}
+          isDirty={isDirty}
+          changedFields={changedFields}
+          reviewStatus={reviewStatus}
+          publishStatus={publishStatus}
+          readiness={readiness}
+          archived={archived}
+          saving={saving}
+          canSave={canSave && !archived}
+          canPrivilegedWorkflow={canPrivilegedWorkflow && canSave && !archived}
+          canPreview={Boolean(publicUrl)}
+          canArchive={canArchive}
+          canRestore={canRestore}
+          createActionLabel={template.group === 'system' ? 'Lưu thiết lập' : 'Tạo nội dung'}
+          onNavigateTarget={revealEditorTarget}
+          onOpenPreview={() => setPreviewOpen(true)}
+          onRequestWorkflow={setPendingWorkflow}
+          onSave={onSave}
+          onUnpublish={() => setPendingWorkflow('unpublish')}
+          onArchive={onArchive}
+          onRestore={onRestore}
+        />
+        <EditorSectionNav template={template} />
+      </div>
 
       {!canSave ? (
         <ReadOnlyBanner>Không có quyền lưu dữ liệu, màn hình đang ở chế độ chỉ đọc.</ReadOnlyBanner>
@@ -215,16 +347,6 @@ export function PageContentEditor({
         </div>
       ) : null}
       {error ? <ErrorState error={error} context={errorContext} /> : null}
-      {message ? (
-        <div className="flex items-center gap-2 rounded-sm border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-          <CheckCircle2 className="h-4 w-4" />
-          {message}
-        </div>
-      ) : null}
-
-      <CompactWarnings warnings={warnings} />
-      {isCreate && template.group === 'system' ? <DefaultLoadedNotice template={template} /> : null}
-
       <form id={FORM_ID} onSubmit={onSave}>
         {template.mode === 'news' ? (
           <NewsEditorLayout
@@ -274,6 +396,24 @@ export function PageContentEditor({
       </form>
 
       <ConfirmDialog
+        open={Boolean(pendingWorkflow)}
+        title={pendingWorkflow ? workflowConfirmation(pendingWorkflow).title : ''}
+        description={pendingWorkflow === 'unpublish' && isDirty
+          ? `Trang sẽ được ẩn ngay. Các chỉnh sửa chưa lưu vẫn ở lại trên màn hình này.${menuVisibilityNote}`
+          : pendingWorkflow === 'unpublish'
+          ? `${workflowConfirmation('unpublish').description}${menuVisibilityNote}`
+          : pendingWorkflow === 'publish' && isDirty
+          ? 'Các thay đổi chưa lưu sẽ được lưu, duyệt và hiển thị ngay trên website. Xác nhận sau khi đã xem trước nội dung.'
+          : pendingWorkflow ? workflowConfirmation(pendingWorkflow).description : ''}
+        confirmLabel={pendingWorkflow ? workflowConfirmation(pendingWorkflow).label : 'Xác nhận'}
+        onConfirm={() => {
+          if (pendingWorkflow) submitWorkflow(pendingWorkflow);
+          setPendingWorkflow(null);
+        }}
+        onClose={() => setPendingWorkflow(null)}
+      />
+
+      <ConfirmDialog
         open={Boolean(pendingAction)}
         title={pendingAction?.action === 'restore' ? 'Khôi phục nội dung?' : 'Lưu trữ nội dung?'}
         description={
@@ -305,199 +445,366 @@ function PageEditorHeader({
   title,
   publicPath,
   publicUrl,
-  reviewStatus,
   publishStatus,
   archived,
-  saving,
-  canSave,
-  canPrivilegedWorkflow,
-  publishReady,
-  canPreview,
-  canArchive,
-  canRestore,
-  onBackToHub,
-  onOpenPreview,
-  onWorkflowAction,
-  onSave,
-  onArchive,
-  onRestore
+  onBackToHub
 }: {
   isCreate: boolean;
   template: PageContentTemplate;
   title: string;
   publicPath: string;
   publicUrl: string;
+  publishStatus: PagePublishStatus;
+  archived: boolean;
+  onBackToHub?: () => void;
+}) {
+  return (
+    <header
+      className="flex flex-col gap-2 border-b border-border pb-3 xl:flex-row xl:items-center xl:justify-between"
+      data-page-editor-summary="true"
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-2 xl:flex-1">
+        {onBackToHub ? (
+          <button
+            type="button"
+            onClick={onBackToHub}
+            className="inline-flex h-11 items-center gap-1 rounded-sm border border-border bg-panel px-2.5 text-xs font-semibold text-slate-700 hover:bg-muted md:h-8"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Đổi loại
+          </button>
+        ) : (
+          <Link
+            href="/page-contents"
+            className="inline-flex h-11 items-center gap-1 rounded-sm border border-border bg-panel px-2.5 text-xs font-semibold text-slate-700 hover:bg-muted md:h-8"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Hàng đợi
+          </Link>
+        )}
+        <Badge tone={template.group === 'system' ? 'info' : template.group === 'news' ? 'warning' : 'default'}>
+          {template.label}
+        </Badge>
+        {archived ? <Badge tone="archived">Đã lưu trữ</Badge> : null}
+        <h1 className="min-w-0 flex-1 text-balance text-[21px] font-semibold leading-7 tracking-tight text-text">
+          {isCreate && template.group === 'system'
+            ? `Thiết lập nội dung trang ${template.shortLabel}`
+            : isCreate
+              ? template.formTitle
+              : title}
+        </h1>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1 rounded-sm border border-border bg-muted px-2 py-1 font-mono text-xs text-slate-600">
+          <Globe2 className="h-3.5 w-3.5" />
+          {publicPath || 'Chưa có đường dẫn'}
+        </span>
+        {publicUrl && publishStatus === 'published' ? (
+          <a
+            href={publicUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-9 items-center gap-1 rounded-sm border border-border bg-panel px-2 text-xs font-semibold text-primary hover:bg-muted"
+          >
+            Xem website
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        ) : (
+          <span className="max-w-[22rem] text-xs text-muted-foreground">
+            {template.mode === 'products'
+              ? 'Trang danh mục đang ẩn; từng sản phẩm có trạng thái xuất bản riêng.'
+              : 'Trang này chưa hiển thị trên website'}
+          </span>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function PageLifecycleBar({
+  isCreate,
+  isDirty,
+  changedFields,
+  reviewStatus,
+  publishStatus,
+  readiness,
+  archived,
+  saving,
+  canSave,
+  canPrivilegedWorkflow,
+  canPreview,
+  canArchive,
+  canRestore,
+  createActionLabel,
+  onNavigateTarget,
+  onOpenPreview,
+  onRequestWorkflow,
+  onSave,
+  onUnpublish,
+  onArchive,
+  onRestore
+}: {
+  isCreate: boolean;
+  isDirty: boolean;
+  changedFields: string[];
   reviewStatus: PageReviewStatus;
   publishStatus: PagePublishStatus;
+  readiness: ContentReadiness;
   archived: boolean;
   saving: boolean;
   canSave: boolean;
   canPrivilegedWorkflow: boolean;
-  publishReady: boolean;
   canPreview: boolean;
   canArchive: boolean;
   canRestore: boolean;
-  onBackToHub?: () => void;
+  createActionLabel: string;
+  onNavigateTarget: (target: string) => void;
   onOpenPreview: () => void;
-  onWorkflowAction: (action: PageWorkflowAction) => void;
+  onRequestWorkflow: (action: PageWorkflowAction) => void;
   onSave: (event: FormEvent) => void;
+  onUnpublish: () => void;
   onArchive: () => void;
   onRestore: () => void;
 }) {
+  const workflowLocked = isDirty || saving;
+
   return (
-    <div className="rounded-sm border border-border bg-panel px-4 py-4 shadow-[0_1px_2px_rgb(15_23_42_/_0.04)]">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            {onBackToHub ? (
-              <button
-                type="button"
-                onClick={onBackToHub}
-                className="inline-flex h-8 items-center gap-1 rounded-sm border border-border bg-panel px-2.5 text-xs font-semibold text-slate-700 hover:bg-muted"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Đổi loại
-              </button>
-            ) : (
-              <Link
-                href="/page-contents"
-                className="inline-flex h-8 items-center gap-1 rounded-sm border border-border bg-panel px-2.5 text-xs font-semibold text-slate-700 hover:bg-muted"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-                Danh sách
-              </Link>
-            )}
-            <Badge tone={template.group === 'system' ? 'info' : template.group === 'news' ? 'warning' : 'default'}>
-              {template.label}
-            </Badge>
-            <Badge tone={archived ? 'archived' : pageReviewStatusTone(reviewStatus)}>
-              {archived ? 'Đã lưu trữ' : `Duyệt: ${pageReviewStatusLabel(reviewStatus)}`}
-            </Badge>
-            <Badge tone={archived ? 'archived' : pagePublishStatusTone(publishStatus)}>
-              {archived ? 'Đã lưu trữ' : `Website: ${pagePublishStatusLabel(publishStatus)}`}
-            </Badge>
-          </div>
-          <h1 className="mt-3 text-[22px] font-semibold leading-7 tracking-tight text-text">
-            {isCreate ? template.formTitle : title}
-          </h1>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-sm border border-border bg-muted px-2 py-1 font-mono text-xs text-slate-600">
-              <Globe2 className="h-3.5 w-3.5" />
-              {publicPath || 'Chưa có đường dẫn'}
-            </span>
-            {publicUrl && publishStatus === 'published' ? (
-              <a
-                href={publicUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-sm border border-border bg-panel px-2 py-1 text-xs font-semibold text-primary hover:bg-muted"
-              >
-                Xem website
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            ) : (
-              <span className="text-xs text-muted-foreground">Chưa hiển thị ngoài website</span>
-            )}
-          </div>
+    <div
+      id="page-content-lifecycle"
+      data-page-lifecycle-bar="true"
+      className="rounded-xl border border-border bg-panel px-4 py-3 shadow-[0_6px_20px_rgba(16,35,55,0.06)]"
+    >
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+          <span className={cn(
+            'inline-flex min-h-8 items-center gap-2 rounded-full px-3 font-semibold',
+            archived ? 'bg-slate-100 text-slate-600' : publishStatus === 'published'
+              ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'
+          )}>
+            <span className={cn('h-2 w-2 rounded-full', archived ? 'bg-slate-400' : publishStatus === 'published' ? 'bg-emerald-500' : 'bg-slate-400')} />
+            {archived ? 'Đã lưu trữ' : publishStatus === 'published' ? 'Đang hiển thị' : 'Chưa hiển thị'}
+          </span>
+          <span className={isDirty ? 'font-medium text-amber-800' : 'text-muted-foreground'}>
+            {isDirty ? `${changedFields.length} thay đổi chưa lưu` : isCreate ? 'Chưa lưu lần đầu' : 'Đã lưu'}
+          </span>
+          {!archived && publishStatus !== 'published' && readiness.issues.length > 0 ? (
+            <ContentReadinessSummary readiness={readiness} onNavigateTarget={onNavigateTarget} />
+          ) : null}
+          {isDirty && publishStatus === 'published' ? (
+            <span className="text-xs text-muted-foreground">Lưu bản sửa sẽ tạm ẩn trang; xuất bản để cập nhật ngay.</span>
+          ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {canSave && !archived && (reviewStatus === 'draft' || reviewStatus === 'rejected') ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={saving}
-              onClick={() => onWorkflowAction('submit_review')}
-            >
-              Gửi duyệt
-            </Button>
-          ) : null}
-          {canPrivilegedWorkflow && reviewStatus === 'pending_review' ? (
-            <>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={saving}
-                onClick={() => onWorkflowAction('reject')}
-              >
-                Từ chối
-              </Button>
-              <Button type="button" disabled={saving} onClick={() => onWorkflowAction('approve')}>
-                Duyệt
-              </Button>
-            </>
-          ) : null}
-          {canPrivilegedWorkflow && reviewStatus === 'approved' && publishStatus !== 'published' ? (
-            <Button
-              type="button"
-              disabled={saving || !publishReady}
-              title={
-                publishReady
-                  ? undefined
-                  : 'Cần có tiêu đề, đường dẫn và nội dung hoặc khối nội dung.'
-              }
-              onClick={() => onWorkflowAction('publish')}
-            >
-              Xuất bản
-            </Button>
-          ) : null}
-          {canPrivilegedWorkflow && publishStatus === 'published' ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={saving}
-              onClick={() => onWorkflowAction('unpublish')}
-            >
+
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          <Button type="button" variant="secondary" disabled={!canPreview} onClick={onOpenPreview}>
+            <Eye className="h-4 w-4" />
+            Xem trước
+          </Button>
+          {!isCreate && !archived && publishStatus === 'published' && canPrivilegedWorkflow ? (
+            <Button type="button" variant="secondary" disabled={saving} onClick={onUnpublish}>
               Ẩn khỏi website
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!canPreview}
-            onClick={onOpenPreview}
-          >
-            <Eye className="h-4 w-4" />
-            Xem trước lớn
-          </Button>
-          <Button
-            type="button"
-            disabled={!canSave || saving}
-            onClick={onSave}
-          >
-            <Save className="h-4 w-4" />
-            {saving ? 'Đang lưu' : 'Lưu thay đổi'}
-          </Button>
-          {canSave && !canPrivilegedWorkflow && reviewStatus === 'pending_review' ? (
-            <span className="basis-full text-xs text-muted-foreground">
-              Nội dung đang chờ người có quyền duyệt.
-            </span>
-          ) : null}
-          {canPrivilegedWorkflow && reviewStatus === 'approved' && publishStatus !== 'published' && !publishReady ? (
-            <span className="basis-full text-xs text-amber-700">
-              Cần có nội dung hoặc ít nhất một khối nội dung trước khi xuất bản.
-            </span>
-          ) : null}
-          {!isCreate && canArchive && !archived ? (
-            <Button
-              type="button"
-              variant="ghost"
-              className="text-red-700 hover:bg-red-50"
-              disabled={saving}
-              onClick={onArchive}
-            >
-              <Trash2 className="h-4 w-4" />
-              Lưu trữ
-            </Button>
-          ) : null}
-          {!isCreate && canRestore && archived ? (
-            <Button type="button" variant="secondary" disabled={saving} onClick={onRestore}>
-              Khôi phục
-            </Button>
-          ) : null}
+          <LifecycleMoreActions
+            isCreate={isCreate}
+            archived={archived}
+            reviewStatus={reviewStatus}
+            disabled={workflowLocked}
+            canPrivilegedWorkflow={canPrivilegedWorkflow}
+            canArchive={canArchive}
+            onRequestWorkflow={onRequestWorkflow}
+            onArchive={onArchive}
+          />
+          <LifecyclePrimaryAction
+            isCreate={isCreate}
+            isDirty={isDirty}
+            reviewStatus={reviewStatus}
+            publishStatus={publishStatus}
+            readiness={readiness}
+            archived={archived}
+            saving={saving}
+            canSave={canSave}
+            canRestore={canRestore}
+            createActionLabel={createActionLabel}
+            canPrivilegedWorkflow={canPrivilegedWorkflow}
+            onSave={onSave}
+            onRestore={onRestore}
+            onRequestWorkflow={onRequestWorkflow}
+          />
         </div>
       </div>
     </div>
   );
+}
+
+function LifecycleMoreActions({
+  isCreate,
+  archived,
+  reviewStatus,
+  disabled,
+  canPrivilegedWorkflow,
+  canArchive,
+  onRequestWorkflow,
+  onArchive
+}: {
+  isCreate: boolean;
+  archived: boolean;
+  reviewStatus: PageReviewStatus;
+  disabled: boolean;
+  canPrivilegedWorkflow: boolean;
+  canArchive: boolean;
+  onRequestWorkflow: (action: PageWorkflowAction) => void;
+  onArchive: () => void;
+}) {
+  const canReject = canPrivilegedWorkflow && reviewStatus === 'pending_review';
+  const canArchiveRecord = !isCreate && canArchive && !archived;
+  if (!canReject && !canArchiveRecord) return null;
+
+  return (
+    <details className="group relative">
+      <summary className="inline-flex min-h-11 cursor-pointer list-none items-center rounded-sm border border-border bg-panel px-3 text-sm font-medium text-slate-700 hover:bg-muted md:min-h-10">
+        Thao tác khác
+      </summary>
+      <div className="absolute right-0 top-full z-30 mt-2 w-56 overflow-hidden rounded-md border border-border bg-panel p-1 shadow-lg">
+        {canReject ? (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onRequestWorkflow('reject')}
+            className="flex min-h-11 w-full items-center rounded-sm px-3 text-left text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            Từ chối và trả về chỉnh sửa
+          </button>
+        ) : null}
+        {canArchiveRecord ? (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onArchive}
+            className="flex min-h-11 w-full items-center rounded-sm px-3 text-left text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            Lưu trữ nội dung
+          </button>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function LifecyclePrimaryAction({
+  isCreate,
+  isDirty,
+  reviewStatus,
+  publishStatus,
+  readiness,
+  archived,
+  saving,
+  canSave,
+  canRestore,
+  createActionLabel,
+  canPrivilegedWorkflow,
+  onSave,
+  onRestore,
+  onRequestWorkflow
+}: {
+  isCreate: boolean;
+  isDirty: boolean;
+  reviewStatus: PageReviewStatus;
+  publishStatus: PagePublishStatus;
+  readiness: ContentReadiness;
+  archived: boolean;
+  saving: boolean;
+  canSave: boolean;
+  canRestore: boolean;
+  createActionLabel: string;
+  canPrivilegedWorkflow: boolean;
+  onSave: (event: FormEvent) => void;
+  onRestore: () => void;
+  onRequestWorkflow: (action: PageWorkflowAction) => void;
+}) {
+  if (archived) {
+    return canRestore ? (
+      <Button type="button" disabled={saving} onClick={onRestore}>Khôi phục</Button>
+    ) : null;
+  }
+  if (!isCreate && isDirty && canPrivilegedWorkflow) {
+    return (
+      <>
+        <Button type="button" variant="secondary" disabled={!canSave || saving} onClick={onSave}>
+          Lưu thay đổi
+        </Button>
+        <Button
+          type="button"
+          disabled={!canSave || saving || !readiness.canPublish}
+          title={readiness.blockingIssues[0]?.title}
+          onClick={() => onRequestWorkflow('publish')}
+        >
+          Xuất bản ngay
+        </Button>
+      </>
+    );
+  }
+  if (isCreate || isDirty) {
+    return (
+      <Button type="button" disabled={!canSave || saving} onClick={onSave}>
+        <Save className="h-4 w-4" />
+        {saving ? 'Đang lưu' : isCreate ? createActionLabel : 'Lưu thay đổi'}
+      </Button>
+    );
+  }
+  if (canPrivilegedWorkflow && publishStatus !== 'published') {
+    return (
+      <Button
+        type="button"
+        disabled={saving || !readiness.canPublish}
+        title={readiness.blockingIssues[0]?.title}
+        onClick={() => onRequestWorkflow('publish')}
+      >
+        Xuất bản
+      </Button>
+    );
+  }
+  if ((reviewStatus === 'draft' || reviewStatus === 'rejected') && canSave) {
+    return (
+      <Button type="button" disabled={saving} onClick={() => onRequestWorkflow('submit_review')}>
+        Gửi duyệt
+      </Button>
+    );
+  }
+  if (publishStatus === 'published') {
+    return null;
+  }
+  return (
+    <Button type="button" disabled>
+      {reviewStatus === 'pending_review' ? 'Đang chờ duyệt' : 'Chưa thể xuất bản'}
+    </Button>
+  );
+}
+
+function workflowConfirmation(action: PageWorkflowAction) {
+  const metadata: Record<PageWorkflowAction, { title: string; description: string; label: string }> = {
+    submit_review: {
+      title: 'Gửi nội dung để duyệt?',
+      description: 'Bản đã lưu sẽ chuyển sang hàng đợi của người duyệt và vẫn chưa xuất hiện trên website.',
+      label: 'Gửi duyệt'
+    },
+    reject: {
+      title: 'Từ chối nội dung này?',
+      description: 'Nội dung sẽ quay về người biên tập và bị ẩn khỏi website nếu đang hiển thị.',
+      label: 'Từ chối'
+    },
+    publish: {
+      title: 'Xuất bản ra website?',
+      description: 'Khách truy cập có thể thấy nội dung ngay sau khi xác nhận.',
+      label: 'Xuất bản'
+    },
+    unpublish: {
+      title: 'Ẩn nội dung khỏi website?',
+      description: 'Nội dung vẫn được giữ trong admin nhưng khách truy cập sẽ không còn thấy.',
+      label: 'Ẩn khỏi website'
+    }
+  };
+  return metadata[action];
 }
 
 function PublicPreviewDialog({
@@ -527,7 +834,16 @@ function PublicPreviewDialog({
     }
   }, []);
   const postPreviewDraft = useCallback(() => {
-    iframeRef.current?.contentWindow?.postMessage(
+    const targetWindow = iframeRef.current?.contentWindow;
+    if (!targetWindow) return;
+    if (targetOrigin !== '*') {
+      try {
+        if (targetWindow.location.origin !== targetOrigin) return;
+      } catch {
+        // Cross-origin access is expected after the public preview loads.
+      }
+    }
+    targetWindow.postMessage(
       {
         type: PAGE_CONTENT_PREVIEW_MESSAGE_TYPE,
         payload: draft
@@ -538,31 +854,42 @@ function PublicPreviewDialog({
 
   useEffect(() => {
     if (!open) return;
-    const timer = window.setTimeout(postPreviewDraft, 60);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [open, postPreviewDraft]);
 
-  useEffect(() => {
-    if (!open) return;
+    let retryTimer: number | null = null;
+    const stopRetries = () => {
+      if (retryTimer !== null) {
+        window.clearInterval(retryTimer);
+        retryTimer = null;
+      }
+    };
 
     function handleMessage(event: MessageEvent<unknown>) {
       if (targetOrigin !== '*' && event.origin !== targetOrigin) return;
+      if (event.source !== iframeRef.current?.contentWindow) return;
       if (
         typeof event.data === 'object' &&
         event.data !== null &&
         (event.data as { type?: unknown }).type === PAGE_CONTENT_PREVIEW_READY_MESSAGE_TYPE
       ) {
         postPreviewDraft();
+        stopRetries();
       }
     }
 
     window.addEventListener('message', handleMessage);
+    const initialTimer = window.setTimeout(() => {
+      postPreviewDraft();
+      retryTimer = window.setInterval(postPreviewDraft, 250);
+    }, 60);
+    const retryDeadline = window.setTimeout(stopRetries, 10_000);
+
     return () => {
+      window.clearTimeout(initialTimer);
+      window.clearTimeout(retryDeadline);
+      stopRetries();
       window.removeEventListener('message', handleMessage);
     };
-  }, [open, postPreviewDraft, targetOrigin]);
+  }, [open, postPreviewDraft, targetOrigin, viewport]);
 
   return (
     <Modal
@@ -576,7 +903,7 @@ function PublicPreviewDialog({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              Render bằng website public
+              Xem bằng giao diện website
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <Badge tone="info">Bản xem trước</Badge>
@@ -646,49 +973,69 @@ function PublicPreviewDialog({
   );
 }
 
-function CompactWarnings({ warnings }: { warnings: PageContentWarning[] }) {
-  if (warnings.length === 0) {
-    return null;
-  }
-  const visibleWarnings = warnings.slice(0, 4);
-  const hiddenCount = warnings.length - visibleWarnings.length;
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2">
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.06em] text-amber-800">
-        <AlertCircle className="h-4 w-4" />
-        Cần bổ sung
-      </div>
-      {visibleWarnings.map((warning) => (
-        <span
-          key={warning.label}
-          className={cn(
-            'rounded-sm border px-2 py-1 text-xs font-medium',
-            warning.tone === 'danger'
-              ? 'border-red-200 bg-red-50 text-red-700'
-              : warning.tone === 'warning'
-                ? 'border-amber-200 bg-white text-amber-800'
-                : 'border-blue-200 bg-blue-50 text-blue-700'
-          )}
-        >
-          {warning.label}
-        </span>
-      ))}
-      {hiddenCount > 0 ? (
-        <span className="text-xs font-medium text-amber-800">+{hiddenCount}</span>
-      ) : null}
-    </div>
-  );
-}
-
-function DefaultLoadedNotice({ template }: { template: PageContentTemplate }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-sm border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-      <CheckCircle2 className="h-4 w-4" />
-      <span className="font-medium">
-        Đã nạp phần đang hiện ngoài website cho {template.shortLabel}. Lưu nháp để admin bắt đầu quản lý nội dung này.
+function ContentReadinessSummary({
+  readiness,
+  onNavigateTarget
+}: {
+  readiness: ContentReadiness;
+  onNavigateTarget: (target: string) => void;
+}) {
+  if (readiness.issues.length === 0) {
+    return (
+      <span
+        data-content-readiness="ready"
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-semibold text-emerald-800"
+      >
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        Đủ điều kiện xuất bản
       </span>
-    </div>
+    );
+  }
+
+  return (
+    <details
+      data-content-readiness={readiness.blockingIssues.length > 0 ? 'blocked' : 'warning'}
+      className="group relative"
+    >
+      <summary className="inline-flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 text-xs font-semibold text-amber-900">
+        <AlertCircle className="h-3.5 w-3.5" />
+        {readiness.blockingIssues.length > 0
+          ? readiness.blockingIssues.length === 1
+            ? `Cần sửa: ${readiness.blockingIssues[0].title}`
+            : `${readiness.blockingIssues.length} mục cần sửa trước khi xuất bản`
+          : `Cảnh báo: ${readiness.warningIssues[0]?.title ?? 'Nội dung chưa đầy đủ'}`}
+      </summary>
+      <div className="absolute left-0 top-full z-30 mt-2 max-h-[calc(100dvh-240px)] w-[min(380px,calc(100vw-32px))] overflow-y-auto rounded-md border border-border bg-panel p-3 shadow-lg">
+        <p className="text-sm font-semibold text-text">Cần hoàn thiện ở đâu?</p>
+        <ul className="mt-2 space-y-2">
+          {readiness.issues.slice(0, 6).map((item) => (
+            <li
+              className="rounded-sm border border-border bg-surface p-3 text-sm leading-5 text-muted-foreground"
+              data-content-issue={item.code}
+              key={item.code}
+            >
+              <span className="block font-semibold text-text">{item.title}</span>
+              <span className="mt-0.5 block">{item.detail}</span>
+              <button
+                className="mt-2 inline-flex min-h-11 items-center rounded-sm px-1 font-semibold text-primary underline-offset-4 hover:text-primary-hover hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                type="button"
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  onNavigateTarget(item.action.target);
+                }}
+              >
+                {item.action.label} →
+              </button>
+            </li>
+          ))}
+        </ul>
+        {readiness.issues.length > 6 ? (
+          <p className="mt-2 text-xs font-medium text-amber-800">
+            +{readiness.issues.length - 6} mục khác
+          </p>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
@@ -717,17 +1064,17 @@ function SystemPageLayout(props: EditorLayoutProps) {
 
 function AboutPageLayout(props: EditorLayoutProps) {
   return (
-    <PageStudioWorkspace props={props}>
+    <PageStudioWorkspace props={props} aside={<TemplateBlocksCard template={props.template} />}>
       <div className="space-y-4">
         <BasicContentCard {...props} />
-        <BodyEditorCard {...props} minHeight={320} />
+        <BodyEditorCard {...props} minHeight={240} />
         <MediaCard {...props} />
         <ExtraBlocksCard
           value={props.form.extra_blocks ?? ''}
           onChange={(next) => props.onFieldChange('extra_blocks', next)}
           readOnly={props.readOnly}
+          error={props.fieldErrors.extra_blocks}
         />
-        <TemplateBlocksCard template={props.template} />
         <SeoCard {...props} />
       </div>
     </PageStudioWorkspace>
@@ -736,7 +1083,7 @@ function AboutPageLayout(props: EditorLayoutProps) {
 
 function AdminManagedLandingPageLayout(props: EditorLayoutProps) {
   return (
-    <PageStudioWorkspace props={props}>
+    <PageStudioWorkspace props={props} aside={<TemplateBlocksCard template={props.template} />}>
       <div className="space-y-4">
         <BasicContentCard {...props} />
         <BodyEditorCard {...props} minHeight={260} />
@@ -745,8 +1092,8 @@ function AdminManagedLandingPageLayout(props: EditorLayoutProps) {
           value={props.form.extra_blocks ?? ''}
           onChange={(next) => props.onFieldChange('extra_blocks', next)}
           readOnly={props.readOnly}
+          error={props.fieldErrors.extra_blocks}
         />
-        <TemplateBlocksCard template={props.template} />
         <SeoCard {...props} />
       </div>
     </PageStudioWorkspace>
@@ -755,19 +1102,17 @@ function AdminManagedLandingPageLayout(props: EditorLayoutProps) {
 
 function ModuleIntroPageLayout(props: EditorLayoutProps) {
   return (
-    <PageStudioWorkspace props={props}>
+    <PageStudioWorkspace props={props} aside={<TemplateBlocksCard template={props.template} />}>
       <div className="space-y-4">
         <BasicContentCard {...props} />
         <BodyEditorCard {...props} minHeight={200} />
-        {/* Chỉ trang Dịch vụ + Dự án có khối phụ; Brands/Contact giữ nguyên */}
-        {(props.template.mode === 'services' || props.template.mode === 'projects') ? (
-          <ExtraBlocksCard
-            value={props.form.extra_blocks ?? ''}
-            onChange={(next) => props.onFieldChange('extra_blocks', next)}
-            readOnly={props.readOnly}
-          />
-        ) : null}
-        <TemplateBlocksCard template={props.template} />
+        <MediaCard {...props} />
+        <ExtraBlocksCard
+          value={props.form.extra_blocks ?? ''}
+          onChange={(next) => props.onFieldChange('extra_blocks', next)}
+          readOnly={props.readOnly}
+          error={props.fieldErrors.extra_blocks}
+        />
         <SeoCard {...props} />
       </div>
     </PageStudioWorkspace>
@@ -776,15 +1121,17 @@ function ModuleIntroPageLayout(props: EditorLayoutProps) {
 
 function BrandsPageLayout(props: EditorLayoutProps) {
   return (
-    <PageStudioWorkspace props={props}>
+    <PageStudioWorkspace props={props} aside={<TemplateBlocksCard template={props.template} />}>
       <div className="space-y-4">
         <BasicContentCard {...props} />
+        <BodyEditorCard {...props} minHeight={220} />
+        <MediaCard {...props} />
         <ExtraBlocksCard
           value={props.form.extra_blocks ?? ''}
           onChange={(next) => props.onFieldChange('extra_blocks', next)}
           readOnly={props.readOnly}
+          error={props.fieldErrors.extra_blocks}
         />
-        <TemplateBlocksCard template={props.template} />
         <SeoCard {...props} />
       </div>
     </PageStudioWorkspace>
@@ -796,8 +1143,9 @@ function ContactPageLayout(props: EditorLayoutProps) {
     <PageStudioWorkspace props={props}>
       <div className="space-y-4">
         <BasicContentCard {...props} />
+        <BodyEditorCard {...props} minHeight={220} />
+        <MediaCard {...props} />
         <ContactOperationsCard />
-        <TemplateBlocksCard template={props.template} />
         <SeoCard {...props} />
       </div>
     </PageStudioWorkspace>
@@ -875,11 +1223,11 @@ function NewsMetaCard({ form, readOnly, onFieldChange }: EditorLayoutProps) {
   }, []);
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden" data-editor-section="true" id="page-section-news-meta">
       <div className="admin-card-header">
         <div className="flex items-center gap-2">
           <Newspaper className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-text">Thông tin tin tức</h2>
+          <h2 className="text-base font-semibold text-text">Thông tin tin tức</h2>
         </div>
       </div>
       <div className="admin-card-body admin-form-stack">
@@ -889,8 +1237,9 @@ function NewsMetaCard({ form, readOnly, onFieldChange }: EditorLayoutProps) {
           </div>
         ) : null}
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Chuyên mục">
+          <Field label="Chuyên mục" htmlFor="page-content-news-category">
             <Select
+              id="page-content-news-category"
               value={form.news_category_id ?? ''}
               disabled={readOnly || loading}
               onChange={(event) => onFieldChange('news_category_id', event.target.value)}
@@ -903,8 +1252,9 @@ function NewsMetaCard({ form, readOnly, onFieldChange }: EditorLayoutProps) {
               ))}
             </Select>
           </Field>
-          <Field label="Ngày đăng">
+          <Field label="Ngày đăng" htmlFor="page-content-published-at">
             <Input
+              id="page-content-published-at"
               type="datetime-local"
               value={toDateTimeLocalValue(form.published_at)}
               readOnly={readOnly}
@@ -937,90 +1287,184 @@ function PageStudioWorkspace({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="min-w-0">{children}</div>
-      <div className="space-y-4 xl:sticky xl:top-[calc(var(--topbar-height)+16px)] xl:self-start">
-        <ManagementFocusCard template={props.template} />
-        <SourceMapCard template={props.template} />
-        <LivePageDataCard template={props.template} />
+    <div
+      className="mx-auto w-full max-w-[1180px] space-y-4"
+      data-page-studio-workspace="single-column"
+    >
+      <RelatedModulesBar template={props.template} />
+      <div className="page-studio-fields min-w-0">
+        <div className="space-y-4">
+          <PageLayoutPanel
+            onChange={(next) => props.onFieldChange('extra_blocks', next)}
+            readOnly={props.readOnly}
+            template={props.template}
+            value={props.form.extra_blocks ?? ''}
+          />
+          {children}
+        </div>
+      </div>
+      <div className="space-y-4" data-page-supporting-information="true">
+        <Card className="divide-y divide-border overflow-hidden">
+          <SourceMapCard template={props.template} />
+          <LivePageDataCard template={props.template} />
+        </Card>
         {aside}
       </div>
     </div>
   );
 }
 
-function ManagementFocusCard({ template }: { template: PageContentTemplate }) {
-  const relatedModules = template.relatedModules;
-  const [open, setOpen] = useState(false);
+function EditorSectionNav({ template }: { template: PageContentTemplate }) {
+  const supportsPageLayout = getTemplateBlocks(template).length > 0;
+  const supportsExtraBlocks = [
+    'about',
+    'products',
+    'capability_profile',
+    'news_index',
+    'services',
+    'projects',
+    'brands'
+  ].includes(template.mode);
+  const links = [
+    ...(supportsPageLayout
+      ? [{ href: '#page-section-layout', label: 'Bố cục hiển thị' }]
+      : []),
+    { href: '#page-section-basic', label: 'Thông tin trang' },
+    { href: '#page-section-body', label: template.bodyLabel },
+    { href: '#page-section-media', label: template.imageLabel },
+    ...(supportsExtraBlocks
+      ? [{ href: '#page-section-blocks', label: 'Khối nội dung phụ' }]
+      : []),
+    { href: '#page-section-seo', label: 'SEO & chia sẻ' }
+  ];
+  const [activeHref, setActiveHref] = useState(links[0]?.href ?? '#page-section-basic');
+  const linkKey = links.map((link) => link.href).join('|');
 
-  if (!template.primarySource && relatedModules.length === 0) {
-    return null;
-  }
+  useEffect(() => {
+    const linkTargets = links
+      .map((link) => document.querySelector<HTMLElement>(link.href))
+      .filter((item): item is HTMLElement => Boolean(item));
+    const setFromTarget = (target: string) => {
+      const direct = links.find((link) => link.href === target);
+      if (direct) {
+        setActiveHref(direct.href);
+        return;
+      }
+      const element = document.querySelector<HTMLElement>(target);
+      const section = element?.closest<HTMLElement>('[data-editor-section]');
+      if (section?.id) setActiveHref(`#${section.id}`);
+    };
+    const onTarget = (event: Event) => {
+      const target = (event as CustomEvent<{ target?: string }>).detail?.target;
+      if (target) setFromTarget(target);
+    };
+    window.addEventListener(EDITOR_TARGET_EVENT, onTarget);
+    let frame = 0;
+    const updateFromScroll = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const activationLine = Math.min(360, window.innerHeight * 0.45);
+        const passed = linkTargets.filter(
+          (target) => target.getBoundingClientRect().top <= activationLine
+        );
+        const current =
+          passed.at(-1) ??
+          linkTargets.find((target) => target.getBoundingClientRect().bottom > activationLine) ??
+          linkTargets[0];
+        if (current?.id) setActiveHref(`#${current.id}`);
+      });
+    };
+    updateFromScroll();
+    window.addEventListener('scroll', updateFromScroll, { passive: true });
+    window.addEventListener('resize', updateFromScroll);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener(EDITOR_TARGET_EVENT, onTarget);
+      window.removeEventListener('scroll', updateFromScroll);
+      window.removeEventListener('resize', updateFromScroll);
+    };
+  }, [linkKey]);
 
   return (
-    <Card className="overflow-hidden border-primary/20">
-      <button
-        type="button"
-        className="admin-card-header flex w-full items-center justify-between text-left hover:bg-muted/80"
-        onClick={() => setOpen(!open)}
-      >
-        <span className="text-sm font-semibold text-text">Quản lý đúng chỗ</span>
-        <span className="text-xs text-muted-foreground">{open ? 'Thu gọn' : 'Mở'}</span>
-      </button>
-      {open ? (
-      <div className="space-y-3 border-t border-border p-4">
-        {template.primarySource ? (
-          <p className="text-sm leading-6 text-muted-foreground">{template.primarySource}</p>
-        ) : null}
-        {relatedModules.length > 0 ? (
-          <div className="grid gap-2">
-            {relatedModules.map((module) => (
-              <Link
-                key={`${module.href}-${module.label}`}
-                href={module.href}
-                className="group flex items-start justify-between gap-3 rounded-sm border border-border bg-panel px-3 py-3 text-left transition hover:border-primary/35 hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              >
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-text group-hover:text-primary">
-                    {module.label}
-                  </span>
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                    {module.description}
-                  </span>
-                </span>
-                <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
-              </Link>
-            ))}
-          </div>
-        ) : null}
+    <nav
+      aria-label="Mục lục biên tập trang"
+      className="sticky top-[calc(var(--topbar-height)+8px)] z-20 mt-2 rounded-xl border border-border bg-panel px-2 shadow-[0_4px_14px_rgb(16_35_55_/_0.04)] lg:static lg:mt-0"
+      data-page-editor-sections="true"
+    >
+      <div className="flex gap-1 overflow-x-auto">
+        {links.map((link) => (
+          <a
+            aria-current={activeHref === link.href ? 'location' : undefined}
+            className={cn(
+              'inline-flex min-h-11 shrink-0 items-center border-b-2 px-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
+              activeHref === link.href
+                ? 'border-primary text-primary'
+                : 'border-transparent text-slate-600 hover:border-slate-200 hover:text-primary'
+            )}
+            href={link.href}
+            key={link.href}
+            onClick={(event) => {
+              event.preventDefault();
+              setActiveHref(link.href);
+              revealEditorTarget(link.href);
+            }}
+          >
+            <span>{link.label}</span>
+          </a>
+        ))}
       </div>
-      ) : null}
-    </Card>
+    </nav>
+  );
+}
+
+function RelatedModulesBar({ template }: { template: PageContentTemplate }) {
+  const relatedModules = template.relatedModules;
+
+  if (relatedModules.length === 0) return null;
+
+  return (
+    <nav
+      aria-label="Dữ liệu liên quan"
+      className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-panel px-4 py-3"
+    >
+      <span className="mr-1 text-sm font-semibold text-text">Chỉnh dữ liệu liên quan:</span>
+      {relatedModules.map((module) => (
+        <Link
+          key={`${module.href}-${module.label}`}
+          href={module.href}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-sm border border-border bg-surface px-3 text-sm font-semibold text-primary transition hover:border-primary/40 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+        >
+          {module.label}
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Link>
+      ))}
+    </nav>
   );
 }
 
 function LivePageDataCard({ template }: { template: PageContentTemplate }) {
-  const snapshot = usePublicPageSnapshot();
-  const lines = buildLivePageLines(template, snapshot);
   const [open, setOpen] = useState(false);
+  const snapshot = usePublicPageSnapshot(open);
+  const lines = buildLivePageLines(template, snapshot);
 
   return (
-    <Card className="overflow-hidden">
+    <section>
       <button
         type="button"
+        aria-expanded={open}
         className="admin-card-header flex w-full items-center justify-between text-left hover:bg-muted/80"
         onClick={() => setOpen(!open)}
       >
-        <span className="text-sm font-semibold text-text">Đang hiện ngoài web</span>
-        <span className="text-xs text-muted-foreground">{open ? 'Thu gọn' : 'Mở'}</span>
+        <span className="text-sm font-semibold text-text">Đang hiện ngoài website</span>
+        <span className="text-xs text-muted-foreground">{open ? 'Thu gọn' : 'Kiểm tra'}</span>
       </button>
       {open ? (
       <div className="space-y-2 border-t border-border p-4">
         {snapshot.loading ? (
-          <div className="text-sm text-muted-foreground">Đang lấy dữ liệu public...</div>
+          <div className="text-sm text-muted-foreground">Đang lấy dữ liệu đang hiển thị...</div>
         ) : snapshot.error ? (
           <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Không tải được dữ liệu public.
+            Không tải được dữ liệu đang hiển thị trên website.
           </div>
         ) : (
           lines.map((line) => (
@@ -1032,13 +1476,13 @@ function LivePageDataCard({ template }: { template: PageContentTemplate }) {
         )}
       </div>
       ) : null}
-    </Card>
+    </section>
   );
 }
 
-function usePublicPageSnapshot(): PageSnapshotState {
+function usePublicPageSnapshot(enabled: boolean): PageSnapshotState {
   const [state, setState] = useState<PageSnapshotState>({
-    loading: true,
+    loading: false,
     error: '',
     companyInfo: null,
     banners: [],
@@ -1053,10 +1497,16 @@ function usePublicPageSnapshot(): PageSnapshotState {
     productCategories: [],
     productGroups: [],
     services: [],
-    projects: []
+    projects: [],
+    brandCount: 0,
+    productCategoryCount: 0,
+    productGroupCount: 0,
+    serviceCount: 0,
+    projectCount: 0
   });
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     async function load() {
       setState((current) => ({ ...current, loading: true, error: '' }));
@@ -1077,20 +1527,20 @@ function usePublicPageSnapshot(): PageSnapshotState {
           services,
           projects
         ] = await Promise.all([
-          apiClient.get<unknown>('/public/site-shell').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=gioi-thieu').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=san-pham').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=ho-so-nang-luc').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=dich-vu').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=du-an').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=doi-tac-thuong-hieu').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=lien-he').catch(() => null),
-          apiClient.get<unknown>('/public/banners?position=tin-tuc').catch(() => null),
-          apiClient.get<unknown>('/public/brands?page=1&page_size=40').catch(() => null),
-          apiClient.get<unknown>('/public/product-categories').catch(() => null),
-          apiClient.get<unknown>('/public/product-groups?page=1&page_size=40').catch(() => null),
-          apiClient.get<unknown>('/public/services?page=1&page_size=40').catch(() => null),
-          apiClient.get<unknown>('/public/projects?page=1&page_size=40').catch(() => null)
+          apiClient.get<unknown>('/public/site-shell'),
+          apiClient.get<unknown>('/public/banners?position=gioi-thieu'),
+          apiClient.get<unknown>('/public/banners?position=san-pham'),
+          apiClient.get<unknown>('/public/banners?position=ho-so-nang-luc'),
+          apiClient.get<unknown>('/public/banners?position=dich-vu'),
+          apiClient.get<unknown>('/public/banners?position=du-an'),
+          apiClient.get<unknown>('/public/banners?position=doi-tac-thuong-hieu'),
+          apiClient.get<unknown>('/public/banners?position=lien-he'),
+          apiClient.get<unknown>('/public/banners?position=tin-tuc'),
+          apiClient.get<unknown>('/public/brands?page=1&page_size=40'),
+          apiClient.get<unknown>('/public/product-categories'),
+          apiClient.get<unknown>('/public/product-groups?page=1&page_size=40'),
+          apiClient.get<unknown>('/public/services?page=1&page_size=40'),
+          apiClient.get<unknown>('/public/projects?page=1&page_size=40')
         ]);
         if (!active) return;
         setState({
@@ -1109,14 +1559,19 @@ function usePublicPageSnapshot(): PageSnapshotState {
           productCategories: extractPublicItems(productCategories),
           productGroups: extractPublicItems(productGroups),
           services: extractPublicItems(services),
-          projects: extractPublicItems(projects)
+          projects: extractPublicItems(projects),
+          brandCount: extractPublicTotal(brands),
+          productCategoryCount: extractPublicTotal(productCategories),
+          productGroupCount: extractPublicTotal(productGroups),
+          serviceCount: extractPublicTotal(services),
+          projectCount: extractPublicTotal(projects)
         });
-      } catch (err) {
+      } catch {
         if (!active) return;
         setState((current) => ({
           ...current,
           loading: false,
-          error: err instanceof Error ? err.message : 'Không tải được dữ liệu public.'
+          error: 'Không thể lấy dữ liệu đang hiển thị trên website. Hãy thử mở lại mục này.'
         }));
       }
     }
@@ -1124,7 +1579,7 @@ function usePublicPageSnapshot(): PageSnapshotState {
     return () => {
       active = false;
     };
-  }, []);
+  }, [enabled]);
 
   return state;
 }
@@ -1139,41 +1594,39 @@ function buildLivePageLines(template: PageContentTemplate, snapshot: PageSnapsho
   if (template.mode === 'about') {
     return [
       { label: 'Hero banner', value: snapshot.banners.length ? `${snapshot.banners.length} banner` : 'Chưa có' },
-      { label: 'Năng lực cốt lõi', value: '4 mục mẫu' },
       { label: 'Thông tin công ty', value: hotline || email || address ? 'Đã có' : 'Chưa đủ' },
-      { label: 'Thương hiệu', value: `${snapshot.brands.length} public` }
+      { label: 'Thương hiệu', value: `${snapshot.brandCount} đang hiển thị` }
     ];
   }
   if (template.mode === 'products') {
     return [
       { label: 'Banner trang sản phẩm', value: snapshot.productBanners.length ? `${snapshot.productBanners.length} banner` : 'Chưa có' },
-      { label: 'Danh mục public', value: `${snapshot.productCategories.length} mục` },
-      { label: 'Nhóm sản phẩm public', value: `${snapshot.productGroups.length} mục` }
+      { label: 'Danh mục đang hiển thị', value: `${snapshot.productCategoryCount} mục` },
+      { label: 'Nhóm sản phẩm đang hiển thị', value: `${snapshot.productGroupCount} mục` }
     ];
   }
   if (template.mode === 'capability_profile') {
     return [
-      { label: 'Banner hồ sơ năng lực', value: snapshot.capabilityBanners.length ? `${snapshot.capabilityBanners.length} banner` : 'Chưa có' },
-      { label: 'PDF và ảnh hồ sơ', value: 'Asset website hiện có' }
+      { label: 'Banner hồ sơ năng lực', value: snapshot.capabilityBanners.length ? `${snapshot.capabilityBanners.length} banner` : 'Chưa có' }
     ];
   }
   if (template.mode === 'services') {
     return [
       { label: 'Banner trang dịch vụ', value: snapshot.serviceBanners.length ? `${snapshot.serviceBanners.length} banner` : 'Chưa có' },
-      { label: 'Dịch vụ đang hiển thị', value: `${snapshot.services.length} mục` },
+      { label: 'Dịch vụ đang hiển thị', value: `${snapshot.serviceCount} mục` },
       { label: 'Hotline CTA', value: hotline || 'Chưa có' }
     ];
   }
   if (template.mode === 'projects') {
     return [
       { label: 'Banner trang dự án', value: snapshot.projectBanners.length ? `${snapshot.projectBanners.length} banner` : 'Chưa có' },
-      { label: 'Dự án public', value: `${snapshot.projects.length} mục` }
+      { label: 'Dự án đang hiển thị', value: `${snapshot.projectCount} mục` }
     ];
   }
   if (template.mode === 'brands') {
     return [
       { label: 'Banner trang thương hiệu', value: snapshot.brandBanners.length ? `${snapshot.brandBanners.length} banner` : 'Chưa có' },
-      { label: 'Thương hiệu public', value: `${snapshot.brands.length} brand` }
+      { label: 'Thương hiệu đang hiển thị', value: `${snapshot.brandCount} mục` }
     ];
   }
   if (template.mode === 'news_index') {
@@ -1241,14 +1694,17 @@ function TemplateBlocksCard({ template }: { template: PageContentTemplate }) {
 
   return (
     <Card className="overflow-hidden">
-      <div className="admin-card-header">
-        <h2 className="text-sm font-semibold text-text">Thành phần mẫu website</h2>
-      </div>
-      <div className="divide-y divide-border">
-        {templateBlocks.map((block) => (
-          <TemplateBlockPanel key={block.id} block={block} />
-        ))}
-      </div>
+      <details>
+        <summary className="admin-card-header flex cursor-pointer list-none items-center justify-between gap-3 hover:bg-muted/80">
+          <span className="text-sm font-semibold text-text">Thành phần cố định</span>
+          <span className="text-xs font-medium text-muted-foreground">{templateBlocks.length} nhóm</span>
+        </summary>
+        <div className="divide-y divide-border border-t border-border">
+          {templateBlocks.map((block) => (
+            <TemplateBlockPanel key={block.id} block={block} />
+          ))}
+        </div>
+      </details>
     </Card>
   );
 }
@@ -1266,7 +1722,7 @@ function TemplateBlockPanel({ block }: { block: PageTemplateBlock }) {
         <Badge tone="info">{block.ownerLabel}</Badge>
       </div>
       {block.items?.length ? (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-2">
           {block.items.map((item, index) => (
             <div key={`${block.id}-${item.title}`} className="rounded-sm border border-border bg-muted px-3 py-3">
               <div className="flex items-center gap-2">
@@ -1316,15 +1772,22 @@ function BasicContentCard({
   onFieldChange
 }: EditorLayoutProps) {
   return (
-    <Card className="overflow-hidden">
+    <Card
+      className="scroll-mt-56 overflow-hidden"
+      data-editor-section="true"
+      id="page-section-basic"
+    >
       <div className="admin-card-header">
-        <h2 className="text-sm font-semibold text-text">Nội dung chính</h2>
+        <h2 className="text-base font-semibold text-text">Thông tin trang</h2>
       </div>
       <div className="admin-card-body admin-form-stack">
-        <Field label={template.mode === 'news' ? 'Tiêu đề bài viết' : 'Tiêu đề trang'} required error={fieldErrors.title}>
+        <Field fieldKey="title" label={template.mode === 'news' ? 'Tiêu đề bài viết' : 'Tiêu đề trang'} required error={fieldErrors.title}>
           <Input
+            id="page-content-title"
+            aria-label={template.mode === 'news' ? 'Tiêu đề bài viết' : 'Tiêu đề trang'}
             placeholder={template.titlePlaceholder}
             value={form.title ?? ''}
+            maxLength={255}
             readOnly={readOnly}
             className={fieldErrors.title ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : ''}
             onChange={(event) => onFieldChange('title', event.target.value)}
@@ -1337,7 +1800,9 @@ function BasicContentCard({
             </span>
             <input
               id="page-content-slug"
-              className="min-w-0 flex-1 bg-panel px-2 py-2 text-sm text-text outline-none"
+              aria-label="Đường dẫn trên website"
+              maxLength={255}
+              className="h-11 min-w-0 flex-1 bg-panel px-2 text-sm text-text outline-none md:h-10"
               placeholder={template.slug || 'duong-dan-trang'}
               value={form.slug ?? ''}
               readOnly={readOnly || template.group === 'system'}
@@ -1347,6 +1812,8 @@ function BasicContentCard({
         </Field>
         <Field label="Mô tả ngắn" error={fieldErrors.excerpt}>
           <Textarea
+            id="page-content-excerpt"
+            aria-label="Mô tả ngắn"
             className={cn('min-h-24', fieldErrors.excerpt ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
             placeholder={template.excerptPlaceholder}
             value={form.excerpt ?? ''}
@@ -1367,16 +1834,21 @@ function BodyEditorCard({
   minHeight
 }: EditorLayoutProps & { minHeight: number }) {
   return (
-    <Card className="overflow-hidden">
+    <Card
+      className="scroll-mt-56 overflow-hidden"
+      data-editor-section="true"
+      id="page-section-body"
+    >
       <div className="admin-card-header">
         <div className="flex items-center gap-2">
           <Pencil className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-text">{template.bodyLabel}</h2>
+          <h2 className="text-base font-semibold text-text">{template.bodyLabel}</h2>
         </div>
       </div>
       <div className="admin-card-body">
         <RichTextEditor
           value={form.content_html ?? ''}
+          ariaLabel={template.bodyLabel}
           readOnly={readOnly}
           minHeight={minHeight}
           onChange={(next) => onFieldChange('content_html', next)}
@@ -1394,12 +1866,24 @@ function MediaCard({
   onFieldChange
 }: EditorLayoutProps) {
   return (
-    <Card className="overflow-hidden">
+    <Card
+      className="scroll-mt-56 overflow-hidden"
+      data-editor-section="true"
+      id="page-section-media"
+    >
       <div className="admin-card-header">
-        <div className="flex items-center gap-2">
-          <FileImage className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-text">{template.imageLabel}</h2>
+        <div className="flex min-w-0 items-start gap-2">
+          <FileImage className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-text">{template.imageLabel}</h2>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+              {template.imageHint}
+            </p>
+          </div>
         </div>
+        {template.group === 'system' && template.imageLabel.includes('chia sẻ') ? (
+          <Badge tone="info">Không phải banner</Badge>
+        ) : null}
       </div>
       <div className="admin-card-body">
         <FileReferencePicker
@@ -1426,15 +1910,20 @@ function SeoCard({
   onFieldChange
 }: EditorLayoutProps) {
   return (
-    <Card className="overflow-hidden">
+    <Card
+      className="scroll-mt-56 overflow-hidden"
+      data-editor-section="true"
+      id="page-section-seo"
+    >
       <button
         type="button"
+        aria-expanded={seoOpen}
         className="admin-card-header flex w-full items-center justify-between text-left hover:bg-muted/80"
         onClick={() => setSeoOpen(!seoOpen)}
       >
         <span className="flex items-center gap-2">
           <Search className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-semibold text-text">SEO và chia sẻ</span>
+          <span className="text-base font-semibold text-text">SEO và chia sẻ</span>
         </span>
         <span className="text-xs text-muted-foreground">{seoOpen ? 'Thu gọn' : 'Mở'}</span>
       </button>
@@ -1442,15 +1931,19 @@ function SeoCard({
         <div className="admin-card-body admin-form-stack border-t border-border">
           <Field label="Tiêu đề SEO" error={fieldErrors.seo_title}>
             <Input
+              id="page-content-seo-title"
               placeholder="Nếu để trống sẽ dùng tiêu đề trang"
               value={form.seo_title ?? ''}
+              maxLength={255}
               readOnly={readOnly}
               onChange={(event) => onFieldChange('seo_title', event.target.value)}
             />
           </Field>
           <Field label="Mô tả SEO" error={fieldErrors.seo_description}>
             <Textarea
+              id="page-content-seo-description"
               className="min-h-24"
+              maxLength={512}
               placeholder="Tóm tắt 140-160 ký tự cho Google và chia sẻ link"
               value={form.seo_description ?? ''}
               readOnly={readOnly}
@@ -1477,14 +1970,16 @@ function SourceMapCard({ template }: { template: PageContentTemplate }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <Card className="overflow-hidden">
+    <section aria-label="Cấu trúc trang website">
       <button
         type="button"
+        aria-expanded={open}
+        aria-label="Cấu trúc trang website"
         className="admin-card-header flex w-full items-center justify-between text-left hover:bg-muted/80"
         onClick={() => setOpen(!open)}
       >
-        <span className="text-sm font-semibold text-text">Cấu trúc trang public</span>
-        <span className="text-xs text-muted-foreground">{open ? 'Thu gọn' : 'Mở'}</span>
+        <span className="text-sm font-semibold text-text">Cấu trúc toàn trang</span>
+        <span className="text-xs text-muted-foreground">{open ? 'Thu gọn' : `${zones.length} khu vực`}</span>
       </button>
       {open ? (
       <div className="divide-y divide-border border-t border-border">
@@ -1514,7 +2009,7 @@ function SourceMapCard({ template }: { template: PageContentTemplate }) {
         ))}
       </div>
       ) : null}
-    </Card>
+    </section>
   );
 }
 
@@ -1525,7 +2020,9 @@ function getTemplateZones(template: PageContentTemplate): PageTemplateZone[] {
       label: block.title,
       owner: block.ownerLabel,
       href: block.href,
-      description: block.description,
+      // The fixed-component card owns the detailed template guidance. Keeping
+      // it out of the source map avoids showing the same help text twice.
+      description: block.owner === 'template' ? undefined : block.description,
       badge:
         block.owner === 'this_page'
           ? 'Tại đây'
@@ -1577,6 +2074,7 @@ function getTemplateZones(template: PageContentTemplate): PageTemplateZone[] {
   if (template.mode === 'brands') {
     return [
       ownIntro,
+      { label: template.bodyLabel, owner: 'Sửa tại màn này' },
       ownImage,
       { label: 'Logo và trạng thái', owner: 'Sửa ở Thương hiệu', href: '/brands' }
     ];
@@ -1585,6 +2083,8 @@ function getTemplateZones(template: PageContentTemplate): PageTemplateZone[] {
     return [
       { label: 'Hero', owner: 'Sửa ở Banner', href: '/banners?position=lien-he' },
       ownIntro,
+      { label: template.bodyLabel, owner: 'Sửa tại màn này' },
+      ownImage,
       { label: 'Hotline, email, địa chỉ', owner: 'Sửa ở Cấu hình website', href: '/website-settings' },
       { label: 'Form khách gửi', owner: 'Xem ở Yêu cầu liên hệ', href: '/contacts' }
     ];
@@ -1596,19 +2096,21 @@ function getTemplateZones(template: PageContentTemplate): PageTemplateZone[] {
   ];
 }
 
-function InfoLine({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium text-text">{value}</span>
-    </div>
-  );
-}
-
 function extractPublicItems(data: unknown): RecordMap[] {
   if (!data || typeof data !== 'object') return [];
   const items = (data as RecordMap).items;
   return Array.isArray(items) ? (items as RecordMap[]) : [];
+}
+
+function extractPublicTotal(data: unknown): number {
+  const items = extractPublicItems(data);
+  if (!data || typeof data !== 'object') return items.length;
+  const pagination = (data as RecordMap).pagination;
+  if (!pagination || typeof pagination !== 'object') return items.length;
+  const total = (pagination as RecordMap).total;
+  return typeof total === 'number' && Number.isSafeInteger(total) && total >= 0
+    ? total
+    : items.length;
 }
 
 function extractCompanyInfo(data: unknown): RecordMap | null {
@@ -1639,7 +2141,6 @@ function toDateTimeLocalValue(value: unknown) {
     return value.slice(0, 16);
   }
 }
-
 function buildPreviewDraft(
   form: Record<string, string>,
   record: RecordMap,
@@ -1668,6 +2169,7 @@ function buildPreviewDraft(
       : null,
     seo_title: getText(form.seo_title) || null,
     seo_description: getText(form.seo_description) || null,
+    extra_blocks: parsePreviewExtraBlocks(form.extra_blocks),
     published_at: getText(form.published_at) || null,
     created_at: getText(record.created_at) || now,
     updated_at: getText(record.updated_at) || now,
@@ -1676,17 +2178,31 @@ function buildPreviewDraft(
   };
 }
 
-function canPublishContent(form: Record<string, string>, contentText: string) {
-  if (!form.title?.trim() || !form.slug?.trim()) return false;
-  if (contentText.trim()) return true;
-
+function parsePreviewExtraBlocks(value: string | undefined): PageContentPreviewDraft['extra_blocks'] {
+  if (!value) return { blocks: [], layout: null };
   try {
-    const extraBlocks = JSON.parse(form.extra_blocks || '{"blocks":[]}') as {
-      blocks?: unknown[];
+    const parsed = JSON.parse(value) as {
+      blocks?: unknown;
+      layout?: { sections?: unknown };
     };
-    return Array.isArray(extraBlocks.blocks) && extraBlocks.blocks.length > 0;
+    const sections = Array.isArray(parsed?.layout?.sections)
+      ? parsed.layout.sections
+          .filter(
+            (entry): entry is Record<string, unknown> =>
+              Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry)
+          )
+          .map((entry) => ({
+            id: typeof entry.id === 'string' ? entry.id : '',
+            visible: entry.visible !== false
+          }))
+          .filter((entry) => Boolean(entry.id))
+      : [];
+    return {
+      blocks: Array.isArray(parsed?.blocks) ? parsed.blocks : [],
+      layout: sections.length > 0 ? { sections } : null
+    };
   } catch {
-    return false;
+    return { blocks: [], layout: null };
   }
 }
 
@@ -1709,49 +2225,11 @@ function applyPageWorkflowAction(
   switch (action) {
     case 'submit_review':
       return { ...current, review_status: 'pending_review', publish_status: 'unpublished' };
-    case 'approve':
-      return { ...current, review_status: 'approved' };
     case 'reject':
       return { ...current, review_status: 'rejected', publish_status: 'unpublished' };
     case 'publish':
-      return { ...current, publish_status: 'published' };
+      return { ...current, review_status: 'approved', publish_status: 'published' };
     case 'unpublish':
       return { ...current, publish_status: 'unpublished' };
   }
-}
-
-function pageReviewStatusLabel(status: PageReviewStatus) {
-  switch (status) {
-    case 'pending_review':
-      return 'Chờ duyệt';
-    case 'approved':
-      return 'Đã duyệt';
-    case 'rejected':
-      return 'Từ chối';
-    default:
-      return 'Bản nháp';
-  }
-}
-
-function pagePublishStatusLabel(status: PagePublishStatus) {
-  if (status === 'published') return 'Đang hiển thị';
-  if (status === 'archived') return 'Lưu trữ';
-  return 'Đang ẩn';
-}
-
-function pageReviewStatusTone(
-  status: PageReviewStatus
-): 'default' | 'active' | 'inactive' | 'archived' | 'success' | 'warning' | 'info' | 'danger' {
-  if (status === 'approved') return 'success';
-  if (status === 'pending_review') return 'warning';
-  if (status === 'rejected') return 'danger';
-  return 'inactive';
-}
-
-function pagePublishStatusTone(
-  status: PagePublishStatus
-): 'default' | 'active' | 'inactive' | 'archived' | 'success' | 'warning' | 'info' | 'danger' {
-  if (status === 'published') return 'success';
-  if (status === 'archived') return 'archived';
-  return 'inactive';
 }

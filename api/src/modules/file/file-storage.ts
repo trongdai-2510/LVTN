@@ -20,7 +20,7 @@ function resolveStorageRoot(envName: string, fallbackPath: string): string {
   return resolve(configuredPath || fallbackPath);
 }
 
-export const API_STORAGE_ROOT = resolveStorageRoot('API_STORAGE_ROOT', DEFAULT_STORAGE_ROOT);
+const API_STORAGE_ROOT = resolveStorageRoot('API_STORAGE_ROOT', DEFAULT_STORAGE_ROOT);
 
 export const FILE_LIBRARY_STORAGE_ROOT = resolveStorageRoot(
   'FILE_LIBRARY_STORAGE_ROOT',

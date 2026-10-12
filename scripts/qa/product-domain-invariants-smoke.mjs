@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,11 +17,14 @@ const QA_CLIENT_IP = '203.0.113.40';
 const RUN_ID = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'product-domain-invariants-qa-last-run.md'
 );
 const MAX_PUBLIC_PRICE = 2_147_483_647;
+const MAX_SMALLINT = 32_767;
+const requireFromApi = createRequire(path.join(ROOT, 'api', 'package.json'));
+const { Client: PostgresClient } = requireFromApi('pg');
 
 const results = [];
 const context = {
@@ -34,7 +38,9 @@ const context = {
   groupId: '',
   groupSlug: '',
   draftGroupId: '',
-  variantId: ''
+  variantId: '',
+  technicalDocumentId: '',
+  extraGroupIds: []
 };
 
 assertSafeTarget();
@@ -283,6 +289,155 @@ await runCase('PROD-GROUP-PUBLISH-SUCCESS', 'A complete approved active group ca
   return { id: group.id, public_status: publicResponse.status };
 });
 
+await runCase('PROD-GROUP-CREATE-CATEGORY-RACE', 'Product-group creation re-checks its category after a concurrent deactivation', async () => {
+  const groupName = `Group category race ${RUN_ID}`;
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  let createPromise;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_category WHERE id = $1 FOR UPDATE', [context.level2Id]);
+    await client.query("UPDATE product_category SET status = 'inactive' WHERE id = $1", [context.level2Id]);
+
+    let settled = false;
+    createPromise = createGroup({
+      name: groupName,
+      category_id: context.level2Id,
+      brand_id: context.brandId,
+      status: 'active'
+    }).then((response) => {
+      settled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!settled, 'product-group creation did not wait on the held category lock');
+
+    await client.query('COMMIT');
+    committed = true;
+    const response = await createPromise;
+    assertError(response, 404, 'NOT_FOUND');
+    const persisted = await client.query(
+      'SELECT COUNT(*)::int AS total FROM product_group WHERE name = $1 AND deleted_at IS NULL',
+      [groupName]
+    );
+    assert(Number(persisted.rows[0]?.total || 0) === 0, 'rejected group creation was persisted');
+
+    await client.query("UPDATE product_category SET status = 'active' WHERE id = $1", [context.level2Id]);
+    return { code: errorCode(response), persisted_group_count: 0 };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    if (createPromise) await createPromise.catch(() => undefined);
+    await client.query("UPDATE product_category SET status = 'active' WHERE id = $1", [context.level2Id]).catch(() => undefined);
+    await client.end();
+  }
+});
+
+await runCase('PROD-GROUP-UPDATE-CATEGORY-RACE', 'Product-group update cannot commit against a category deactivated while validation is in flight', async () => {
+  const before = await adminRequest(`/song-thanh/product-groups/${context.groupId}`);
+  assert(before.ok, responseError(before));
+  const originalSeoTitle = record(before.body, 'product_group')?.seo_title ?? null;
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  let updatePromise;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_category WHERE id = $1 FOR UPDATE', [context.level2Id]);
+    await client.query("UPDATE product_category SET status = 'inactive' WHERE id = $1", [context.level2Id]);
+
+    let settled = false;
+    updatePromise = updateGroup(context.groupId, {
+      seo_title: `Must not persist ${RUN_ID}`
+    }).then((response) => {
+      settled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!settled, 'product-group update did not wait on the held category lock');
+
+    await client.query('COMMIT');
+    committed = true;
+    const response = await updatePromise;
+    assertError(response, 404, 'NOT_FOUND');
+    const after = await adminRequest(`/song-thanh/product-groups/${context.groupId}`);
+    assert(after.ok, responseError(after));
+    assert(
+      (record(after.body, 'product_group')?.seo_title ?? null) === originalSeoTitle,
+      'rejected group update changed seo_title'
+    );
+
+    await client.query("UPDATE product_category SET status = 'active' WHERE id = $1", [context.level2Id]);
+    return { code: errorCode(response), rejected_value_retained: true };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    if (updatePromise) await updatePromise.catch(() => undefined);
+    await client.query("UPDATE product_category SET status = 'active' WHERE id = $1", [context.level2Id]).catch(() => undefined);
+    await client.end();
+  }
+});
+
+await runCase('PROD-GROUP-RESTORE-BRAND-RACE', 'Product-group restore re-checks its brand after a concurrent deactivation', async () => {
+  const created = await createGroup({
+    name: `Restore brand race ${RUN_ID}`,
+    category_id: context.level2Id,
+    brand_id: context.brandId,
+    status: 'active'
+  });
+  assert(created.ok, responseError(created));
+  const groupId = String(record(created.body, 'product_group')?.id || '');
+  assert(groupId, 'restore-race group id is missing');
+  const archive = await adminRequest(`/song-thanh/product-groups/${groupId}/archive`, {
+    method: 'POST',
+    body: {}
+  });
+  assert(archive.ok, responseError(archive));
+
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  let restorePromise;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM brand WHERE id = $1 FOR UPDATE', [context.brandId]);
+    await client.query("UPDATE brand SET status = 'inactive' WHERE id = $1", [context.brandId]);
+
+    let settled = false;
+    restorePromise = adminRequest(`/song-thanh/product-groups/${groupId}/restore`, {
+      method: 'POST',
+      body: {}
+    }).then((response) => {
+      settled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!settled, 'product-group restore did not wait on the held brand lock');
+
+    await client.query('COMMIT');
+    committed = true;
+    const response = await restorePromise;
+    assertError(response, 404, 'NOT_FOUND');
+    const persisted = await client.query(
+      'SELECT deleted_at FROM product_group WHERE id = $1',
+      [groupId]
+    );
+    assert(persisted.rows[0]?.deleted_at, 'rejected restore cleared deleted_at');
+
+    await client.query("UPDATE brand SET status = 'active' WHERE id = $1", [context.brandId]);
+    const successfulRestore = await adminRequest(`/song-thanh/product-groups/${groupId}/restore`, {
+      method: 'POST',
+      body: {}
+    });
+    assert(successfulRestore.ok, responseError(successfulRestore));
+    return { code: errorCode(response), archived_state_retained: true };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    if (restorePromise) await restorePromise.catch(() => undefined);
+    await client.query("UPDATE brand SET status = 'active' WHERE id = $1", [context.brandId]).catch(() => undefined);
+    await client.end();
+  }
+});
+
 for (const [id, title, body, expectedCode] of [
   [
     'PROD-GROUP-INVARIANT-STATUS',
@@ -315,6 +470,188 @@ for (const [id, title, body, expectedCode] of [
     return errorEvidence(response);
   });
 }
+
+await runCase('PROD-GROUP-STORAGE-BOUNDS', 'Product-group varchar and smallint boundaries fail as validation errors, not database errors', async () => {
+  const acceptedText = await updateGroup(context.groupId, { seo_title: 'S'.repeat(255) });
+  assert(acceptedText.ok, responseError(acceptedText));
+
+  const overlongText = await updateGroup(context.groupId, { seo_title: 'S'.repeat(256) });
+  assert(overlongText.status === 400, `256-character SEO title expected 400, received ${overlongText.status}`);
+
+  const negativeOrder = await updateGroup(context.groupId, { sort_order: -1 });
+  assert(negativeOrder.status === 400, `negative sort_order expected 400, received ${negativeOrder.status}`);
+
+  const overflowOrder = await updateGroup(context.groupId, { sort_order: MAX_SMALLINT + 1 });
+  assert(overflowOrder.status === 400, `smallint overflow expected 400, received ${overflowOrder.status}`);
+
+  const maximumOrder = await updateGroup(context.groupId, { sort_order: MAX_SMALLINT });
+  assert(maximumOrder.ok, responseError(maximumOrder));
+  const reset = await updateGroup(context.groupId, { seo_title: null, sort_order: 0 });
+  assert(reset.ok, responseError(reset));
+
+  return {
+    seo_title_max: 255,
+    overlong_status: overlongText.status,
+    negative_status: negativeOrder.status,
+    overflow_status: overflowOrder.status,
+    accepted_sort_order: MAX_SMALLINT
+  };
+});
+
+await runCase('PROD-GROUP-STALE-WRITE', 'A stale product-group editor cannot overwrite a newer saved value', async () => {
+  const before = await adminRequest(`/song-thanh/product-groups/${context.groupId}`);
+  assert(before.ok, responseError(before));
+  const original = record(before.body, 'product_group');
+  const expectedUpdatedAt = String(original.updated_at || '');
+  assert(expectedUpdatedAt, 'product-group updated_at is missing');
+
+  const winnerValue = `Phiên mới thắng ${RUN_ID}`;
+  const winner = await updateGroup(context.groupId, {
+    seo_description: winnerValue,
+    expected_updated_at: expectedUpdatedAt
+  });
+  assert(winner.ok, responseError(winner));
+
+  const stale = await updateGroup(context.groupId, {
+    seo_description: `Phiên cũ không được ghi ${RUN_ID}`,
+    expected_updated_at: expectedUpdatedAt
+  });
+  assertError(stale, 409, 'PRODUCT_GROUP_VERSION_CONFLICT');
+
+  const after = await adminRequest(`/song-thanh/product-groups/${context.groupId}`);
+  assert(after.ok, responseError(after));
+  const retained = record(after.body, 'product_group');
+  assert(retained.seo_description === winnerValue, 'stale group write replaced the winner value');
+  return {
+    code: errorCode(stale),
+    winner_retained: retained.seo_description === winnerValue
+  };
+});
+
+await runCase('PROD-GROUP-ARCHIVE-RACE', 'Archiving a locked parent rejects child records that passed an earlier service check', async () => {
+  const createdGroup = await createGroup({
+    name: `Nhóm Race Cha Con ${RUN_ID}`,
+    category_id: context.level2Id,
+    brand_id: context.brandId,
+    status: 'active'
+  });
+  assert(createdGroup.ok, responseError(createdGroup));
+  const raceGroupId = String(record(createdGroup.body, 'product_group')?.id || '');
+  assert(raceGroupId, 'race product group id is missing');
+
+  const [servicesResponse, projectsResponse] = await Promise.all([
+    adminRequest('/song-thanh/services?page=1&page_size=1&deleted_scope=active'),
+    adminRequest('/song-thanh/projects?page=1&page_size=1&deleted_scope=active')
+  ]);
+  assert(servicesResponse.ok, responseError(servicesResponse));
+  assert(projectsResponse.ok, responseError(projectsResponse));
+  const serviceId = String(extractItems(unwrap(servicesResponse.body))[0]?.id || '');
+  const projectId = String(extractItems(unwrap(projectsResponse.body))[0]?.id || '');
+  assert(serviceId && projectId, 'service/project fixtures are required for relation race coverage');
+
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_group WHERE id = $1 FOR UPDATE', [raceGroupId]);
+
+    let settled = 0;
+    const track = (promise) => promise.then((response) => {
+      settled += 1;
+      return response;
+    });
+    const pending = [
+      track(createVariant({
+        product_group_id: raceGroupId,
+        variant_name: `Biến thể đua ${RUN_ID}`
+      })),
+      track(adminRequest('/song-thanh/technical-documents', {
+        method: 'POST',
+        body: {
+          product_group_id: raceGroupId,
+          document_name: `Tài liệu đua ${RUN_ID}`,
+          file_id: context.nonImageFileId
+        }
+      })),
+      track(adminRequest(`/song-thanh/product-groups/${raceGroupId}/images`, {
+        method: 'PUT',
+        body: { images: [{ file_id: context.imageFileId, alt_text: 'Ảnh đua' }] }
+      })),
+      track(adminRequest(`/song-thanh/services/${serviceId}/product-groups`, {
+        method: 'POST',
+        body: { product_group_id: raceGroupId }
+      })),
+      track(adminRequest(`/song-thanh/projects/${projectId}/product-groups`, {
+        method: 'POST',
+        body: { product_group_id: raceGroupId }
+      }))
+    ];
+
+    await delay(350);
+    assert(settled === 0, `${settled} child mutations bypassed the held product-group lock`);
+    await client.query(
+      'UPDATE product_group SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [raceGroupId]
+    );
+    await client.query('COMMIT');
+    committed = true;
+
+    const responses = await Promise.all(pending);
+    for (const response of responses) {
+      assertError(response, 404, 'NOT_FOUND');
+    }
+
+    const counts = await client.query(
+      `SELECT
+        (SELECT COUNT(*) FROM product_variant WHERE product_group_id = $1 AND deleted_at IS NULL)::int AS variants,
+        (SELECT COUNT(*) FROM technical_document WHERE product_group_id = $1 AND deleted_at IS NULL)::int AS documents,
+        (SELECT COUNT(*) FROM product_image WHERE product_group_id = $1 AND deleted_at IS NULL)::int AS images,
+        (SELECT COUNT(*) FROM service_product_group WHERE product_group_id = $1 AND deleted_at IS NULL)::int AS service_links,
+        (SELECT COUNT(*) FROM project_product_group WHERE product_group_id = $1 AND deleted_at IS NULL)::int AS project_links`,
+      [raceGroupId]
+    );
+    const retained = counts.rows[0];
+    assert(
+      Object.values(retained).every((value) => Number(value) === 0),
+      `archived group retained active children: ${JSON.stringify(retained)}`
+    );
+
+    return { blocked_statuses: responses.map((response) => response.status), retained };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    await client.end();
+  }
+});
+
+await runCase('PROD-GROUP-SLUG-LENGTH-COLLISION', 'Automatic 255-character slugs remain within storage limits when a suffix is needed', async () => {
+  const longName = 'n'.repeat(255);
+  const first = await createGroup({
+    name: longName,
+    category_id: context.level2Id,
+    brand_id: context.brandId
+  });
+  assert(first.ok, responseError(first));
+  const second = await createGroup({
+    name: longName,
+    category_id: context.level2Id,
+    brand_id: context.brandId
+  });
+  assert(second.ok, responseError(second));
+
+  const firstGroup = record(first.body, 'product_group');
+  const secondGroup = record(second.body, 'product_group');
+  context.extraGroupIds.push(String(firstGroup.id), String(secondGroup.id));
+  assert(String(firstGroup.slug).length === 255, 'first maximum-length slug was not retained');
+  assert(String(secondGroup.slug).length <= 255, 'collision suffix exceeded the slug column');
+  assert(firstGroup.slug !== secondGroup.slug, 'collision did not produce a distinct slug');
+
+  return {
+    first_length: String(firstGroup.slug).length,
+    second_length: String(secondGroup.slug).length,
+    second_suffix: String(secondGroup.slug).slice(-4)
+  };
+});
 
 await runCase('PROD-PUBLIC-BRAND-CASCADE', 'Inactive brand hides and reactivation restores its product group', async () => {
   const disable = await adminRequest(`/song-thanh/brands/${context.brandId}`, {
@@ -425,6 +762,29 @@ await runCase('PROD-VARIANT-PRICE-BOUNDS', 'Public prices accept the integer max
   return { zero_status: zero.status, overflow_status: overflow.status, maximum: MAX_PUBLIC_PRICE };
 });
 
+await runCase('PROD-VARIANT-TEXT-BOUNDS', 'Variant names and generated SKUs respect varchar storage boundaries', async () => {
+  const overlong = await createVariant({
+    product_group_id: context.groupId,
+    variant_name: 'V'.repeat(256)
+  });
+  assert(overlong.status === 400, `256-character variant name expected 400, received ${overlong.status}`);
+
+  const maximum = await createVariant({
+    product_group_id: context.groupId,
+    variant_name: 'V'.repeat(255)
+  });
+  assert(maximum.ok, responseError(maximum));
+  const variant = record(maximum.body, 'product_variant');
+  assert(String(variant.variant_name).length === 255, 'maximum variant name was not retained');
+  assert(String(variant.sku).length <= 128, 'generated SKU exceeded varchar(128)');
+
+  return {
+    overlong_status: overlong.status,
+    accepted_name_length: String(variant.variant_name).length,
+    generated_sku_length: String(variant.sku).length
+  };
+});
+
 await runCase('PROD-VARIANT-IDENTIFIER-UNIQUE', 'SKU, external_code, and model_code are independently unique', async () => {
   const base = await createVariant({
     product_group_id: context.groupId,
@@ -505,6 +865,827 @@ await runCase('PROD-VARIANT-MOVE-PARENT', 'A published variant cannot move to an
   return errorEvidence(response);
 });
 
+await runCase('PROD-VARIANT-STORAGE-BOUNDS', 'Variant identifiers, ordering, and attribute columns enforce exact storage bounds', async () => {
+  const acceptedIdentifier = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+    method: 'PUT',
+    body: { external_code: 'E'.repeat(128), sort_order: MAX_SMALLINT }
+  });
+  assert(acceptedIdentifier.ok, responseError(acceptedIdentifier));
+
+  const overlongIdentifier = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+    method: 'PUT',
+    body: { external_code: 'E'.repeat(129) }
+  });
+  assert(overlongIdentifier.status === 400, `129-character external_code expected 400, received ${overlongIdentifier.status}`);
+
+  const negativeOrder = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+    method: 'PUT',
+    body: { sort_order: -1 }
+  });
+  assert(negativeOrder.status === 400, `negative variant sort_order expected 400, received ${negativeOrder.status}`);
+
+  const overflowOrder = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+    method: 'PUT',
+    body: { sort_order: MAX_SMALLINT + 1 }
+  });
+  assert(overflowOrder.status === 400, `variant smallint overflow expected 400, received ${overflowOrder.status}`);
+
+  const attribute = await adminRequest(`/song-thanh/product-variants/${context.variantId}/attributes`, {
+    method: 'POST',
+    body: { attribute_name: 'A'.repeat(128), attribute_value: 'Giá trị biên', display_order: MAX_SMALLINT }
+  });
+  assert(attribute.ok, responseError(attribute));
+  const attributeId = String(record(attribute.body, 'attribute')?.id || '');
+  assert(attributeId, 'accepted attribute id is missing');
+
+  const overlongAttribute = await adminRequest(`/song-thanh/product-variants/${context.variantId}/attributes`, {
+    method: 'POST',
+    body: { attribute_name: 'A'.repeat(129), attribute_value: 'Bị chặn' }
+  });
+  assert(overlongAttribute.status === 400, `129-character attribute name expected 400, received ${overlongAttribute.status}`);
+
+  const overflowAttributeOrder = await adminRequest(`/song-thanh/product-variants/${context.variantId}/attributes`, {
+    method: 'POST',
+    body: { attribute_name: 'Thứ tự tràn', attribute_value: 'Bị chặn', display_order: MAX_SMALLINT + 1 }
+  });
+  assert(overflowAttributeOrder.status === 400, `attribute smallint overflow expected 400, received ${overflowAttributeOrder.status}`);
+
+  const archiveAttribute = await adminRequest(
+    `/song-thanh/product-variants/${context.variantId}/attributes/${attributeId}/archive`,
+    { method: 'POST', body: {} }
+  );
+  assert(archiveAttribute.ok, responseError(archiveAttribute));
+
+  const reset = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+    method: 'PUT',
+    body: { external_code: `QA-EXT-${RUN_ID}`, sort_order: 0 }
+  });
+  assert(reset.ok, responseError(reset));
+
+  return {
+    identifier_max: 128,
+    overlong_identifier_status: overlongIdentifier.status,
+    sort_order_max: MAX_SMALLINT,
+    overlong_attribute_status: overlongAttribute.status,
+    overflow_attribute_order_status: overflowAttributeOrder.status
+  };
+});
+
+await runCase('PROD-VARIANT-STALE-WRITE', 'A stale variant editor cannot overwrite a newer saved value', async () => {
+  const before = await adminRequest(`/song-thanh/product-variants/${context.variantId}`);
+  assert(before.ok, responseError(before));
+  const original = record(before.body, 'product_variant');
+  const expectedUpdatedAt = String(original.updated_at || '');
+  assert(expectedUpdatedAt, 'product-variant updated_at is missing');
+
+  const winnerValue = `Mô tả phiên mới ${RUN_ID}`;
+  const winner = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+    method: 'PUT',
+    body: {
+      detailed_description: winnerValue,
+      expected_updated_at: expectedUpdatedAt
+    }
+  });
+  assert(winner.ok, responseError(winner));
+
+  const stale = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+    method: 'PUT',
+    body: {
+      detailed_description: `Mô tả phiên cũ ${RUN_ID}`,
+      expected_updated_at: expectedUpdatedAt
+    }
+  });
+  assertError(stale, 409, 'PRODUCT_VARIANT_VERSION_CONFLICT');
+
+  const after = await adminRequest(`/song-thanh/product-variants/${context.variantId}`);
+  assert(after.ok, responseError(after));
+  const retained = record(after.body, 'product_variant');
+  assert(retained.detailed_description === winnerValue, 'stale variant write replaced the winner value');
+  return {
+    code: errorCode(stale),
+    winner_retained: retained.detailed_description === winnerValue
+  };
+});
+
+await runCase('PROD-VARIANT-PARENT-PUBLISH-RACE', 'Variant publication re-checks the parent after waiting for a concurrent unpublish', async () => {
+  const unpublishVariant = await adminRequest(
+    `/song-thanh/product-variants/${context.variantId}`,
+    { method: 'PUT', body: { publish_status: 'unpublished' } }
+  );
+  assert(unpublishVariant.ok, responseError(unpublishVariant));
+
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_group WHERE id = $1 FOR UPDATE', [context.groupId]);
+
+    let publishSettled = false;
+    const publishPromise = adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+      method: 'PUT',
+      body: { publish_status: 'published' }
+    }).then((response) => {
+      publishSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!publishSettled, 'variant publication did not wait on the held product-group lock');
+
+    await client.query(
+      "UPDATE product_group SET publish_status = 'unpublished' WHERE id = $1",
+      [context.groupId]
+    );
+    await client.query('COMMIT');
+    committed = true;
+
+    const publish = await publishPromise;
+    assertError(publish, 409, 'PRODUCT_VARIANT_PUBLISH_REQUIRES_PUBLIC_GROUP');
+    const variant = await adminRequest(`/song-thanh/product-variants/${context.variantId}`);
+    assert(variant.ok, responseError(variant));
+    assert(
+      record(variant.body, 'product_variant')?.publish_status === 'unpublished',
+      'rejected publication still changed the variant publish status'
+    );
+
+    const restoreGroup = await updateGroup(context.groupId, { publish_status: 'published' });
+    assert(restoreGroup.ok, responseError(restoreGroup));
+    const republishVariant = await adminRequest(
+      `/song-thanh/product-variants/${context.variantId}`,
+      { method: 'PUT', body: { publish_status: 'published' } }
+    );
+    assert(republishVariant.ok, responseError(republishVariant));
+    return { code: errorCode(publish), rejected_status_retained: true };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    await client.end();
+  }
+});
+
+await runCase('PROD-VARIANT-ANCESTOR-PUBLISH-RACE', 'Variant publication re-checks category and brand visibility under the same transaction', async () => {
+  const unpublishVariant = await adminRequest(
+    `/song-thanh/product-variants/${context.variantId}`,
+    { method: 'PUT', body: { publish_status: 'unpublished' } }
+  );
+  assert(unpublishVariant.ok, responseError(unpublishVariant));
+
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  let publishPromise;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM brand WHERE id = $1 FOR UPDATE', [context.brandId]);
+    await client.query("UPDATE brand SET status = 'inactive' WHERE id = $1", [context.brandId]);
+
+    let settled = false;
+    publishPromise = adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+      method: 'PUT',
+      body: { publish_status: 'published' }
+    }).then((response) => {
+      settled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!settled, 'variant publication did not wait on the held brand lock');
+
+    await client.query('COMMIT');
+    committed = true;
+    const response = await publishPromise;
+    assertError(response, 404, 'NOT_FOUND');
+    const variant = await adminRequest(`/song-thanh/product-variants/${context.variantId}`);
+    assert(variant.ok, responseError(variant));
+    assert(
+      record(variant.body, 'product_variant')?.publish_status === 'unpublished',
+      'rejected ancestor race still published the variant'
+    );
+
+    await client.query("UPDATE brand SET status = 'active' WHERE id = $1", [context.brandId]);
+    const republish = await adminRequest(`/song-thanh/product-variants/${context.variantId}`, {
+      method: 'PUT',
+      body: { publish_status: 'published' }
+    });
+    assert(republish.ok, responseError(republish));
+    return { code: errorCode(response), rejected_status_retained: true };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    if (publishPromise) await publishPromise.catch(() => undefined);
+    await client.query("UPDATE brand SET status = 'active' WHERE id = $1", [context.brandId]).catch(() => undefined);
+    await client.end();
+  }
+});
+
+await runCase('PROD-PUBLIC-LIST-QUERY-BOUNDS', 'Public product search, pagination, and multi-select filters have explicit bounds', async () => {
+  const overlongSearch = await request(
+    `/public/product-groups?q=${encodeURIComponent('Q'.repeat(256))}`
+  );
+  assert(overlongSearch.status === 400, `256-character search expected 400, received ${overlongSearch.status}`);
+
+  const overflowPage = await request(
+    `/public/product-groups?page=${MAX_PUBLIC_PRICE + 1}`
+  );
+  assert(overflowPage.status === 400, `overflow page expected 400, received ${overflowPage.status}`);
+
+  const tooManyBrands = Array.from(
+    { length: 51 },
+    (_, index) => `brand-${index}`
+  ).join(',');
+  const brandFilter = await request(
+    `/public/product-groups?brands=${encodeURIComponent(tooManyBrands)}`
+  );
+  assert(brandFilter.status === 400, `51-brand filter expected 400, received ${brandFilter.status}`);
+
+  const maximumPageSize = await request('/public/product-groups?page=1&page_size=40');
+  assert(maximumPageSize.ok, responseError(maximumPageSize));
+  return {
+    search_status: overlongSearch.status,
+    page_status: overflowPage.status,
+    brand_filter_status: brandFilter.status,
+    accepted_page_size: unwrap(maximumPageSize.body)?.pagination?.page_size
+  };
+});
+
+await runCase('PROD-QUOTE-QUANTITY-BOUNDS', 'Quote quantities reject fractions, fraction-like text, and integer overflow', async () => {
+  const baseBody = {
+    full_name: 'Khách kiểm thử số lượng',
+    phone: '0901234567',
+    email: `quote-quantity-${RUN_ID}@example.com`
+  };
+  const invalidQuantities = [0, -1, 0.5, '1/2', MAX_PUBLIC_PRICE + 1];
+  const rejected = [];
+
+  for (const [index, quantity] of invalidQuantities.entries()) {
+    const response = await request('/public/quote-requests', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': `203.0.113.${41 + index}` },
+      body: {
+        ...baseBody,
+        items: [{
+          product_group_id: context.groupId,
+          product_variant_id: context.variantId,
+          quantity
+        }]
+      }
+    });
+    assert(response.status === 400, `quantity ${String(quantity)} expected 400, received ${response.status}`);
+    rejected.push(String(quantity));
+  }
+
+  const accepted = await request('/public/quote-requests', {
+    method: 'POST',
+    headers: { 'X-Forwarded-For': '203.0.113.47' },
+    body: {
+      ...baseBody,
+      items: [{
+        product_group_id: context.groupId,
+        product_variant_id: context.variantId,
+        quantity: MAX_PUBLIC_PRICE
+      }]
+    }
+  });
+  assert(accepted.status === 201, responseError(accepted));
+  const created = unwrap(accepted.body);
+  const quoteRequestId = String(created?.quote_request?.id || '');
+  assert(quoteRequestId, 'boundary quote request id is missing');
+  assert(
+    Number(created?.items?.[0]?.quantity) === MAX_PUBLIC_PRICE,
+    'maximum PostgreSQL integer quantity was not retained exactly'
+  );
+
+  const client = createDatabaseClient();
+  await client.connect();
+  try {
+    await client.query(
+      'UPDATE quote_item SET deleted_at = NOW() WHERE quote_request_id = $1 AND deleted_at IS NULL',
+      [quoteRequestId]
+    );
+    await client.query(
+      'UPDATE quote_request SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
+      [quoteRequestId]
+    );
+  } finally {
+    await client.end();
+  }
+
+  return { rejected, accepted_maximum: MAX_PUBLIC_PRICE };
+});
+
+await runCase('PROD-VARIANT-ARCHIVE-QUOTE-RACE', 'Variant archival re-checks quote dependencies after waiting for a concurrent quote', async () => {
+  const email = `variant-archive-race-${RUN_ID}@example.com`;
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  let quoteRequestId = '';
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_group WHERE id = $1 FOR UPDATE', [context.groupId]);
+
+    let quoteSettled = false;
+    const quotePromise = request('/public/quote-requests', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '203.0.113.48' },
+      body: {
+        full_name: 'Khách kiểm thử lưu trữ đồng thời',
+        phone: '0901234567',
+        email,
+        items: [{
+          product_group_id: context.groupId,
+          product_variant_id: context.variantId,
+          quantity: 1
+        }]
+      }
+    }).then((response) => {
+      quoteSettled = true;
+      return response;
+    });
+
+    await delay(350);
+    assert(!quoteSettled, 'quote request did not wait on the held product-group lock');
+
+    let archiveSettled = false;
+    const archivePromise = adminRequest(
+      `/song-thanh/product-variants/${context.variantId}/archive`,
+      { method: 'POST', body: {} }
+    ).then((response) => {
+      archiveSettled = true;
+      return response;
+    });
+
+    await delay(350);
+    assert(!archiveSettled, 'variant archive did not wait on the quote-held variant lock');
+    await client.query('COMMIT');
+    committed = true;
+
+    const quote = await quotePromise;
+    assert(quote.status === 201, responseError(quote));
+    quoteRequestId = String(unwrap(quote.body)?.quote_request?.id || '');
+    assert(quoteRequestId, 'race quote request id is missing');
+
+    const archive = await archivePromise;
+    assertError(archive, 409, 'PRODUCT_VARIANT_ARCHIVE_BLOCKED');
+    const variant = await adminRequest(`/song-thanh/product-variants/${context.variantId}`);
+    assert(variant.ok, responseError(variant));
+    assert(!record(variant.body, 'product_variant')?.deleted_at, 'blocked archive still archived the variant');
+
+    await client.query(
+      'UPDATE quote_item SET deleted_at = NOW() WHERE quote_request_id = $1 AND deleted_at IS NULL',
+      [quoteRequestId]
+    );
+    await client.query(
+      'UPDATE quote_request SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
+      [quoteRequestId]
+    );
+    return { quote_status: quote.status, archive_code: errorCode(archive) };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    if (quoteRequestId) {
+      await client.query(
+        'UPDATE quote_item SET deleted_at = NOW() WHERE quote_request_id = $1 AND deleted_at IS NULL',
+        [quoteRequestId]
+      ).catch(() => undefined);
+      await client.query(
+        'UPDATE quote_request SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
+        [quoteRequestId]
+      ).catch(() => undefined);
+    }
+    await client.end();
+  }
+});
+
+await runCase('PROD-PUBLIC-QUOTE-VISIBILITY-RACE', 'A quote request is rolled back when its product becomes non-public while the request waits', async () => {
+  const email = `quote-race-${RUN_ID}@example.com`;
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_variant WHERE id = $1 FOR UPDATE', [context.variantId]);
+    await client.query('SELECT id FROM product_group WHERE id = $1 FOR UPDATE', [context.groupId]);
+
+    let settled = false;
+    const quotePromise = request('/public/quote-requests', {
+      method: 'POST',
+      headers: { 'X-Forwarded-For': '203.0.113.49' },
+      body: {
+        full_name: 'Khách kiểm thử race',
+        phone: '0901234567',
+        email,
+        items: [{
+          product_group_id: context.groupId,
+          product_variant_id: context.variantId,
+          quantity: 1
+        }]
+      }
+    }).then((response) => {
+      settled = true;
+      return response;
+    });
+
+    await delay(350);
+    assert(!settled, 'quote request bypassed the held product/variant locks');
+    await client.query(
+      "UPDATE product_group SET publish_status = 'unpublished' WHERE id = $1",
+      [context.groupId]
+    );
+    await client.query('COMMIT');
+    committed = true;
+
+    const response = await quotePromise;
+    assert(response.status === 404, `visibility race quote expected 404, received ${response.status}`);
+    const quoteCount = await client.query(
+      'SELECT COUNT(*)::int AS total FROM quote_request WHERE email = $1 AND deleted_at IS NULL',
+      [email]
+    );
+    assert(Number(quoteCount.rows[0]?.total || 0) === 0, 'rejected quote left a quote_request row');
+
+    const restore = await updateGroup(context.groupId, { publish_status: 'published' });
+    assert(restore.ok, responseError(restore));
+    return { status: response.status, persisted_quote_count: 0 };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    await client.end();
+  }
+});
+
+await runCase('PROD-PUBLIC-QUOTE-ANCESTOR-RACES', 'Quote creation serializes against level-2, level-1, and brand visibility changes', async () => {
+  const targets = [
+    { table: 'product_category', id: context.level2Id, label: 'level-2-category', ip: '203.0.113.50' },
+    { table: 'product_category', id: context.level1Id, label: 'level-1-category', ip: '203.0.113.51' },
+    { table: 'brand', id: context.brandId, label: 'brand', ip: '203.0.113.52' }
+  ];
+  const evidence = [];
+
+  for (const target of targets) {
+    const email = `quote-${target.label}-${RUN_ID}@example.com`;
+    const client = createDatabaseClient();
+    await client.connect();
+    let committed = false;
+    let quotePromise;
+    try {
+      await client.query('BEGIN');
+      await client.query(`SELECT id FROM ${target.table} WHERE id = $1 FOR UPDATE`, [target.id]);
+      await client.query(`UPDATE ${target.table} SET status = 'inactive' WHERE id = $1`, [target.id]);
+
+      let settled = false;
+      quotePromise = request('/public/quote-requests', {
+        method: 'POST',
+        headers: { 'X-Forwarded-For': target.ip },
+        body: {
+          full_name: `Quote ancestor ${target.label}`,
+          phone: '0901234567',
+          email,
+          items: [{
+            product_group_id: context.groupId,
+            product_variant_id: context.variantId,
+            quantity: 1
+          }]
+        }
+      }).then((response) => {
+        settled = true;
+        return response;
+      });
+      await delay(350);
+      assert(!settled, `quote did not wait on the held ${target.label} lock`);
+
+      await client.query('COMMIT');
+      committed = true;
+      const response = await quotePromise;
+      assert(response.status === 404, `${target.label} visibility race expected 404, received ${response.status}`);
+      const persisted = await client.query(
+        'SELECT COUNT(*)::int AS total FROM quote_request WHERE email = $1 AND deleted_at IS NULL',
+        [email]
+      );
+      assert(Number(persisted.rows[0]?.total || 0) === 0, `${target.label} race persisted a quote`);
+      evidence.push({ target: target.label, status: response.status, persisted: 0 });
+    } finally {
+      if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+      if (quotePromise) await quotePromise.catch(() => undefined);
+      await client.query(`UPDATE ${target.table} SET status = 'active' WHERE id = $1`, [target.id]).catch(() => undefined);
+      await client.end();
+    }
+  }
+
+  return evidence;
+});
+
+await runCase('PROD-DOCUMENT-VARIANT-MOVE-RACE', 'A document cannot keep a variant that moved groups after service validation', async () => {
+  const variantResponse = await createVariant({
+    product_group_id: context.groupId,
+    variant_name: `Biến thể race tài liệu ${RUN_ID}`
+  });
+  assert(variantResponse.ok, responseError(variantResponse));
+  const variantId = String(record(variantResponse.body, 'product_variant')?.id || '');
+  assert(variantId, 'document-race variant id is missing');
+  const documentName = `Tài liệu race chuyển nhóm ${RUN_ID}`;
+
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_group WHERE id = $1 FOR UPDATE', [context.draftGroupId]);
+
+    let moveSettled = false;
+    const movePromise = adminRequest(`/song-thanh/product-variants/${variantId}`, {
+      method: 'PUT',
+      body: { product_group_id: context.draftGroupId }
+    }).then((response) => {
+      moveSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!moveSettled, 'variant move did not wait on the held target-group lock');
+
+    let documentSettled = false;
+    const documentPromise = adminRequest('/song-thanh/technical-documents', {
+      method: 'POST',
+      body: {
+        product_group_id: context.groupId,
+        product_variant_id: variantId,
+        document_name: documentName,
+        document_type: 'datasheet',
+        file_id: context.nonImageFileId,
+        is_public: true
+      }
+    }).then((response) => {
+      documentSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!documentSettled, 'document create did not wait on the moving variant lock');
+
+    await client.query('COMMIT');
+    committed = true;
+    const move = await movePromise;
+    assert(move.ok, responseError(move));
+    const document = await documentPromise;
+    assertError(document, 409, 'TECHNICAL_DOCUMENT_VARIANT_GROUP_MISMATCH');
+
+    const persisted = await client.query(
+      'SELECT COUNT(*)::int AS total FROM technical_document WHERE document_name = $1 AND deleted_at IS NULL',
+      [documentName]
+    );
+    assert(Number(persisted.rows[0]?.total || 0) === 0, 'rejected race document was persisted');
+
+    const archive = await adminRequest(`/song-thanh/product-variants/${variantId}/archive`, {
+      method: 'POST',
+      body: {}
+    });
+    assert(archive.ok, responseError(archive));
+    return { move_status: move.status, document_code: errorCode(document) };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    await client.end();
+  }
+});
+
+await runCase('PROD-DOCUMENT-RELATION-AND-BOUNDS', 'Technical documents cannot retain a variant from another group and enforce storage bounds', async () => {
+  const created = await adminRequest('/song-thanh/technical-documents', {
+    method: 'POST',
+    body: {
+      product_group_id: context.groupId,
+      product_variant_id: context.variantId,
+      document_name: `Tài liệu biên ${RUN_ID}`,
+      document_type: 'datasheet',
+      file_id: context.nonImageFileId,
+      version: 'V'.repeat(32),
+      is_public: true,
+      sort_order: MAX_SMALLINT
+    }
+  });
+  assert(created.ok, responseError(created));
+  const document = record(created.body, 'technical_document');
+  context.technicalDocumentId = String(document?.id || '');
+  assert(context.technicalDocumentId, 'technical document id is missing');
+
+  const publicBeforeUnpublish = await request(
+    `/public/product-groups/${encodeURIComponent(context.groupSlug)}`
+  );
+  assert(publicBeforeUnpublish.ok, responseError(publicBeforeUnpublish));
+  const documentsBeforeUnpublish = unwrap(publicBeforeUnpublish.body)?.technical_documents ?? [];
+  assert(
+    documentsBeforeUnpublish.some((item) => String(item?.id || '') === context.technicalDocumentId),
+    'public variant document was missing while its variant was public'
+  );
+
+  const unpublishVariant = await adminRequest(
+    `/song-thanh/product-variants/${context.variantId}`,
+    { method: 'PUT', body: { publish_status: 'unpublished' } }
+  );
+  assert(unpublishVariant.ok, responseError(unpublishVariant));
+  const publicAfterUnpublish = await request(
+    `/public/product-groups/${encodeURIComponent(context.groupSlug)}`
+  );
+  assert(publicAfterUnpublish.ok, responseError(publicAfterUnpublish));
+  const documentsAfterUnpublish = unwrap(publicAfterUnpublish.body)?.technical_documents ?? [];
+  assert(
+    !documentsAfterUnpublish.some((item) => String(item?.id || '') === context.technicalDocumentId),
+    'document for an unpublished variant leaked through the public product detail'
+  );
+  const blockedVariantMove = await adminRequest(
+    `/song-thanh/product-variants/${context.variantId}`,
+    { method: 'PUT', body: { product_group_id: context.draftGroupId } }
+  );
+  assertError(
+    blockedVariantMove,
+    409,
+    'PRODUCT_VARIANT_MOVE_BLOCKED_BY_DOCUMENTS'
+  );
+  const republishVariant = await adminRequest(
+    `/song-thanh/product-variants/${context.variantId}`,
+    { method: 'PUT', body: { publish_status: 'published' } }
+  );
+  assert(republishVariant.ok, responseError(republishVariant));
+  const publicAfterRepublish = await request(
+    `/public/product-groups/${encodeURIComponent(context.groupSlug)}`
+  );
+  assert(publicAfterRepublish.ok, responseError(publicAfterRepublish));
+  const documentsAfterRepublish = unwrap(publicAfterRepublish.body)?.technical_documents ?? [];
+  assert(
+    documentsAfterRepublish.some((item) => String(item?.id || '') === context.technicalDocumentId),
+    'public variant document did not return after the variant was republished'
+  );
+
+  const mismatchedGroup = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`,
+    { method: 'PUT', body: { product_group_id: context.draftGroupId } }
+  );
+  assertError(mismatchedGroup, 409, 'TECHNICAL_DOCUMENT_VARIANT_GROUP_MISMATCH');
+
+  const overlongVersion = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`,
+    { method: 'PUT', body: { version: 'V'.repeat(33) } }
+  );
+  assert(overlongVersion.status === 400, `33-character document version expected 400, received ${overlongVersion.status}`);
+
+  const negativeOrder = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`,
+    { method: 'PUT', body: { sort_order: -1 } }
+  );
+  assert(negativeOrder.status === 400, `negative document sort_order expected 400, received ${negativeOrder.status}`);
+
+  const overflowOrder = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`,
+    { method: 'PUT', body: { sort_order: MAX_SMALLINT + 1 } }
+  );
+  assert(overflowOrder.status === 400, `document smallint overflow expected 400, received ${overflowOrder.status}`);
+
+  const detail = await adminRequest(`/song-thanh/technical-documents/${context.technicalDocumentId}`);
+  assert(detail.ok, responseError(detail));
+  const retained = record(detail.body, 'technical_document');
+  assert(retained.product_group_id === context.groupId, 'rejected mismatch changed product_group_id');
+  assert(retained.product_variant_id === context.variantId, 'rejected mismatch changed product_variant_id');
+
+  return {
+    mismatch_code: errorCode(mismatchedGroup),
+    retained_group_id: retained.product_group_id,
+    public_document_lifecycle: 'visible-hidden-visible',
+    version_max: 32,
+    overlong_version_status: overlongVersion.status,
+    sort_order_max: MAX_SMALLINT
+  };
+});
+
+await runCase('PROD-DOCUMENT-STALE-LIFECYCLE', 'Document update, archive, and restore reject stale versions without partial file-usage changes', async () => {
+  const before = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`
+  );
+  assert(before.ok, responseError(before));
+  const original = record(before.body, 'technical_document');
+  const initialUpdatedAt = String(original.updated_at || '');
+  assert(initialUpdatedAt, 'technical-document updated_at is missing');
+
+  const winnerVersion = `winner-${RUN_ID}`;
+  const winner = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`,
+    {
+      method: 'PUT',
+      body: { version: winnerVersion, expected_updated_at: initialUpdatedAt }
+    }
+  );
+  assert(winner.ok, responseError(winner));
+  const winnerRecord = record(winner.body, 'technical_document');
+  const winnerUpdatedAt = String(winnerRecord.updated_at || '');
+
+  const staleUpdate = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`,
+    {
+      method: 'PUT',
+      body: { version: `loser-${RUN_ID}`, expected_updated_at: initialUpdatedAt }
+    }
+  );
+  assertError(staleUpdate, 409, 'TECHNICAL_DOCUMENT_VERSION_CONFLICT');
+
+  const staleArchive = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}/archive`,
+    { method: 'POST', body: { expected_updated_at: initialUpdatedAt } }
+  );
+  assertError(staleArchive, 409, 'TECHNICAL_DOCUMENT_VERSION_CONFLICT');
+
+  const activeDetail = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}`
+  );
+  assert(activeDetail.ok, responseError(activeDetail));
+  const activeRecord = record(activeDetail.body, 'technical_document');
+  assert(activeRecord.deleted_at === null, 'stale archive changed deleted_at');
+  assert(activeRecord.version === winnerVersion, 'stale update replaced document version');
+
+  const archive = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}/archive`,
+    { method: 'POST', body: { expected_updated_at: winnerUpdatedAt } }
+  );
+  assert(archive.ok, responseError(archive));
+  const archivedRecord = record(archive.body, 'technical_document');
+  const archivedUpdatedAt = String(archivedRecord.updated_at || '');
+  assert(archivedRecord.deleted_at, 'document was not archived');
+
+  const staleRestore = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}/restore`,
+    { method: 'POST', body: { expected_updated_at: winnerUpdatedAt } }
+  );
+  assertError(staleRestore, 409, 'TECHNICAL_DOCUMENT_VERSION_CONFLICT');
+
+  const restore = await adminRequest(
+    `/song-thanh/technical-documents/${context.technicalDocumentId}/restore`,
+    { method: 'POST', body: { expected_updated_at: archivedUpdatedAt } }
+  );
+  assert(restore.ok, responseError(restore));
+  const restoredRecord = record(restore.body, 'technical_document');
+  assert(restoredRecord.deleted_at === null, 'document was not restored');
+  assert(restoredRecord.version === winnerVersion, 'document version changed across lifecycle');
+
+  return {
+    update_code: errorCode(staleUpdate),
+    archive_code: errorCode(staleArchive),
+    restore_code: errorCode(staleRestore),
+    winner_retained: restoredRecord.version === winnerVersion
+  };
+});
+
+await runCase('PROD-GALLERY-VARIANT-MOVE-RACE', 'Gallery replacement rejects a variant that moved groups after service validation', async () => {
+  const variantResponse = await createVariant({
+    product_group_id: context.groupId,
+    variant_name: `Biến thể race thư viện ảnh ${RUN_ID}`
+  });
+  assert(variantResponse.ok, responseError(variantResponse));
+  const variantId = String(record(variantResponse.body, 'product_variant')?.id || '');
+  assert(variantId, 'gallery-race variant id is missing');
+
+  const client = createDatabaseClient();
+  await client.connect();
+  let committed = false;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM product_group WHERE id = $1 FOR UPDATE', [context.draftGroupId]);
+
+    let moveSettled = false;
+    const movePromise = adminRequest(`/song-thanh/product-variants/${variantId}`, {
+      method: 'PUT',
+      body: { product_group_id: context.draftGroupId }
+    }).then((response) => {
+      moveSettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!moveSettled, 'gallery-race variant move did not wait on the target-group lock');
+
+    let gallerySettled = false;
+    const galleryPromise = replaceGallery([{
+      file_id: context.imageFileId,
+      product_variant_id: variantId,
+      alt_text: `Ảnh race ${RUN_ID}`
+    }]).then((response) => {
+      gallerySettled = true;
+      return response;
+    });
+    await delay(350);
+    assert(!gallerySettled, 'gallery replacement did not wait on the moving variant lock');
+
+    await client.query('COMMIT');
+    committed = true;
+    const move = await movePromise;
+    assert(move.ok, responseError(move));
+    const gallery = await galleryPromise;
+    assertError(gallery, 404, 'NOT_FOUND');
+
+    const persisted = await client.query(
+      'SELECT COUNT(*)::int AS total FROM product_image WHERE product_variant_id = $1 AND deleted_at IS NULL',
+      [variantId]
+    );
+    assert(Number(persisted.rows[0]?.total || 0) === 0, 'rejected gallery race persisted an image relation');
+
+    const archive = await adminRequest(`/song-thanh/product-variants/${variantId}/archive`, {
+      method: 'POST',
+      body: {}
+    });
+    assert(archive.ok, responseError(archive));
+    return { move_status: move.status, gallery_code: errorCode(gallery) };
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+    await client.end();
+  }
+});
+
 await runCase('PROD-GALLERY-FILE-TYPE', 'Product gallery rejects active non-image metadata', async () => {
   const response = await replaceGallery([
     { file_id: context.nonImageFileId, alt_text: 'Không phải hình ảnh' }
@@ -540,7 +1721,15 @@ await runCase('PROD-GALLERY-MAX', 'Gallery rejects the 81st requested image befo
 
 await runCase('PROD-CLEANUP', 'Product fixtures are archived before downstream suites run', async () => {
   const cleaned = [];
-  for (const groupId of [context.groupId, context.draftGroupId].filter(Boolean)) {
+  if (context.technicalDocumentId) {
+    const archivedDocument = await adminRequest(
+      `/song-thanh/technical-documents/${context.technicalDocumentId}/archive`,
+      { method: 'POST', body: {} }
+    );
+    assert(archivedDocument.ok, responseError(archivedDocument));
+  }
+
+  for (const groupId of [context.groupId, context.draftGroupId, ...context.extraGroupIds].filter(Boolean)) {
     const variantsResponse = await adminRequest(
       `/song-thanh/product-variants?product_group_id=${encodeURIComponent(groupId)}&page=1&page_size=100&deleted_scope=active`
     );
@@ -713,6 +1902,20 @@ function requireContext(key) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function createDatabaseClient() {
+  return new PostgresClient({
+    host: process.env.DATABASE_HOST,
+    port: Number(process.env.DATABASE_PORT || 5432),
+    user: process.env.DATABASE_USER,
+    password: process.env.DATABASE_PASSWORD,
+    database: process.env.DATABASE_NAME
+  });
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function assertSafeTarget() {

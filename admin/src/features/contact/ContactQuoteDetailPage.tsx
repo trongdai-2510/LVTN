@@ -5,12 +5,13 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
-  type ReactNode
+  useState
 } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
+  ClipboardList,
   Mail,
   MessageSquare,
   Package,
@@ -33,11 +34,15 @@ import type { AuthState } from '@/features/auth/auth.types';
 import { extractRecord } from '@/features/shared/extract';
 import { apiClient } from '@/lib/api-client';
 import { byId } from '@/lib/api-endpoints';
+import { adminPath } from '@/lib/admin-navigation';
 import { formatDate, formatValue } from '@/lib/formatters';
 import { PERMISSIONS } from '@/lib/permissions';
 
 type WorkbenchType = 'contact' | 'quote';
 type WorkbenchRecord = Record<string, unknown>;
+const quotePriceFormatter = new Intl.NumberFormat('vi-VN', {
+  style: 'currency', currency: 'VND', maximumFractionDigits: 0
+});
 
 const CONTACT_STATUSES = [
   { value: 'new',         label: 'Mới' },
@@ -151,34 +156,52 @@ export function ContactQuoteDetailPage({
   const isDone        = currentStatus === 'done';
   const isArchived    = Boolean(entity.deleted_at);
   const messageText   = getString(entity, ['message', 'content', 'body']);
+  const projectName = getString(entity, ['project_name']);
+  const projectContext = getString(entity, ['project_context']);
+  const projectRequirements = getProjectRequirements(entity.project_requirements);
+  const unresolvedQuantityCount = quoteItems.filter(
+    (item) => item.quantity_state === 'unspecified' || item.quantity == null
+  ).length;
+  const hasProjectBrief = Boolean(
+    projectName || projectContext || projectRequirements.length > 0
+  );
 
   async function applyStatus(nextStatus: string) {
-    if (!nextStatus || nextStatus === currentStatus) return;
+    if (!nextStatus) return;
+
+    if (!statusSavingRef.current && nextStatus === currentStatus) return;
+
+    queuedStatusRef.current = nextStatus;
 
     // A select can emit consecutive changes before React has rendered the
-    // disabled state. Persist the newest value after the in-flight mutation,
-    // preventing an older response from overwriting the latest user intent.
+    // disabled state. Keep draining the latest intent, including changes that
+    // arrive while the previous result is being reloaded from the API.
     if (statusSavingRef.current) {
-      queuedStatusRef.current = nextStatus;
       return;
     }
 
     statusSavingRef.current = true;
     setStatusSaving(true);
     setActionError('');
+    let lastPersistedStatus = currentStatus;
     try {
-      let statusToSave: string | null = nextStatus;
-
-      while (statusToSave) {
-        await apiClient.put(`${detailPath}/status`, { status: statusToSave });
-
+      while (true) {
         const queuedStatus = queuedStatusRef.current;
         queuedStatusRef.current = null;
-        statusToSave = queuedStatus && queuedStatus !== statusToSave ? queuedStatus : null;
-      }
+        if (queuedStatus && queuedStatus !== lastPersistedStatus) {
+          await apiClient.put(`${detailPath}/status`, { status: queuedStatus });
+          lastPersistedStatus = queuedStatus;
+          continue;
+        }
 
-      await load();
+        await load();
+        if (!queuedStatusRef.current) {
+          break;
+        }
+      }
     } catch (err) {
+      queuedStatusRef.current = null;
+      await load();
       setActionError(err instanceof Error ? err.message : 'Không cập nhật được trạng thái.');
     } finally {
       statusSavingRef.current = false;
@@ -222,7 +245,7 @@ export function ContactQuoteDetailPage({
     setActionError('');
     try {
       await apiClient.post(`${detailPath}/archive`);
-      window.location.href = text.listPath;
+      window.location.assign(adminPath(text.listPath));
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Không ẩn được.');
       setConfirmArchive(false);
@@ -264,6 +287,9 @@ export function ContactQuoteDetailPage({
             <span>·</span>
             <Badge tone={statusTone(currentStatus)}>{statusLabel(currentStatus)}</Badge>
             {isArchived && <Badge tone="archived">Đã lưu trữ</Badge>}
+            {isQuote && unresolvedQuantityCount > 0 ? (
+              <Badge tone="warning">{unresolvedQuantityCount} mục cần xác nhận</Badge>
+            ) : null}
           </div>
         </div>
 
@@ -291,6 +317,14 @@ export function ContactQuoteDetailPage({
 
         {/* ── Cột trái ── */}
         <div className="space-y-4">
+
+          {isQuote && hasProjectBrief ? (
+            <ProjectBriefCard
+              context={projectContext}
+              name={projectName}
+              requirements={projectRequirements}
+            />
+          ) : null}
 
           {/* Sản phẩm — ưu tiên 1 */}
           {isQuote && (
@@ -445,6 +479,7 @@ export function ContactQuoteDetailPage({
                   <Textarea
                     value={noteDraft}
                     rows={3}
+                    maxLength={10_000}
                     placeholder={text.notePlaceholder}
                     onChange={(e) => setNoteDraft(e.target.value)}
                     onKeyDown={(e) => {
@@ -486,7 +521,7 @@ export function ContactQuoteDetailPage({
                 <button
                   type="button"
                   onClick={() => setConfirmArchive(true)}
-                  className="mt-2 text-[12px] text-muted-foreground underline-offset-2 hover:text-red-500 hover:underline"
+                  className="mt-2 inline-flex min-h-11 items-center rounded-sm px-1 text-[12px] text-muted-foreground underline-offset-2 hover:text-red-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 md:min-h-8"
                 >
                   Lưu trữ yêu cầu
                 </button>
@@ -521,6 +556,54 @@ export function ContactQuoteDetailPage({
 }
 
 /* ── Components ── */
+
+function ProjectBriefCard({
+  context,
+  name,
+  requirements
+}: {
+  context: string;
+  name: string;
+  requirements: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <Card className="overflow-hidden border-primary/20">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-primary/15 bg-primary/5 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <ClipboardList className="h-4 w-4 text-primary" />
+          <span className="text-sm font-semibold text-text">Hồ sơ dự án khách cung cấp</span>
+        </div>
+        <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
+          Nguồn: website
+        </span>
+      </div>
+      <div className="space-y-5 p-4">
+        {name ? (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dự án / công trình</p>
+            <p className="mt-1 text-base font-semibold text-text">{name}</p>
+          </div>
+        ) : null}
+        {context ? (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Bối cảnh nguyên văn</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{context}</p>
+          </div>
+        ) : null}
+        {requirements.length > 0 ? (
+          <dl className="grid gap-3 sm:grid-cols-2">
+            {requirements.map((requirement, index) => (
+              <div className="rounded-md border border-border bg-muted/50 px-3 py-3" key={`${requirement.label}-${index}`}>
+                <dt className="text-xs font-semibold text-muted-foreground">{requirement.label}</dt>
+                <dd className="mt-1 whitespace-pre-wrap text-sm font-medium leading-5 text-text">{requirement.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
 
 function CustomerCard({
   entity,
@@ -596,7 +679,15 @@ function ProductRow({ item }: { item: WorkbenchRecord }) {
   const brandName      = item.brand_name as string | null;
   const thumbnailId    = item.thumbnail_file_id as string | null | undefined;
   const qty            = item.quantity;
+  const quantityRaw    = typeof item.quantity_raw === 'string' ? item.quantity_raw : null;
+  const quantityUnit   = typeof item.quantity_unit === 'string' ? item.quantity_unit : null;
+  const quantityState  = item.quantity_state === 'unspecified' || qty == null
+    ? 'unspecified'
+    : 'confirmed';
   const notes          = (item.notes ?? item.note) as string | null;
+  const priceSnapshot  = typeof item.public_price_amount_at_request === 'number'
+    ? item.public_price_amount_at_request
+    : null;
 
   return (
     <div className="flex gap-3 p-4">
@@ -618,12 +709,24 @@ function ProductRow({ item }: { item: WorkbenchRecord }) {
           <p className={`font-medium leading-snug text-text${productDeleted ? ' line-through opacity-50' : ''}`}>
             {productName}
           </p>
-          <span className="shrink-0 text-lg font-bold text-text">×{qty != null ? String(qty) : '?'}</span>
+          {quantityState === 'confirmed' ? (
+            <span className="shrink-0 text-lg font-bold text-text">
+              ×{String(qty)}{quantityUnit ? ` ${quantityUnit}` : ''}
+            </span>
+          ) : (
+            <Badge tone="warning">Cần xác nhận</Badge>
+          )}
         </div>
 
         {variantName && (
           <p className="mt-0.5 text-sm text-muted-foreground">{variantName}</p>
         )}
+
+        {priceSnapshot !== null && priceSnapshot > 0 ? (
+          <p className="mt-2 text-sm font-semibold tabular-nums text-primary">
+            Giá công khai lúc gửi: {quotePriceFormatter.format(priceSnapshot)}
+          </p>
+        ) : null}
 
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {brandName && (
@@ -641,6 +744,26 @@ function ProductRow({ item }: { item: WorkbenchRecord }) {
         {notes && (
           <p className="mt-1 text-xs italic text-muted-foreground">{notes}</p>
         )}
+
+        {quantityState === 'unspecified' ? (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+              <div>
+                <p className="text-xs font-semibold text-amber-900">
+                  Khách nhập: “{quantityRaw || 'chưa ghi số lượng'}{quantityUnit ? ` ${quantityUnit}` : ''}”
+                </p>
+                <p className="mt-1 text-xs leading-5 text-amber-800">
+                  Hệ thống chưa diễn giải thành số. Cần hỏi lại khách trước khi lập báo giá.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : quantityRaw ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Nguyên văn khách nhập: “{quantityRaw}{quantityUnit ? ` ${quantityUnit}` : ''}” · Đã xác nhận thành {String(qty)}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -696,10 +819,25 @@ function noteKeys(type: WorkbenchType) {
 }
 
 function getTitle(type: WorkbenchType, entity: WorkbenchRecord, id: string) {
+  if (type === 'quote') {
+    const projectName = getString(entity, ['project_name']);
+    if (projectName) return projectName;
+  }
   const value = type === 'contact'
     ? getString(entity, ['full_name', 'email', 'phone'])
     : getString(entity, ['full_name', 'customer_name', 'email', 'phone']);
   return value || (type === 'quote' ? `Báo giá ${id}` : `Liên hệ ${id}`);
+}
+
+function getProjectRequirements(value: unknown): Array<{ label: string; value: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const label = typeof record.label === 'string' ? record.label.trim() : '';
+    const requirementValue = typeof record.value === 'string' ? record.value.trim() : '';
+    return label && requirementValue ? [{ label, value: requirementValue }] : [];
+  });
 }
 
 function getString(record: WorkbenchRecord, keys: string[]) {

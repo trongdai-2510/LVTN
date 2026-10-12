@@ -15,8 +15,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_QA_PASSWORD || 'ChangeMe123!';
 const QA_CLIENT_IP = '192.0.2.30';
 const REPORT_PATH = path.join(
   ROOT,
-  'docs',
-  'working-notes',
+  'tmp',
+  'qa-artifacts',
   'audit-trail-qa-last-run.md'
 );
 const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);

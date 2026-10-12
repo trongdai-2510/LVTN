@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowLeft, FileSpreadsheet, Upload } from '@/components/icons';
+import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { ArrowLeft, Upload, X } from '@/components/icons';
 
 import { Field } from '@/components/form/Field';
 import { Button } from '@/components/ui/Button';
@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { ErrorMessagePanel } from '@/components/ui/ErrorMessagePanel';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
+import { Select } from '@/components/ui/Select';
 import { authStore } from '@/features/auth/auth.store';
 import type { AuthState } from '@/features/auth/auth.types';
 import { apiClient } from '@/lib/api-client';
@@ -17,20 +18,31 @@ import { adminPath } from '@/lib/admin-navigation';
 import { pushAdminFlash } from '@/lib/admin-flash';
 import { endpoints } from '@/lib/api-endpoints';
 import { PERMISSIONS } from '@/lib/permissions';
+import { readWorkbookSheetNames } from './sheetPicker';
 
 type ImportCreateResponse = {
   batch?: { id?: string };
 };
 
+const MAX_IMPORT_UPLOAD_BYTES = 20 * 1024 * 1024;
+const IMPORT_UPLOAD_EXTENSIONS = ['.xlsx', '.csv'] as const;
+
 export function ImportBatchCreatePage() {
   const [authState, setAuthState] = useState<AuthState>(() => authStore.getState());
   const [batchName, setBatchName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [selectedSheet, setSelectedSheet] = useState('');
+  const [readingSheets, setReadingSheets] = useState(false);
+  const [serverSheetName, setServerSheetName] = useState('');
   const [path, setPath] = useState('');
   const [rowRanges, setRowRanges] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<unknown>(null);
+  const [draggingFile, setDraggingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileChoiceVersion = useRef(0);
 
   useEffect(() => {
     setAuthState(authStore.hydrate());
@@ -38,6 +50,63 @@ export function ImportBatchCreatePage() {
   }, []);
 
   const canIntake = authState.permissions.includes(PERMISSIONS.importIntake);
+
+  async function chooseFile(nextFile: File | null) {
+    const choiceVersion = ++fileChoiceVersion.current;
+    if (!nextFile) {
+      setSelectedFile(null);
+      setSheetNames([]);
+      setSelectedSheet('');
+      setReadingSheets(false);
+      return;
+    }
+
+    const fileError = validateImportUploadFile(nextFile);
+    if (fileError) {
+      setSelectedFile(null);
+      setSheetNames([]);
+      setSelectedSheet('');
+      setReadingSheets(false);
+      setSubmitError(new Error(fileError));
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setSubmitError(null);
+    setSelectedFile(nextFile);
+    setSheetNames([]);
+    setSelectedSheet('');
+    setReadingSheets(false);
+    setPath('');
+    setBatchName((current) => current.trim() || batchNameFromFileName(nextFile.name));
+    if (!nextFile.name.toLowerCase().endsWith('.xlsx')) return;
+
+    setReadingSheets(true);
+    try {
+      const names = await readWorkbookSheetNames(nextFile);
+      if (choiceVersion !== fileChoiceVersion.current) return;
+      setSheetNames(names);
+      if (names.length === 1) setSelectedSheet(names[0]);
+    } catch (error) {
+      if (choiceVersion !== fileChoiceVersion.current) return;
+      setSelectedFile(null);
+      setSubmitError(error);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } finally {
+      if (choiceVersion === fileChoiceVersion.current) setReadingSheets(false);
+    }
+  }
+
+  function dropFile(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDraggingFile(false);
+    if (!canIntake || submitting) return;
+    if (event.dataTransfer.files.length !== 1) {
+      setSubmitError(new Error('Chỉ chọn một tệp cho mỗi lô nhập.'));
+      return;
+    }
+    chooseFile(event.dataTransfer.files?.[0] ?? null);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -52,10 +121,22 @@ export function ImportBatchCreatePage() {
     if (!selectedFile && !path.trim()) {
       setSubmitError(
         new Error(
-          'Chọn workbook .xlsx hoặc .csv để tải lên. Chỉ dùng đường dẫn nội bộ khi file đã nằm sẵn trên máy chủ API.'
+          'Chọn tệp Excel .xlsx hoặc CSV .csv để bắt đầu.'
         )
       );
       return;
+    }
+
+    if (selectedFile) {
+      const fileError = validateImportUploadFile(selectedFile);
+      if (fileError) {
+        setSubmitError(new Error(fileError));
+        return;
+      }
+      if (selectedFile.name.toLowerCase().endsWith('.xlsx') && !selectedSheet) {
+        setSubmitError(new Error('Chọn sheet chứa dữ liệu sản phẩm trước khi đọc tệp.'));
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -69,6 +150,7 @@ export function ImportBatchCreatePage() {
         if (notes.trim()) formData.append('notes', notes.trim());
         if (rowRanges.trim()) formData.append('row_ranges', rowRanges.trim());
         formData.append('source_kind', 'uploaded_workbook');
+        if (selectedSheet) formData.append('sheet_name', selectedSheet);
         result = await apiClient.postForm<ImportCreateResponse>(
           endpoints.songThanh.importBatchUpload,
           formData
@@ -79,6 +161,9 @@ export function ImportBatchCreatePage() {
           {
             batch_name: batchName.trim() || undefined,
             source_workbook_path: path.trim(),
+            sheet_name: path.trim().toLowerCase().endsWith('.xlsx')
+              ? serverSheetName.trim() || undefined
+              : undefined,
             notes: notes.trim() || undefined,
             row_ranges: parsedRanges.ranges
           }
@@ -87,13 +172,13 @@ export function ImportBatchCreatePage() {
 
       const nextBatchId = String(result.batch?.id || '');
       if (!nextBatchId) {
-        throw new Error('Không nhận được mã lô nhập sau khi đọc workbook.');
+        throw new Error('Hệ thống chưa hoàn tất việc tạo lô nhập. Vui lòng thử lại.');
       }
 
       pushAdminFlash({
         tone: 'success',
         message:
-          'Đã đọc workbook. Bước tiếp theo là xác nhận cột dữ liệu trước khi tạo dữ liệu tạm.'
+          'Đã đọc tệp. Bước tiếp theo là xác nhận cách ghép cột.'
       });
       window.location.assign(adminPath(`/import/${nextBatchId}`));
     } catch (err) {
@@ -105,8 +190,8 @@ export function ImportBatchCreatePage() {
 
   const submitLabel =
     !selectedFile && path.trim()
-      ? 'Tạo lô nhập từ đường dẫn nội bộ'
-      : 'Tải lên và đọc workbook';
+      ? 'Đọc tệp từ máy chủ'
+      : 'Đọc tệp dữ liệu';
 
   return (
     <section className="space-y-5">
@@ -119,8 +204,7 @@ export function ImportBatchCreatePage() {
             Tạo lô nhập
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Tải workbook lên để hệ thống đọc cấu trúc file trước. Dữ liệu chính thức chỉ
-            được tạo sau khi bạn xác nhận cột, duyệt dữ liệu tạm và áp dụng.
+            Chọn tệp, kiểm tra cách ghép cột rồi duyệt trước khi áp dụng.
           </p>
         </div>
 
@@ -142,52 +226,91 @@ export function ImportBatchCreatePage() {
             <Upload className="h-4 w-4" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-text">Workbook nguồn</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Chọn file là đủ để bắt đầu. Tên lô và khoảng dòng có thể bổ sung khi cần.
-            </p>
+            <h2 className="text-sm font-semibold text-text">Chọn tệp dữ liệu</h2>
           </div>
         </div>
 
         <form onSubmit={submit} className="space-y-4 p-4 lg:p-5">
-          <div className="rounded-sm border border-dashed border-blue-200 bg-blue-50/60 px-4 py-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-semibold text-text">
-                  <FileSpreadsheet className="h-4 w-4 text-primary" />
-                  Tải file Excel hoặc CSV
-                </div>
-                <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
-                  Sau khi đọc file, hệ thống chỉ tạo bản xem trước và gợi ý mapping. Chưa có
-                  dữ liệu nào được đưa thẳng vào catalog chính thức.
-                </p>
-              </div>
-              {selectedFile ? (
-                <span className="rounded-sm border border-blue-200 bg-panel px-3 py-2 text-xs font-medium text-blue-700">
-                  {selectedFile.name}
-                </span>
-              ) : null}
-            </div>
-          </div>
-
           <div className="grid gap-4 lg:grid-cols-2">
-            <Field label="Workbook nguồn" hint="Hỗ trợ .xlsx và .csv.">
-              <Input
+            <Field label="Tệp Excel hoặc CSV">
+              <div
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  if (canIntake && !submitting) setDraggingFile(true);
+                }}
+                onDragOver={(event) => event.preventDefault()}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setDraggingFile(false);
+                  }
+                }}
+                onDrop={dropFile}
+                className={`rounded-md border border-dashed p-3 transition-colors ${
+                  draggingFile
+                    ? 'border-primary bg-blue-50'
+                    : selectedFile
+                      ? 'border-emerald-300 bg-emerald-50/70'
+                      : 'border-slate-300 bg-slate-50 hover:border-primary hover:bg-blue-50/40'
+                }`}
+                data-import-upload-dropzone="true"
+              >
+                <input
+                ref={fileInputRef}
                 data-import-upload-file="true"
                 type="file"
                 accept=".xlsx,.csv"
                 disabled={!canIntake || submitting}
-                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-              />
-              {selectedFile ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Đã chọn: <span className="font-medium text-text">{selectedFile.name}</span>
-                </p>
-              ) : null}
+                className="sr-only"
+                onChange={(event) => {
+                  chooseFile(event.target.files?.[0] ?? null);
+                }}
+                id="import-data-file"
+                />
+                {selectedFile ? (
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm bg-emerald-100 text-emerald-700">
+                      <Upload className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-emerald-950">{selectedFile.name}</p>
+                      <p className="text-xs text-emerald-700">
+                        {formatFileSize(selectedFile.size)} · {readingSheets ? 'Đang đọc danh sách sheet' : selectedFile.name.toLowerCase().endsWith('.xlsx') && !selectedSheet ? 'Chọn sheet để tiếp tục' : 'Sẵn sàng đọc'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-emerald-800 hover:bg-emerald-100"
+                      onClick={() => {
+                        chooseFile(null);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      aria-label="Bỏ tệp đã chọn"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label
+                    htmlFor="import-data-file"
+                    className={`flex cursor-pointer items-center gap-3 ${
+                      !canIntake || submitting ? 'cursor-not-allowed opacity-60' : ''
+                    }`}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm border border-border bg-panel text-primary">
+                      <Upload className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-text">Chọn tệp hoặc kéo thả vào đây</span>
+                      <span className="block text-xs text-muted-foreground">Excel .xlsx hoặc CSV .csv, tối đa 20 MB</span>
+                    </span>
+                  </label>
+                )}
+              </div>
             </Field>
 
             <Field label="Tên lô">
               <Input
+                data-import-batch-name="true"
                 value={batchName}
                 onChange={(event) => setBatchName(event.target.value)}
                 disabled={!canIntake || submitting}
@@ -196,17 +319,36 @@ export function ImportBatchCreatePage() {
             </Field>
           </div>
 
+          {selectedFile?.name.toLowerCase().endsWith('.xlsx') && sheetNames.length > 1 ? (
+            <Field label="Sheet chứa dữ liệu sản phẩm">
+              <Select
+                value={selectedSheet}
+                onChange={(event) => setSelectedSheet(event.target.value)}
+                disabled={submitting}
+                data-import-sheet-select="true"
+              >
+                <option value="">Chọn sheet để nhập</option>
+                {sheetNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </Select>
+            </Field>
+          ) : null}
+          {selectedFile?.name.toLowerCase().endsWith('.xlsx') && sheetNames.length === 1 ? (
+            <p className="text-sm text-muted-foreground" data-import-selected-sheet="true">
+              Sheet sẽ nhập: <span className="font-medium text-text">{selectedSheet}</span>
+            </p>
+          ) : null}
+
           <details
             data-import-optional-fields="true"
             className="rounded-sm border border-border bg-panel"
           >
             <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-text">
-              Tùy chọn thêm
+              Chỉ đọc một phần tệp
             </summary>
             <div className="grid gap-4 border-t border-border px-4 py-4 lg:grid-cols-2">
               <Field
                 label="Khoảng dòng"
-                hint="Để trống nếu dùng toàn bộ workbook. Ví dụ: 2-8, mỗi dòng một khoảng."
+                hint="Ví dụ 2-8. Để trống để đọc toàn bộ tệp."
               >
                 <Textarea
                   className="min-h-24"
@@ -229,31 +371,40 @@ export function ImportBatchCreatePage() {
             </div>
           </details>
 
-          <p data-import-spec-note="true" className="text-sm text-muted-foreground">
-            Sau khi đọc file, bạn sẽ chọn cột nào đi vào danh mục chính, danh mục con,
-            nhóm sản phẩm, biến thể, thông số và thuộc tính.
-          </p>
-
           <details
             data-import-technical-options="true"
             className="rounded-sm border border-border bg-panel"
           >
             <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-text">
-              Tùy chọn kỹ thuật
+              Nguồn tệp dành cho vận hành hệ thống
             </summary>
             <div className="space-y-3 border-t border-border px-4 py-4">
-              <Field
-                label="Dùng đường dẫn nội bộ"
-                hint="Chỉ dùng khi file đã nằm trên máy chủ API. Người dùng thông thường nên tải file lên."
-              >
+              <Field label="Đường dẫn tệp trên máy chủ">
                 <Input
                   data-import-source-path="true"
                   value={path}
-                  onChange={(event) => setPath(event.target.value)}
+                  onChange={(event) => {
+                    const nextPath = event.target.value;
+                    setPath(nextPath);
+                    if (nextPath.trim() && selectedFile) {
+                      void chooseFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }
+                  }}
                   disabled={!canIntake || submitting}
-                  placeholder="Ví dụ: D:\\uploads\\workbook.xlsx"
+                  placeholder="Ví dụ: D:\\uploads\\dulieu.xlsx"
                 />
               </Field>
+              {path.trim().toLowerCase().endsWith('.xlsx') ? (
+                <Field label="Tên sheet cần nhập">
+                  <Input
+                    value={serverSheetName}
+                    onChange={(event) => setServerSheetName(event.target.value)}
+                    disabled={!canIntake || submitting}
+                    placeholder="Để trống để dùng sheet đầu tiên"
+                  />
+                </Field>
+              ) : null}
             </div>
           </details>
 
@@ -266,28 +417,35 @@ export function ImportBatchCreatePage() {
               <p className="text-xs text-muted-foreground">
                 Bạn không có quyền tạo lô nhập.
               </p>
-            ) : (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <FileSpreadsheet className="h-4 w-4" />
-                <span>
-                  Đọc workbook trước, xác nhận cột dữ liệu sau, rồi mới tạo dữ liệu tạm.
-                </span>
-              </div>
-            )}
+            ) : <span />}
 
             <Button
               data-import-upload-submit="true"
               type="submit"
-              disabled={!canIntake || submitting || (!selectedFile && !path.trim())}
+              disabled={!canIntake || submitting || readingSheets || (!selectedFile && !path.trim()) || (Boolean(selectedFile?.name.toLowerCase().endsWith('.xlsx')) && !selectedSheet)}
             >
               <Upload className="h-4 w-4" />
-              {submitting ? 'Đang đọc workbook' : submitLabel}
+              {submitting ? 'Đang đọc tệp' : submitLabel}
             </Button>
           </div>
         </form>
       </Card>
     </section>
   );
+}
+
+function batchNameFromFileName(fileName: string) {
+  return fileName
+    .replace(/\.(xlsx|csv)$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 255);
+}
+
+function formatFileSize(size: number) {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function parseRowRanges(
@@ -331,4 +489,22 @@ function parseRowRanges(
   }
 
   return { ranges };
+}
+
+function validateImportUploadFile(file: File): string | null {
+  const normalizedName = file.name.trim().toLowerCase();
+  const extensionIsSupported = IMPORT_UPLOAD_EXTENSIONS.some((extension) =>
+    normalizedName.endsWith(extension)
+  );
+
+  if (!extensionIsSupported) {
+    return 'Tệp không được hỗ trợ. Chỉ chọn Excel .xlsx hoặc CSV .csv.';
+  }
+  if (file.size <= 0) {
+    return 'Tệp đang trống. Hãy chọn tệp có dữ liệu.';
+  }
+  if (file.size > MAX_IMPORT_UPLOAD_BYTES) {
+    return 'Tệp vượt quá 20 MB. Hãy chia nhỏ dữ liệu trước khi tải lên.';
+  }
+  return null;
 }

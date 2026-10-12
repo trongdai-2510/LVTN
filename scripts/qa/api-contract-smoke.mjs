@@ -689,7 +689,7 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 function writeReport() {
-  const reportPath = path.join(ROOT, 'docs', 'working-notes', 'api-contract-qa-last-run.md');
+  const reportPath = path.join(ROOT, 'tmp', 'qa-artifacts', 'api-contract-qa-last-run.md');
   mkdirSync(path.dirname(reportPath), { recursive: true });
   const lines = [
     '# API contract QA last run',
@@ -726,7 +726,7 @@ function printSummary() {
     const suffix = result.status === 'PASS' ? '' : ` - ${result.error || result.notes}`;
     console.log(`${result.status} ${result.id} ${result.title}${suffix}`);
   }
-  console.log(`Report: ${path.join(ROOT, 'docs', 'working-notes', 'api-contract-qa-last-run.md')}`);
+  console.log(`Report: ${path.join(ROOT, 'tmp', 'qa-artifacts', 'api-contract-qa-last-run.md')}`);
   console.log(`Summary: ${results.length - failed.length - skipped.length}/${results.length} passed, ${skipped.length} skipped`);
 }
 

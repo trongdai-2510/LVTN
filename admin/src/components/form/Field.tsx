@@ -1,4 +1,5 @@
 import {
+  Children,
   cloneElement,
   isValidElement,
   type ReactElement,
@@ -33,7 +34,8 @@ export function Field({
 }) {
   const fallbackId = useId();
   const fieldRef = useRef<HTMLDivElement | null>(null);
-  const controlId = htmlFor || fallbackId;
+  const rootControl = isValidElement<FieldControlProps>(children) ? children : null;
+  const controlId = htmlFor || rootControl?.props.id || fallbackId;
   const hintId = `${controlId}-hint`;
   const errorId = `${controlId}-error`;
 
@@ -41,11 +43,12 @@ export function Field({
   // Most callers render one Input, Select, or Textarea directly. Give that
   // control a stable id when the caller has not supplied one, while preserving
   // explicit ids used by compound controls such as file pickers.
-  const renderedChildren = isValidElement(children)
-    ? cloneElement(children as ReactElement<{ id?: string }>, {
-        id: (children.props as { id?: string }).id || controlId
-      })
-    : children;
+  const renderedChildren = enhanceFirstControl(children, {
+    controlId,
+    hintId: hint ? hintId : undefined,
+    errorId: error ? errorId : undefined,
+    required
+  });
 
   function focusExplicitControl() {
     if (typeof document === 'undefined') {
@@ -79,12 +82,12 @@ export function Field({
 
   return (
     <div ref={fieldRef} className="block" data-field={fieldKey ?? controlId}>
-      <div className="mb-1.5 flex items-center gap-2 text-[13px] font-medium leading-5 text-slate-700">
+      <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold leading-5 text-slate-800">
         <label htmlFor={controlId} onClick={focusExplicitControl}>
           {label}
         </label>
         {required ? (
-          <span className="text-[11px] font-semibold normal-case tracking-normal text-red-600">
+          <span aria-hidden="true" className="text-[11px] font-semibold normal-case tracking-normal text-red-600">
             *
           </span>
         ) : null}
@@ -96,15 +99,81 @@ export function Field({
       </div>
       {renderedChildren}
       {error ? (
-        <span id={errorId} className="mt-1 block text-xs text-red-600">
+        <span id={errorId} role="alert" className="mt-1.5 block text-[13px] font-medium leading-5 text-red-700">
           {error}
         </span>
       ) : null}
       {hint ? (
-        <span id={hintId} className="mt-1 block text-xs text-muted-foreground">
+        <span id={hintId} className="mt-1.5 block text-[13px] leading-5 text-muted-foreground">
           {hint}
         </span>
       ) : null}
     </div>
   );
+}
+
+type FieldControlProps = {
+  id?: string;
+  children?: ReactNode;
+  'aria-describedby'?: string;
+  'aria-errormessage'?: string;
+  'aria-invalid'?: boolean | 'false' | 'true' | 'grammar' | 'spelling';
+  'aria-required'?: boolean | 'false' | 'true';
+};
+
+function enhanceFirstControl(
+  children: ReactNode,
+  options: {
+    controlId: string;
+    hintId?: string;
+    errorId?: string;
+    required: boolean;
+  }
+): ReactNode {
+  let enhanced = false;
+
+  function visit(node: ReactNode, isRoot: boolean): ReactNode {
+    if (!isValidElement<FieldControlProps>(node)) return node;
+
+    const element = node as ReactElement<FieldControlProps>;
+    const nativeType = typeof element.type === 'string' ? element.type : null;
+    const isNativeControl = nativeType
+      ? ['input', 'select', 'textarea', 'button'].includes(nativeType)
+      : false;
+    const matchesExplicitId = Boolean(element.props.id && element.props.id === options.controlId);
+    const isCustomRootControl = isRoot && nativeType === null;
+
+    if (!enhanced && (matchesExplicitId || isNativeControl || isCustomRootControl)) {
+      enhanced = true;
+      const describedBy = joinAriaIds(
+        element.props['aria-describedby'],
+        options.hintId,
+        options.errorId
+      );
+      return cloneElement(element, {
+        id: element.props.id || options.controlId,
+        'aria-describedby': describedBy,
+        'aria-errormessage': options.errorId || element.props['aria-errormessage'],
+        'aria-invalid': options.errorId ? true : element.props['aria-invalid'],
+        'aria-required': options.required ? true : element.props['aria-required']
+      });
+    }
+
+    if (element.props.children === undefined) return element;
+    return cloneElement(
+      element,
+      {},
+      Children.map(element.props.children, (child) => visit(child, false))
+    );
+  }
+
+  return visit(children, true);
+}
+
+function joinAriaIds(...values: Array<string | undefined>): string | undefined {
+  const ids = values
+    .flatMap((value) => value?.split(/\s+/) ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return ids.length ? Array.from(new Set(ids)).join(' ') : undefined;
 }

@@ -7,7 +7,7 @@ import { extractPublicFileIdsFromHtml } from '../../common/files/file-usage-sync
 import { createPaginationMeta, getPaginationParams } from '../../common/pagination/pagination';
 import { resolveAvailableSlug } from '../../common/text/slugify-text';
 import { LogicUserReferenceRepository } from '../../common/users/logic-user-reference.repository';
-import { reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
+import { isVisibilityOnlyUnpublish, reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
 import { ProductGroupService } from '../product-group/product-group.service';
 import {
   CreateProjectDto,
@@ -92,7 +92,7 @@ export class ProjectService {
     const existing = await this.projectRepository.findById(id);
     if (!existing) throw this.notFound('Project was not found.');
     if (existing.deleted_at) throw this.conflict('Project is archived.');
-    const mutation = await this.normalizeUpdateInput(id, input);
+    const mutation = await this.normalizeUpdateInput(id, input, currentUser?.roles.includes('super_admin') ?? false);
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
     await this.projectRepository.update(id, mutation, actorId);
@@ -166,12 +166,13 @@ export class ProjectService {
         alt_text: normalizeNullableText(input.alt_text, 255) ?? null,
         sort_order: sortOrder
       },
-      actorId
+      actorId,
+      !currentUser?.roles.includes('super_admin')
     );
     return this.getGalleryItemForResponse(id, created.id);
   }
 
-  async updateGalleryImage(projectId: string, galleryId: string, input: ProjectGalleryUpdateDto) {
+  async updateGalleryImage(projectId: string, galleryId: string, input: ProjectGalleryUpdateDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('project_id', projectId);
     const itemId = assertUuid('project_gallery_id', galleryId);
     await this.assertProjectUsableForBusiness(id);
@@ -181,24 +182,24 @@ export class ProjectService {
     const mutation: ProjectGalleryMutationInput = {};
     if (typeof input.alt_text !== 'undefined') mutation.alt_text = normalizeNullableText(input.alt_text, 255) ?? null;
     if (typeof input.sort_order !== 'undefined') mutation.sort_order = this.normalizeGallerySortOrder(input.sort_order);
-    const updated = await this.projectRepository.updateGalleryItem(id, itemId, mutation);
+    const updated = await this.projectRepository.updateGalleryItem(id, itemId, mutation, !currentUser?.roles.includes('super_admin'));
     if (!updated) throw this.notFound('Active project gallery image was not found.');
     return this.getGalleryItemForResponse(id, itemId);
   }
 
-  async archiveGalleryImage(projectId: string, galleryId: string) {
+  async archiveGalleryImage(projectId: string, galleryId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('project_id', projectId);
     const itemId = assertUuid('project_gallery_id', galleryId);
     await this.assertProjectUsableForBusiness(id);
     const existing = await this.projectRepository.findGalleryItem(id, itemId);
     if (!existing) throw this.notFound('Project gallery image was not found.');
     if (existing.deleted_at) throw this.conflict('Project gallery image is already archived.');
-    const archived = await this.projectRepository.archiveGalleryItem(id, itemId);
+    const archived = await this.projectRepository.archiveGalleryItem(id, itemId, !currentUser?.roles.includes('super_admin'));
     if (!archived) throw this.notFound('Active project gallery image was not found.');
     return this.getGalleryItemForResponse(id, itemId);
   }
 
-  async restoreGalleryImage(projectId: string, galleryId: string) {
+  async restoreGalleryImage(projectId: string, galleryId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('project_id', projectId);
     const itemId = assertUuid('project_gallery_id', galleryId);
     await this.assertProjectUsableForBusiness(id);
@@ -206,12 +207,12 @@ export class ProjectService {
     if (!existing) throw this.notFound('Project gallery image was not found.');
     if (!existing.deleted_at) throw this.conflict('Project gallery image is not archived.');
     await this.assertGalleryImageUsable(existing.file_id);
-    const restored = await this.projectRepository.restoreGalleryItem(id, itemId);
+    const restored = await this.projectRepository.restoreGalleryItem(id, itemId, !currentUser?.roles.includes('super_admin'));
     if (!restored) throw this.notFound('Deleted project gallery image was not found.');
     return this.getGalleryItemForResponse(id, itemId);
   }
 
-  async reorderGalleryImages(projectId: string, input: ProjectGalleryReorderDto) {
+  async reorderGalleryImages(projectId: string, input: ProjectGalleryReorderDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('project_id', projectId);
     await this.assertProjectUsableForBusiness(id);
     const items = Array.isArray(input.items) ? input.items : [];
@@ -227,7 +228,7 @@ export class ProjectService {
     if (activeItemIds.size !== normalizedItems.length) {
       throw this.notFound('One or more active project gallery images were not found.');
     }
-    await this.projectRepository.reorderGalleryItems(id, normalizedItems);
+    await this.projectRepository.reorderGalleryItems(id, normalizedItems, !currentUser?.roles.includes('super_admin'));
     const itemsAfterReorder = await this.projectRepository.listGallery(id, 'active');
     return { items: itemsAfterReorder };
   }
@@ -246,19 +247,19 @@ export class ProjectService {
     if (relation?.deleted_at) throw this.conflict('Association is archived. Use restore route instead of attach.');
     const actorId =
       await this.logicUserReferenceRepository.requireLogicUserId(currentUser);
-    await this.projectRepository.attachProductGroup(id, groupId, actorId);
+    await this.projectRepository.attachProductGroup(id, groupId, actorId, !currentUser?.roles.includes('super_admin'));
     return this.getProjectDetail(id);
   }
 
-  async detachProductGroup(projectId: string, productGroupId: string) {
+  async detachProductGroup(projectId: string, productGroupId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('project_id', projectId);
     const groupId = assertUuid('product_group_id', productGroupId);
-    const detached = await this.projectRepository.detachProductGroup(id, groupId);
+    const detached = await this.projectRepository.detachProductGroup(id, groupId, !currentUser?.roles.includes('super_admin'));
     if (!detached) throw this.notFound('Active project product group association was not found.');
     return this.getProjectDetail(id);
   }
 
-  async restoreProductGroup(projectId: string, productGroupId: string) {
+  async restoreProductGroup(projectId: string, productGroupId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('project_id', projectId);
     const groupId = assertUuid('product_group_id', productGroupId);
     await this.assertProjectUsableForBusiness(id);
@@ -266,7 +267,7 @@ export class ProjectService {
     const relation = await this.projectRepository.findRelation(id, groupId);
     if (!relation) throw this.notFound('Deleted project product group association was not found.');
     if (!relation.deleted_at) throw this.conflict('Product group is already attached to project.');
-    const restored = await this.projectRepository.restoreProductGroup(id, groupId);
+    const restored = await this.projectRepository.restoreProductGroup(id, groupId, !currentUser?.roles.includes('super_admin'));
     if (!restored) throw this.notFound('Deleted project product group association was not found.');
     return this.getProjectDetail(id);
   }
@@ -327,7 +328,7 @@ export class ProjectService {
     return mutation;
   }
 
-  private async normalizeUpdateInput(id: string, input: UpdateProjectDto): Promise<ProjectMutationInput> {
+  private async normalizeUpdateInput(id: string, input: UpdateProjectDto, actorIsSuperAdmin: boolean): Promise<ProjectMutationInput> {
     const current = await this.projectRepository.findById(id);
     if (!current) throw this.notFound('Project was not found.');
     const mutation: ProjectMutationInput = {};
@@ -347,6 +348,7 @@ export class ProjectService {
     if (typeof input.seo_title !== 'undefined') mutation.seo_title = normalizeNullableText(input.seo_title, 255) ?? null;
     if (typeof input.seo_description !== 'undefined') mutation.seo_description = normalizeNullableText(input.seo_description, 512) ?? null;
     if (typeof input.seo_og_image_file_id !== 'undefined') mutation.seo_og_image_file_id = normalizeNullableUuid('seo_og_image_file_id', input.seo_og_image_file_id) ?? null;
+    if (isVisibilityOnlyUnpublish(input)) return mutation;
     reopenPublishedContentAfterMajorEdit(current, mutation, [
       'title',
       'slug',
@@ -356,7 +358,7 @@ export class ProjectService {
       'description',
       'content_html',
       'image_file_id'
-    ]);
+    ], actorIsSuperAdmin);
     const next = { ...current, ...mutation };
     await this.assertReferencesUsable(next);
     await this.assertPublishReadiness(next);

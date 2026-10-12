@@ -14,7 +14,7 @@ import {
 import { AuthGuard } from '../../common/auth/auth.guard';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
-import { RequirePermissions } from '../../common/permissions/permission.decorator';
+import { RequirePermissions, SuperAdminOnly } from '../../common/permissions/permission.decorator';
 import { PermissionGuard } from '../../common/permissions/permission.guard';
 import {
   AdminUserListQueryDto,
@@ -50,6 +50,7 @@ export class AdminUserController {
 
   @Post()
   @RequirePermissions('admin_user.create')
+  @SuperAdminOnly()
   createUser(
     @Body() body: CreateAdminUserDto,
     @CurrentUser() currentUser: CurrentUserContext
@@ -59,6 +60,7 @@ export class AdminUserController {
 
   @Put(':id')
   @RequirePermissions('admin_user.update')
+  @SuperAdminOnly()
   updateUser(
     @Param('id') id: string,
     @Body() body: UpdateAdminUserDto,
@@ -70,6 +72,7 @@ export class AdminUserController {
   @Post(':id/status')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('admin_user.manage_status')
+  @SuperAdminOnly()
   updateUserStatus(
     @Param('id') id: string,
     @Body() body: UpdateAdminUserStatusDto,
@@ -81,6 +84,7 @@ export class AdminUserController {
   @Post(':id/reset-password')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('admin_user.reset_password')
+  @SuperAdminOnly()
   resetUserPassword(
     @Param('id') id: string,
     @Body() body: ResetAdminUserPasswordDto,

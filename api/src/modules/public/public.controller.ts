@@ -232,18 +232,10 @@ export class PublicController {
     ip_address: string | null;
     user_agent: string | null;
   } {
-    const forwardedHeader = request.headers["x-forwarded-for"];
-    const forwardedValue = Array.isArray(forwardedHeader)
-      ? forwardedHeader[0]
-      : forwardedHeader;
-    const ipAddress =
-      typeof forwardedValue === "string" && forwardedValue.trim() !== ""
-        ? (forwardedValue.split(",")[0]?.trim() ?? null)
-        : (request.ip ?? null);
     const userAgent = request.get("user-agent")?.trim() || null;
 
     return {
-      ip_address: ipAddress,
+      ip_address: request.ip?.trim() || null,
       user_agent: userAgent,
     };
   }

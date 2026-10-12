@@ -11,7 +11,6 @@ export const FILE_PURPOSES = [
   'website_config',
   'other'
 ] as const;
-export const FILE_USAGE_GROUPS = FILE_PURPOSES;
 
 export type FileStorageLocation = (typeof FILE_STORAGE_LOCATIONS)[number];
 export type FileDeletedScope = (typeof FILE_DELETED_SCOPES)[number];

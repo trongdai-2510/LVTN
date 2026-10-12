@@ -1,12 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Knex } from 'knex';
 
+import { AppError } from '../../common/errors/app-error';
+import { ErrorCodes } from '../../common/errors/error-codes';
 import {
   syncManagedFileUsage,
   type FileUsageDatabase
 } from '../../common/files/file-usage-sync';
 import { applyUpdatedOnFilter } from '../../common/validation/date-filter';
 import { KnexService } from '../../db/knex.service';
+import {
+  lockAndAssertActiveProductGroupReferences,
+  lockUsableProductGroupForChildMutation
+} from './productGroupTransactionGuard';
+import { rankProductMatches, type ProductSearchMode } from './productSearch';
 import {
   BRAND_TABLE,
   FILE_METADATA_TABLE,
@@ -61,6 +68,36 @@ interface ListFilters {
   deleted_scope: ProductGroupDeletedScope;
 }
 
+export type ProductGroupWriteOutcome =
+  | { status: 'updated' }
+  | { status: 'not_found' }
+  | { status: 'archived' }
+  | { status: 'not_archived' }
+  | { status: 'blocked'; dependency_counts: ProductGroupDependencyCounts }
+  | { status: 'stale'; current_updated_at: Date | string };
+
+const PRODUCT_GROUP_RECORD_COLUMNS = [
+  'id',
+  'name',
+  'slug',
+  'category_id',
+  'brand_id',
+  'short_description',
+  'detailed_description',
+  'thumbnail_file_id',
+  'review_status',
+  'publish_status',
+  'seo_title',
+  'seo_description',
+  'seo_og_image_file_id',
+  'status',
+  'sort_order',
+  'view_count',
+  'created_at',
+  'updated_at',
+  'deleted_at'
+] as const;
+
 @Injectable()
 export class ProductGroupRepository {
   constructor(private readonly knexService: KnexService) {}
@@ -69,11 +106,16 @@ export class ProductGroupRepository {
     filters: ListFilters;
     limit: number;
     offset: number;
-  }): Promise<{ items: ProductGroupListItem[]; total: number; total_view_count: number }> {
+  }): Promise<{ items: ProductGroupListItem[]; total: number; total_view_count: number; search_match_mode: ProductSearchMode }> {
     const groupAlias = 'product_group_record';
     const categoryLevel2Alias = 'category_level_2_record';
     const categoryLevel1Alias = 'category_level_1_record';
     const brandAlias = 'brand_record';
+    const search = params.filters.q
+      ? await this.findSearchMatches(params.filters.q)
+      : null;
+    const searchIds = search?.matches.map((match) => match.id) ?? [];
+    const searchMatches = new Map(search?.matches.map((match) => [match.id, match]));
     const baseQuery = this.applyListFilters(
       this.knexService.db({ [groupAlias]: PRODUCT_GROUP_TABLE })
         .leftJoin(
@@ -91,6 +133,7 @@ export class ProductGroupRepository {
       categoryLevel1Alias,
       params.filters
     );
+    if (search) baseQuery.whereIn(`${groupAlias}.id`, searchIds);
     const [total, viewCountRow] = await Promise.all([
       this.countDistinct(baseQuery, `${groupAlias}.id`),
       baseQuery
@@ -99,7 +142,7 @@ export class ProductGroupRepository {
         .sum({ total_view_count: `${groupAlias}.view_count` })
         .first() as Promise<{ total_view_count?: string | number | null } | undefined>
     ]);
-    const rows = await baseQuery
+    const rowsQuery = baseQuery
       .clone()
       .select(
         `${groupAlias}.id`,
@@ -126,7 +169,11 @@ export class ProductGroupRepository {
         `${groupAlias}.created_at`,
         `${groupAlias}.updated_at`,
         `${groupAlias}.deleted_at`
-      )
+      );
+    if (searchIds.length > 0) {
+      rowsQuery.orderByRaw('array_position(?::uuid[], ??) ASC', [searchIds, `${groupAlias}.id`]);
+    }
+    const rows = await rowsQuery
       .orderByRaw(`CASE WHEN ${groupAlias}.deleted_at IS NULL THEN 0 ELSE 1 END ASC`)
       .orderBy(`${groupAlias}.sort_order`, 'asc')
       .orderBy(`${groupAlias}.updated_at`, 'desc')
@@ -144,11 +191,23 @@ export class ProductGroupRepository {
       items: typedRows.map((row) => ({
         ...normalizeCategoryPath(row),
         variant_count: variantCounts.get(row.id) ?? 0,
-        document_count: documentCounts.get(row.id) ?? 0
+        document_count: documentCounts.get(row.id) ?? 0,
+        search_match: searchMatches.get(row.id) ?? null
       })),
       total,
-      total_view_count: Number(viewCountRow?.total_view_count ?? 0)
+      total_view_count: Number(viewCountRow?.total_view_count ?? 0),
+      search_match_mode: search?.mode ?? 'none'
     };
+  }
+
+  private async findSearchMatches(query: string) {
+    const [groups, variants] = await Promise.all([
+      this.knexService.db(PRODUCT_GROUP_TABLE).select('id', 'name'),
+      this.knexService.db(PRODUCT_VARIANT_TABLE)
+        .select('product_group_id', 'variant_name', 'sku', 'external_code', 'model_code')
+        .whereNull('deleted_at')
+    ]);
+    return rankProductMatches(groups, variants, query);
   }
 
   async findAdminById(id: string): Promise<ProductGroupAdminRecord | null> {
@@ -201,30 +260,21 @@ export class ProductGroupRepository {
 
   async findById(id: string): Promise<ProductGroupRecord | null> {
     const row = await this.knexService.db<ProductGroupRecord>(PRODUCT_GROUP_TABLE)
-      .select(
-        'id',
-        'name',
-        'slug',
-        'category_id',
-        'brand_id',
-        'short_description',
-        'detailed_description',
-        'thumbnail_file_id',
-        'review_status',
-        'publish_status',
-        'seo_title',
-        'seo_description',
-        'seo_og_image_file_id',
-        'status',
-        'sort_order',
-        'view_count',
-        'created_at',
-        'updated_at',
-        'deleted_at'
-      )
+      .select(...PRODUCT_GROUP_RECORD_COLUMNS)
       .where({ id })
       .first();
     return row ?? null;
+  }
+
+  async findByIds(ids: string[]): Promise<Map<string, ProductGroupRecord>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.knexService.db<ProductGroupRecord>(PRODUCT_GROUP_TABLE)
+      .select(...PRODUCT_GROUP_RECORD_COLUMNS)
+      .whereIn('id', ids);
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   async slugExists(slug: string, exceptId?: string): Promise<boolean> {
@@ -407,6 +457,10 @@ export class ProductGroupRepository {
 
   async create(input: Required<Pick<ProductGroupMutationInput, 'name' | 'slug' | 'category_id'>> & ProductGroupMutationInput) {
     return this.knexService.db.transaction(async (trx) => {
+      await lockAndAssertActiveProductGroupReferences(trx, {
+        category_id: input.category_id,
+        brand_id: input.brand_id ?? null
+      });
       const [row] = await trx<ProductGroupRecord>(PRODUCT_GROUP_TABLE)
         .insert({
           name: input.name,
@@ -432,15 +486,28 @@ export class ProductGroupRepository {
     });
   }
 
-  async update(id: string, input: ProductGroupMutationInput): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async update(
+    id: string,
+    input: ProductGroupMutationInput,
+    expectedUpdatedAt?: string
+  ): Promise<ProductGroupWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<ProductGroupRecord>(PRODUCT_GROUP_TABLE)
         .where({ id })
         .forUpdate()
         .first();
-      if (!existing) {
-        return;
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
       }
+      await lockAndAssertActiveProductGroupReferences(trx, {
+        category_id: input.category_id ?? existing.category_id,
+        brand_id:
+          typeof input.brand_id === 'undefined'
+            ? existing.brand_id
+            : input.brand_id
+      });
       const nextThumbnailId =
         typeof input.thumbnail_file_id === 'undefined' ? existing.thumbnail_file_id : input.thumbnail_file_id;
       const nextOgImageId =
@@ -472,36 +539,57 @@ export class ProductGroupRepository {
       }
       await this.syncFileUsage(trx, id, PRODUCT_GROUP_THUMBNAIL_FIELD_NAME, existing.thumbnail_file_id, nextThumbnailId ?? null);
       await this.syncFileUsage(trx, id, PRODUCT_GROUP_OG_IMAGE_FIELD_NAME, existing.seo_og_image_file_id, nextOgImageId ?? null);
+      return { status: 'updated' };
     });
   }
 
-  async archive(id: string): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async archive(id: string, expectedUpdatedAt?: string): Promise<ProductGroupWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<ProductGroupRecord>(PRODUCT_GROUP_TABLE)
         .where({ id })
         .forUpdate()
         .first();
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      const dependencyCounts = await this.dependencyCountsUsing(trx, id);
+      if (Object.values(dependencyCounts).some((count) => count > 0)) {
+        return { status: 'blocked', dependency_counts: dependencyCounts };
+      }
       await trx(PRODUCT_GROUP_TABLE)
         .where({ id })
         .whereNull('deleted_at')
         .update({ deleted_at: trx.fn.now() });
-      await this.syncFileUsage(trx, id, PRODUCT_GROUP_THUMBNAIL_FIELD_NAME, existing?.thumbnail_file_id ?? null, null);
-      await this.syncFileUsage(trx, id, PRODUCT_GROUP_OG_IMAGE_FIELD_NAME, existing?.seo_og_image_file_id ?? null, null);
+      await this.syncFileUsage(trx, id, PRODUCT_GROUP_THUMBNAIL_FIELD_NAME, existing.thumbnail_file_id ?? null, null);
+      await this.syncFileUsage(trx, id, PRODUCT_GROUP_OG_IMAGE_FIELD_NAME, existing.seo_og_image_file_id ?? null, null);
+      return { status: 'updated' };
     });
   }
 
-  async restore(id: string): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async restore(id: string, expectedUpdatedAt?: string): Promise<ProductGroupWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<ProductGroupRecord>(PRODUCT_GROUP_TABLE)
         .where({ id })
         .forUpdate()
         .first();
+      if (!existing) return { status: 'not_found' };
+      if (!existing.deleted_at) return { status: 'not_archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      await lockAndAssertActiveProductGroupReferences(trx, {
+        category_id: existing.category_id,
+        brand_id: existing.brand_id
+      });
       await trx(PRODUCT_GROUP_TABLE)
         .where({ id })
         .whereNotNull('deleted_at')
         .update({ deleted_at: null });
-      await this.syncFileUsage(trx, id, PRODUCT_GROUP_THUMBNAIL_FIELD_NAME, null, existing?.thumbnail_file_id ?? null);
-      await this.syncFileUsage(trx, id, PRODUCT_GROUP_OG_IMAGE_FIELD_NAME, null, existing?.seo_og_image_file_id ?? null);
+      await this.syncFileUsage(trx, id, PRODUCT_GROUP_THUMBNAIL_FIELD_NAME, null, existing.thumbnail_file_id ?? null);
+      await this.syncFileUsage(trx, id, PRODUCT_GROUP_OG_IMAGE_FIELD_NAME, null, existing.seo_og_image_file_id ?? null);
+      return { status: 'updated' };
     });
   }
 
@@ -511,6 +599,19 @@ export class ProductGroupRepository {
       .whereNull('deleted_at')
       .first('id');
     return Boolean(row);
+  }
+
+  async productVariantIdsBelongToGroup(productGroupId: string, productVariantIds: string[]): Promise<Set<string>> {
+    if (productVariantIds.length === 0) {
+      return new Set();
+    }
+
+    const rows = await this.knexService.db<{ id: string }>(PRODUCT_VARIANT_TABLE)
+      .where({ product_group_id: productGroupId })
+      .whereIn('id', productVariantIds)
+      .whereNull('deleted_at')
+      .select('id');
+    return new Set(rows.map((row) => row.id));
   }
 
   async listHighlightSpecs(
@@ -618,9 +719,10 @@ export class ProductGroupRepository {
     return Number(row?.max_sort_order ?? -1) + 1;
   }
 
-  async createHighlightSpec(input: ProductHighlightSpecMutationInput): Promise<ProductHighlightSpecRecord> {
-    const [row] = await this.knexService.db<ProductHighlightSpecRecord>(PRODUCT_HIGHLIGHT_SPEC_TABLE)
-      .insert({
+  async createHighlightSpec(input: ProductHighlightSpecMutationInput, reopenReview = false): Promise<ProductHighlightSpecRecord> {
+    return this.knexService.db.transaction(async (trx) => {
+      const group = await this.lockEditableGroup(trx, input.product_group_id);
+      const [row] = await trx<ProductHighlightSpecRecord>(PRODUCT_HIGHLIGHT_SPEC_TABLE).insert({
         product_group_id: input.product_group_id,
         product_variant_id: input.product_variant_id,
         source_type: input.source_type,
@@ -630,13 +732,16 @@ export class ProductGroupRepository {
         sort_order: input.sort_order
       })
       .returning('*');
-    return row;
+      await this.reopenGroupReview(trx, group, reopenReview);
+      return row;
+    });
   }
 
   async updateHighlightSpec(
     productGroupId: string,
     highlightSpecId: string,
-    input: ProductHighlightSpecPatchInput
+    input: ProductHighlightSpecPatchInput,
+    reopenReview = false
   ): Promise<void> {
     const patch: Record<string, unknown> = {};
     for (const field of ['display_label', 'display_value', 'sort_order'] as const) {
@@ -647,30 +752,70 @@ export class ProductGroupRepository {
     if (Object.keys(patch).length === 0) {
       return;
     }
-    await this.knexService.db(PRODUCT_HIGHLIGHT_SPEC_TABLE)
-      .where({ id: highlightSpecId, product_group_id: productGroupId })
-      .whereNull('deleted_at')
-      .update(patch);
+    await this.knexService.db.transaction(async (trx) => {
+      const group = await this.lockEditableGroup(trx, productGroupId);
+      const current = await trx(PRODUCT_HIGHLIGHT_SPEC_TABLE)
+        .where({ id: highlightSpecId, product_group_id: productGroupId })
+        .whereNull('deleted_at').forUpdate().first();
+      if (!current) return;
+      const changed = Object.entries(patch).some(([key, value]) => current[key] !== value);
+      if (!changed) return;
+      await trx(PRODUCT_HIGHLIGHT_SPEC_TABLE)
+        .where({ id: highlightSpecId }).update(patch);
+      await this.reopenGroupReview(trx, group, reopenReview);
+    });
   }
 
-  async archiveHighlightSpec(productGroupId: string, highlightSpecId: string): Promise<void> {
-    await this.knexService.db(PRODUCT_HIGHLIGHT_SPEC_TABLE)
-      .where({ id: highlightSpecId, product_group_id: productGroupId })
-      .whereNull('deleted_at')
-      .update({ deleted_at: this.knexService.db.fn.now() });
+  async archiveHighlightSpec(productGroupId: string, highlightSpecId: string, reopenReview = false): Promise<void> {
+    await this.knexService.db.transaction(async (trx) => {
+      const group = await this.lockEditableGroup(trx, productGroupId);
+      const count = await trx(PRODUCT_HIGHLIGHT_SPEC_TABLE)
+        .where({ id: highlightSpecId, product_group_id: productGroupId })
+        .whereNull('deleted_at').update({ deleted_at: trx.fn.now() });
+      if (count) await this.reopenGroupReview(trx, group, reopenReview);
+    });
   }
 
   async reorderHighlightSpecs(
     productGroupId: string,
-    items: Array<{ id: string; sort_order: number }>
+    items: Array<{ id: string; sort_order: number }>,
+    reopenReview = false
   ): Promise<void> {
     await this.knexService.db.transaction(async (trx) => {
+      const group = await this.lockEditableGroup(trx, productGroupId);
+      let changed = false;
       for (const item of items) {
-        await trx(PRODUCT_HIGHLIGHT_SPEC_TABLE)
+        const count = await trx(PRODUCT_HIGHLIGHT_SPEC_TABLE)
           .where({ id: item.id, product_group_id: productGroupId })
           .whereNull('deleted_at')
+          .whereNot('sort_order', item.sort_order)
           .update({ sort_order: item.sort_order });
+        changed ||= count > 0;
       }
+      if (changed) await this.reopenGroupReview(trx, group, reopenReview);
+    });
+  }
+
+  private async lockEditableGroup(trx: Knex.Transaction, id: string): Promise<{
+    id: string; review_status: string; publish_status: string
+  }> {
+    const row = await trx(PRODUCT_GROUP_TABLE).where({ id }).forUpdate().first();
+    if (!row || row.deleted_at) throw new AppError({
+      code: ErrorCodes.NOT_FOUND,
+      message: 'Product group was not found.',
+      statusCode: HttpStatus.NOT_FOUND
+    });
+    return row;
+  }
+
+  private async reopenGroupReview(
+    trx: Knex.Transaction,
+    group: { id: string; review_status: string; publish_status: string },
+    requested: boolean
+  ): Promise<void> {
+    if (!requested || group.review_status !== 'approved' || group.publish_status !== 'published') return;
+    await trx(PRODUCT_GROUP_TABLE).where({ id: group.id }).update({
+      review_status: 'pending_review', publish_status: 'unpublished', updated_at: trx.fn.now()
     });
   }
 
@@ -790,33 +935,6 @@ export class ProductGroupRepository {
       });
     }
     applyUpdatedOnFilter(query, `${tableAlias}.updated_at`, filters.updated_on);
-    if (filters.q) {
-      const searchPattern = `%${filters.q}%`;
-      query.andWhere((builder) => {
-        builder
-          .whereRaw('?? ILIKE ?', [`${tableAlias}.name`, searchPattern])
-          .orWhereRaw('?? ILIKE ?', [`${tableAlias}.slug`, searchPattern])
-          .orWhereRaw('?? ILIKE ?', [`${tableAlias}.short_description`, searchPattern])
-          .orWhereRaw('?? ILIKE ?', [`${tableAlias}.detailed_description`, searchPattern])
-          .orWhereExists(function whereMatchingVariant() {
-            this.select(this.client.raw('1'))
-              .from(`${PRODUCT_VARIANT_TABLE} as search_variant_record`)
-              .whereRaw('?? = ??', [
-                'search_variant_record.product_group_id',
-                `${tableAlias}.id`
-              ])
-              .whereNull('search_variant_record.deleted_at')
-              .andWhere((variantBuilder) => {
-                variantBuilder
-                  .whereRaw('?? ILIKE ?', ['search_variant_record.variant_name', searchPattern])
-                  .orWhereRaw('?? ILIKE ?', ['search_variant_record.sku', searchPattern])
-                  .orWhereRaw('?? ILIKE ?', ['search_variant_record.external_code', searchPattern])
-                  .orWhereRaw('?? ILIKE ?', ['search_variant_record.model_code', searchPattern])
-                  .orWhereRaw('?? ILIKE ?', ['search_variant_record.detailed_description', searchPattern]);
-              });
-          });
-      });
-    }
     return query;
   }
 
@@ -827,6 +945,29 @@ export class ProductGroupRepository {
       .count({ total: columnName })
       .first();
     return Number(row?.total ?? 0);
+  }
+
+  private async dependencyCountsUsing(
+    db: Knex | Knex.Transaction,
+    productGroupId: string
+  ): Promise<ProductGroupDependencyCounts> {
+    const countRows = async (tableName: string) => {
+      const row = await db(tableName)
+        .where({ product_group_id: productGroupId })
+        .whereNull('deleted_at')
+        .count({ total: 'product_group_id' })
+        .first();
+      return Number(row?.total ?? 0);
+    };
+
+    return {
+      active_variants: await countRows(PRODUCT_VARIANT_TABLE),
+      active_documents: await countRows(TECHNICAL_DOCUMENT_TABLE),
+      active_images: await countRows(PRODUCT_IMAGE_TABLE),
+      active_service_relations: await countRows(SERVICE_PRODUCT_GROUP_TABLE),
+      active_project_relations: await countRows(PROJECT_PRODUCT_GROUP_TABLE),
+      active_quote_items: await countRows(QUOTE_ITEM_TABLE)
+    };
   }
 
   private async countMap(tableName: string, columnName: string, ids: string[]): Promise<Map<string, number>> {
@@ -1036,22 +1177,76 @@ export class ProductGroupRepository {
 
   /**
    * Bulk replace gallery cho 1 product_group.
-   * - Soft-delete row hiá»‡n táº¡i náº¿u khĂ´ng cĂ³ trong input.
-   * - Update sort_order/alt_text/variant_id cho row Ä‘Ă£ tá»“n táº¡i (match theo file_id).
-   * - Insert row má»›i cho file_id chÆ°a tá»«ng cĂ³.
-   * - Äá»“ng bá»™ file_usage Ä‘á»ƒ orphan detection chuáº©n xĂ¡c.
+   * - Soft-delete row hiện tại nếu không có trong input.
+   * - Update sort_order/alt_text/variant_id cho row đã tồn tại (match theo file_id).
+   * - Insert row mới cho file_id chưa từng có.
+   * - Đồng bộ file_usage để orphan detection chuẩn xác.
    *
-   * Input lĂ  full danh sĂ¡ch má»›i theo thá»© tá»± admin muá»‘n. sort_order = index.
+   * Input là full danh sách mới theo thứ tự admin muốn. sort_order = index.
    */
   async replaceProductImages(
     productGroupId: string,
-    items: ProductImageGalleryInput[]
+    items: ProductImageGalleryInput[],
+    reopenReview = false
   ): Promise<ProductImageGalleryRecord[]> {
     await this.knexService.db.transaction(async (trx) => {
+      const variantIds = Array.from(
+        new Set(
+          items.flatMap((item) =>
+            item.product_variant_id ? [item.product_variant_id] : []
+          )
+        )
+      ).sort();
+      if (variantIds.length > 0) {
+        const variants = await trx(PRODUCT_VARIANT_TABLE)
+          .whereIn('id', variantIds)
+          .orderBy('id', 'asc')
+          .forUpdate()
+          .select<
+            Array<{
+              id: string;
+              product_group_id: string;
+              status: string;
+              deleted_at: Date | string | null;
+            }>
+          >(['id', 'product_group_id', 'status', 'deleted_at']);
+        const usableIds = new Set(
+          variants
+            .filter(
+              (variant) =>
+                !variant.deleted_at &&
+                variant.status === 'active' &&
+                variant.product_group_id === productGroupId
+            )
+            .map((variant) => variant.id)
+        );
+        if (variantIds.some((variantId) => !usableIds.has(variantId))) {
+          throw new AppError({
+            code: ErrorCodes.NOT_FOUND,
+            message: 'Product variant was not found for this product group.',
+            statusCode: HttpStatus.NOT_FOUND
+          });
+        }
+      }
+      const group = await lockUsableProductGroupForChildMutation(trx, productGroupId);
       const existing = (await trx(PRODUCT_IMAGE_TABLE)
         .where({ product_group_id: productGroupId })
         .whereNull('deleted_at')
-        .select(['id', 'file_id'])) as Array<{ id: string; file_id: string }>;
+        .select(['id', 'file_id', 'alt_text', 'product_variant_id', 'sort_order'])) as Array<{
+          id: string; file_id: string; alt_text: string | null;
+          product_variant_id: string | null; sort_order: number;
+        }>;
+      const orderedExisting = [...existing].sort((left, right) =>
+        left.sort_order - right.sort_order || left.id.localeCompare(right.id)
+      );
+      const galleryChanged = orderedExisting.length !== items.length ||
+        orderedExisting.some((row, index) => {
+          const incoming = items[index];
+          return row.file_id !== incoming.file_id ||
+            row.product_variant_id !== (incoming.product_variant_id ?? null) ||
+            row.alt_text !== (incoming.alt_text?.trim() || null) ||
+            row.sort_order !== index;
+        });
 
       const incomingFileIds = new Set(items.map((item) => item.file_id));
 
@@ -1143,6 +1338,7 @@ export class ProductGroupRepository {
           }
         }
       }
+      if (galleryChanged) await this.reopenGroupReview(trx, group, reopenReview);
     });
 
     return this.listProductImages(productGroupId);
@@ -1196,6 +1392,11 @@ export class ProductGroupRepository {
       .first('id');
     await trx(FILE_METADATA_TABLE).where({ id: fileId }).update({ is_orphan: !activeUsage });
   }
+}
+
+function isStaleWrite(actualUpdatedAt: Date | string, expectedUpdatedAt?: string): boolean {
+  if (!expectedUpdatedAt) return false;
+  return new Date(actualUpdatedAt).getTime() !== new Date(expectedUpdatedAt).getTime();
 }
 
 function normalizeCategoryPath(row: ProductGroupAdminRecord): ProductGroupAdminRecord {

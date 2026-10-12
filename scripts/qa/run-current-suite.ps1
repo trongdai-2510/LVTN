@@ -1,6 +1,7 @@
 param(
   [string[]]$OnlyStages = @(),
   [string]$PlaywrightSpec = '',
+  [string]$PlaywrightGrep = '',
   [switch]$ProductionRuntime
 )
 
@@ -107,9 +108,9 @@ function Copy-NextStandaloneRuntimeAssets {
     [switch]$IncludePublicDirectory
   )
 
-  # `next build` leaves static assets next to the standalone server. Docker copies
-  # them into the runtime image explicitly, so local production QA must do the
-  # same. Without this, the standalone server returns HTML but misses CSS and
+  # `next build` leaves static assets next to the standalone server. This local
+  # production rehearsal copies them into the portable runtime explicitly.
+  # Without this, the standalone server returns HTML but misses CSS and
   # JavaScript chunks, creating false responsive/layout failures.
   $sourceStaticDirectory = Join-Path $ApplicationDirectory '.next\static'
   $standaloneDirectory = Join-Path $ApplicationDirectory '.next\standalone'
@@ -237,6 +238,8 @@ $env:API_BASE_URL = 'http://localhost:4000'
 $env:NEXT_PUBLIC_API_BASE_URL = 'http://localhost:4000'
 $env:ADMIN_BASE_URL = 'http://localhost:3001'
 $env:FRONTEND_BASE_URL = 'http://localhost:3000'
+$env:NEXT_PUBLIC_ADMIN_SITE_URL = $env:ADMIN_BASE_URL
+$env:NEXT_PUBLIC_PUBLIC_SITE_URL = $env:FRONTEND_BASE_URL
 $env:ADMIN_QA_EMAIL = $env:SUPER_ADMIN_EMAIL
 $env:ADMIN_QA_PASSWORD = $env:SUPER_ADMIN_PASSWORD
 $env:QA_RUNTIME_DIR = $runtimeDirectory
@@ -266,7 +269,7 @@ if ($ProductionRuntime) {
   Remove-Item Env:\NEXT_DIST_DIR -ErrorAction SilentlyContinue
 
   # Rebuild from the checked source before starting the production runtime.
-  # Browser-facing admin calls use the same-origin `/api` path as Docker, while
+  # Browser-facing admin calls use the same-origin `/api` path, while
   # the Next rewrite is compiled with the local QA API target. Reusing a locally
   # built bundle can otherwise bake `http://localhost:4000` into the browser and
   # falsely fail production CSP, or leave source changes out of the QA runtime.
@@ -297,7 +300,7 @@ if ($ProductionRuntime) {
     -Required
 
   # Test scripts talk to the API directly; the browser bundle above remains
-  # same-origin `/api`, just like the Docker deployment.
+  # same-origin `/api`, matching the production reverse-proxy boundary.
   $env:NEXT_PUBLIC_API_BASE_URL = 'http://localhost:4000'
   foreach ($requiredBuildPath in @(
     (Join-Path $apiDirectory 'dist\main.js'),
@@ -315,23 +318,24 @@ if ($ProductionRuntime) {
   $env:LOAD_RUNTIME_MODE = 'development-watch'
   $env:NEXT_DIST_DIR = '.next-qa'
 
-  # Next dev's incremental cache can retain a pre-migration middleware build
-  # after the project moves to Next 16's proxy.ts convention. That stale
-  # router manifest may route static paths through app/[slug], producing false
-  # 404s only in QA. Clear exactly the dedicated QA directory before booting.
-  $frontendRootPath = [System.IO.Path]::GetFullPath($frontendDirectory).TrimEnd([char[]]@('\', '/'))
-  $frontendQaDistPath = [System.IO.Path]::GetFullPath(
-    (Join-Path $frontendDirectory $env:NEXT_DIST_DIR)
-  )
-  $frontendQaParentPath = [System.IO.Path]::GetDirectoryName($frontendQaDistPath).TrimEnd([char[]]@('\', '/'))
-  if (
-    $frontendQaParentPath -ne $frontendRootPath -or
-    [System.IO.Path]::GetFileName($frontendQaDistPath) -ne '.next-qa'
-  ) {
-    throw "Refusing to clear an unsafe frontend QA build path: $frontendQaDistPath"
-  }
-  if (Test-Path -LiteralPath $frontendQaDistPath) {
-    Remove-Item -LiteralPath $frontendQaDistPath -Recurse -Force
+  # Next dev's incremental cache can retain stale router and HMR manifests.
+  # Both Next applications inherit NEXT_DIST_DIR, so validate and clear both
+  # dedicated QA directories before either runtime starts.
+  foreach ($applicationDirectory in @($adminDirectory, $frontendDirectory)) {
+    $applicationRootPath = [System.IO.Path]::GetFullPath($applicationDirectory).TrimEnd([char[]]@('\', '/'))
+    $applicationQaDistPath = [System.IO.Path]::GetFullPath(
+      (Join-Path $applicationDirectory $env:NEXT_DIST_DIR)
+    )
+    $applicationQaParentPath = [System.IO.Path]::GetDirectoryName($applicationQaDistPath).TrimEnd([char[]]@('\', '/'))
+    if (
+      $applicationQaParentPath -ne $applicationRootPath -or
+      [System.IO.Path]::GetFileName($applicationQaDistPath) -ne '.next-qa'
+    ) {
+      throw "Refusing to clear an unsafe QA build path: $applicationQaDistPath"
+    }
+    if (Test-Path -LiteralPath $applicationQaDistPath) {
+      Remove-Item -LiteralPath $applicationQaDistPath -Recurse -Force
+    }
   }
 }
 
@@ -431,7 +435,7 @@ try {
   } else {
     $adminProcess = Start-Process `
       -FilePath 'npm.cmd' `
-      -ArgumentList @('run', 'dev') `
+      -ArgumentList @('run', 'dev:qa') `
       -WorkingDirectory $adminDirectory `
       -WindowStyle Hidden `
       -RedirectStandardOutput (Join-Path $runtimeDirectory 'admin.out.log') `
@@ -440,7 +444,7 @@ try {
 
     $frontendProcess = Start-Process `
       -FilePath 'npm.cmd' `
-      -ArgumentList @('run', 'dev') `
+      -ArgumentList @('run', 'dev:qa') `
       -WorkingDirectory $frontendDirectory `
       -WindowStyle Hidden `
       -RedirectStandardOutput (Join-Path $runtimeDirectory 'frontend.out.log') `
@@ -470,6 +474,12 @@ try {
     -Label 'Generate system inventory' `
     -FilePath 'node.exe' `
     -ArgumentList @('scripts/qa/generate-system-inventory.mjs') `
+    -WorkingDirectory $workspaceRoot
+
+  Invoke-CheckedCommand `
+    -Label 'Import cycle audit' `
+    -FilePath 'node.exe' `
+    -ArgumentList @('scripts/qa/importcycleaudit.mjs') `
     -WorkingDirectory $workspaceRoot
 
   Invoke-CheckedCommand `
@@ -574,9 +584,13 @@ try {
     -WorkingDirectory $workspaceRoot `
     -TimeoutSeconds 240
 
-  $playwrightArguments = @('exec', 'playwright', 'test')
+  $playwrightArguments = @('exec', '--', 'playwright', 'test')
   if ($PlaywrightSpec) {
     $playwrightArguments += $PlaywrightSpec
+  }
+  if ($PlaywrightGrep) {
+    $escapedPlaywrightGrep = $PlaywrightGrep.Replace('"', '\"')
+    $playwrightArguments += @('--grep', "`"$escapedPlaywrightGrep`"")
   }
 
   Invoke-CheckedCommand `

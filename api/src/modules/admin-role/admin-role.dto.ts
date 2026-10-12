@@ -4,7 +4,8 @@ import {
   IsOptional,
   IsString,
   MaxLength,
-  MinLength
+  MinLength,
+  ValidateIf
 } from 'class-validator';
 
 import { ADMIN_ROLE_ALLOWED_STATUSES } from './admin-role.types';
@@ -36,7 +37,7 @@ export class CreateAdminRoleDto {
 }
 
 export class UpdateAdminRoleDto {
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @MinLength(1)
   @MaxLength(120)
@@ -47,7 +48,7 @@ export class UpdateAdminRoleDto {
   @MaxLength(500)
   description?: string | null;
 
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsIn(ADMIN_ROLE_ALLOWED_STATUSES)
   status?: 'active' | 'inactive';
 }

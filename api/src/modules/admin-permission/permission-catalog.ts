@@ -1,4 +1,6 @@
-export interface PermissionModuleDefinition {
+import { getRequiredReadPermissionCodes } from './permissionDependencies';
+
+interface PermissionModuleDefinition {
   key: string;
   label: string;
   prefixes: readonly string[];
@@ -9,12 +11,13 @@ export interface PermissionCatalogEntry {
   description: string | null;
 }
 
-export interface PermissionGroupItem {
+interface PermissionGroupItem {
   code: string;
   action_key: string;
   action_label: string;
   description: string | null;
   assigned: boolean;
+  required_permission_codes: string[];
 }
 
 export interface PermissionGroup {
@@ -62,7 +65,39 @@ const ACTION_LABELS: Record<string, string> = {
   intake: 'Nạp dữ liệu'
 };
 
-export const PERMISSION_MODULES: readonly PermissionModuleDefinition[] = [
+const RESOURCE_LABELS: Record<string, string> = {
+  admin_user: 'người dùng',
+  admin_role: 'vai trò',
+  website_settings: 'cấu hình website',
+  website_settings_social_link: 'liên kết mạng xã hội',
+  home_page: 'trang chủ',
+  menu: 'menu',
+  menu_item: 'mục menu',
+  page_content: 'trang nội dung',
+  news_category: 'chuyên mục tin tức',
+  banner: 'banner',
+  product_category: 'danh mục sản phẩm',
+  brand: 'thương hiệu',
+  product_group: 'sản phẩm',
+  product_variant: 'biến thể sản phẩm',
+  technical_document: 'tài liệu kỹ thuật',
+  service: 'dịch vụ',
+  service_product_group: 'sản phẩm trong dịch vụ',
+  project: 'dự án',
+  project_gallery: 'ảnh dự án',
+  project_product_group: 'sản phẩm trong dự án',
+  file: 'tệp',
+  contact: 'liên hệ',
+  contact_note: 'ghi chú liên hệ',
+  customer: 'khách hàng',
+  quote: 'yêu cầu báo giá',
+  quote_note: 'ghi chú báo giá',
+  redirect: 'chuyển hướng',
+  audit_log: 'nhật ký hệ thống',
+  import: 'dữ liệu nhập'
+};
+
+const PERMISSION_MODULES: readonly PermissionModuleDefinition[] = [
   { key: 'dashboard', label: 'Tổng quan', prefixes: ['dashboard'] },
   {
     key: 'website_settings',
@@ -146,6 +181,7 @@ export function buildPermissionGroups(
   assignedCodes: readonly string[]
 ): PermissionGroup[] {
   const assignedSet = new Set(assignedCodes);
+  const availablePermissionCodes = permissions.map((permission) => permission.code);
   const grouped = new Map<string, PermissionGroup>();
 
   for (const permission of permissions) {
@@ -163,10 +199,16 @@ export function buildPermissionGroups(
     existing.permissions.push({
       code: permission.code,
       action_key: resolveActionKey(permission.code),
-      action_label:
-        ACTION_LABELS[resolveActionKey(permission.code)] ?? permission.code,
+      action_label: [
+        ACTION_LABELS[resolveActionKey(permission.code)] ?? resolveActionKey(permission.code),
+        RESOURCE_LABELS[permission.code.slice(0, permission.code.lastIndexOf('.'))] ?? ''
+      ].filter(Boolean).join(' '),
       description: permission.description,
-      assigned: assignedSet.has(permission.code)
+      assigned: assignedSet.has(permission.code),
+      required_permission_codes: getRequiredReadPermissionCodes(
+        permission.code,
+        availablePermissionCodes
+      )
     });
 
     grouped.set(module.key, existing);

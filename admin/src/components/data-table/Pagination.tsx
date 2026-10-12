@@ -54,7 +54,33 @@ export function Pagination({
           </label>
         ) : null}
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <div
+        data-pagination-compact="true"
+        className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:hidden"
+      >
+        <Button
+          size="sm"
+          variant="secondary"
+          className="w-full"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Trước
+        </Button>
+        <span className="px-1 text-center text-xs font-semibold text-text" aria-live="polite">
+          Trang {page}/{pageCount}
+        </span>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="w-full"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Sau
+        </Button>
+      </div>
+      <div data-pagination-pages="true" className="hidden flex-wrap items-center justify-end gap-2 sm:flex">
         <Button
           size="sm"
           variant="secondary"

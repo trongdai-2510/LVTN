@@ -4,6 +4,7 @@ import {
   createPaginationMeta,
   type PaginationMeta,
 } from "../../common/pagination/pagination";
+import { publicSearchPatterns } from "../../common/text/searchnormalization";
 import { KnexService } from "../../db/knex.service";
 import { BRAND_TABLE } from "../brand/brand.types";
 import {
@@ -17,12 +18,16 @@ import { CONTACT_REQUEST_TABLE } from "../contact/contact.types";
 import { CUSTOMER_PROFILE_TABLE } from "../customer/customer.types";
 import { FILE_METADATA_TABLE } from "../website-settings/website-settings.types";
 import { MENU_ITEM_TABLE, MENU_TABLE } from "../menu/menu.types";
-import { PAGE_CONTENT_TABLE } from "../page-content/page-content.types";
+import {
+  PAGE_CONTENT_EXTRA_BLOCK_FIELD_PREFIX,
+  PAGE_CONTENT_TABLE,
+} from "../page-content/page-content.types";
 import { PRODUCT_CATEGORY_TABLE } from "../product-category/product-category.types";
 import {
   PRODUCT_GROUP_TABLE,
   PRODUCT_IMAGE_TABLE,
 } from "../product-group/product-group.types";
+import { lockProductGroupReferenceRows } from "../product-group/productGroupTransactionGuard";
 import {
   PRODUCT_VARIANT_TABLE,
   VARIANT_ATTRIBUTE_TABLE,
@@ -42,7 +47,9 @@ import {
   COMPANY_SOCIAL_LINK_TABLE,
 } from "../website-settings/website-settings.types";
 import { toPublicFileSummary, type PublicFileRecord } from "./public-file";
-import type { PublicFileSummary, PublicHighlightSpec } from "./public.types";
+import { buildPublicPriceSummaryMap, type PublicPriceRow } from './publicPrice';
+import { publicPriceAmountAtRequest } from './publicQuotePrice';
+import type { PublicFileSummary, PublicHighlightSpec, PublicProductPriceSummary } from "./public.types";
 const PROJECT_GALLERY_TABLE = "project_gallery";
 const FILE_USAGE_TABLE = "file_usage";
 const PRODUCT_SPEC_TABLE = "product_spec";
@@ -481,6 +488,9 @@ interface CreatedQuoteRow {
   email: string | null;
   address: string | null;
   message: string | null;
+  project_name: string | null;
+  project_context: string | null;
+  project_requirements: Array<{ label: string; value: string }>;
   status: string;
   created_at: Date | string;
 }
@@ -490,6 +500,10 @@ interface CreatedQuoteItemRow {
   product_group_id: string;
   product_variant_id: string | null;
   quantity: number | null;
+  quantity_raw: string | null;
+  quantity_unit: string | null;
+  quantity_state: 'confirmed' | 'unspecified';
+  public_price_amount_at_request: number | null;
   notes: string | null;
 }
 interface CustomerProfileMatchRow {
@@ -566,6 +580,16 @@ export class PublicRepository {
       .orderBy("sort_order", "asc")
       .orderBy("created_at", "asc");
   }
+  async publishedSystemPageSlugs(slugs: readonly string[]): Promise<string[]> {
+    if (slugs.length === 0) return [];
+    const rows = await this.knexService
+      .db<{ slug: string }>(PAGE_CONTENT_TABLE)
+      .whereIn('slug', [...slugs])
+      .where({ review_status: 'approved', publish_status: 'published' })
+      .whereNull('deleted_at')
+      .select('slug');
+    return rows.map((row) => row.slug);
+  }
   async activeFileMap(
     fileIds: Array<string | null | undefined>,
   ): Promise<Map<string, PublicFileSummary>> {
@@ -621,11 +645,11 @@ export class PublicRepository {
       query.where(`${categoryAlias}.parent_id`, filters.parent_id);
     }
     if (filters.q) {
-      const searchPattern = `%${filters.q}%`;
+      const { textPattern, slugPattern } = publicSearchPatterns(filters.q);
       query.andWhere((builder) => {
         builder
-          .whereRaw("?? ILIKE ?", [`${categoryAlias}.name`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${categoryAlias}.slug`, searchPattern]);
+          .whereRaw("?? ILIKE ?", [`${categoryAlias}.name`, textPattern])
+          .orWhereRaw("?? ILIKE ?", [`${categoryAlias}.slug`, slugPattern]);
       });
     }
     const rows = await query
@@ -767,11 +791,11 @@ export class PublicRepository {
       });
     }
     if (params.q) {
-      const searchPattern = `%${params.q}%`;
+      const { textPattern, slugPattern } = publicSearchPatterns(params.q);
       query.andWhere((builder) => {
         builder
-          .whereRaw("?? ILIKE ?", [`${groupAlias}.name`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${groupAlias}.slug`, searchPattern]);
+          .whereRaw("?? ILIKE ?", [`${groupAlias}.name`, textPattern])
+          .orWhereRaw("?? ILIKE ?", [`${groupAlias}.slug`, slugPattern]);
       });
     }
     return query;
@@ -788,11 +812,11 @@ export class PublicRepository {
       .where(`${alias}.review_status`, "approved")
       .where(`${alias}.publish_status`, "published");
     if (params.q) {
-      const searchPattern = `%${params.q}%`;
+      const { textPattern, slugPattern } = publicSearchPatterns(params.q);
       baseQuery.andWhere((builder) => {
         builder
-          .whereRaw("?? ILIKE ?", [`${alias}.title`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${alias}.slug`, searchPattern]);
+          .whereRaw("?? ILIKE ?", [`${alias}.title`, textPattern])
+          .orWhereRaw("?? ILIKE ?", [`${alias}.slug`, slugPattern]);
       });
     }
     const total = await this.countDistinct(baseQuery, `${alias}.id`);
@@ -863,13 +887,13 @@ export class PublicRepository {
       .where(`${alias}.review_status`, "approved")
       .where(`${alias}.publish_status`, "published");
     if (params.q) {
-      const searchPattern = `%${params.q}%`;
+      const { textPattern, slugPattern } = publicSearchPatterns(params.q);
       baseQuery.andWhere((builder) => {
         builder
-          .whereRaw("?? ILIKE ?", [`${alias}.title`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${alias}.slug`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${alias}.location`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${alias}.client_name`, searchPattern]);
+          .whereRaw("?? ILIKE ?", [`${alias}.title`, textPattern])
+          .orWhereRaw("?? ILIKE ?", [`${alias}.slug`, slugPattern])
+          .orWhereRaw("?? ILIKE ?", [`${alias}.location`, textPattern])
+          .orWhereRaw("?? ILIKE ?", [`${alias}.client_name`, textPattern]);
       });
     }
     const total = await this.countDistinct(baseQuery, `${alias}.id`);
@@ -933,11 +957,11 @@ export class PublicRepository {
       .whereNull(`${alias}.deleted_at`)
       .where(`${alias}.status`, "active");
     if (params.q) {
-      const searchPattern = `%${params.q}%`;
+      const { textPattern, slugPattern } = publicSearchPatterns(params.q);
       baseQuery.andWhere((builder) => {
         builder
-          .whereRaw("?? ILIKE ?", [`${alias}.name`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${alias}.slug`, searchPattern]);
+          .whereRaw("?? ILIKE ?", [`${alias}.name`, textPattern])
+          .orWhereRaw("?? ILIKE ?", [`${alias}.slug`, slugPattern]);
       });
     }
     const total = await this.countDistinct(baseQuery, `${alias}.id`);
@@ -1261,11 +1285,12 @@ export class PublicRepository {
       baseQuery.where(`${catAlias}.slug`, params.category_slug);
     }
     if (params.q) {
-      const searchPattern = `%${params.q}%`;
+      const { textPattern, slugPattern } = publicSearchPatterns(params.q);
       baseQuery.andWhere((builder) => {
         builder
-          .whereRaw(`${alias}.title ILIKE ?`, [searchPattern])
-          .orWhereRaw(`${alias}.excerpt ILIKE ?`, [searchPattern]);
+          .whereRaw(`${alias}.title ILIKE ?`, [textPattern])
+          .orWhereRaw(`${alias}.excerpt ILIKE ?`, [textPattern])
+          .orWhereRaw(`${alias}.slug ILIKE ?`, [slugPattern]);
       });
     }
     const total = await this.countDistinct(baseQuery, `${alias}.id`);
@@ -1458,31 +1483,36 @@ export class PublicRepository {
             .orderByRaw(`coalesce(${groupAlias}.view_count, 0) desc`)
             .orderBy(`${groupAlias}.created_at`, "desc")
             .orderBy(`${groupAlias}.updated_at`, "desc")
-            .orderBy(`${groupAlias}.sort_order`, "asc");
+            .orderBy(`${groupAlias}.sort_order`, "asc")
+            .orderBy(`${groupAlias}.id`, "asc");
           return;
         }
         if (params.sort === "newest") {
           queryBuilder
             .orderBy(`${groupAlias}.created_at`, "desc")
             .orderBy(`${groupAlias}.updated_at`, "desc")
-            .orderBy(`${groupAlias}.sort_order`, "asc");
+            .orderBy(`${groupAlias}.sort_order`, "asc")
+            .orderBy(`${groupAlias}.id`, "asc");
           return;
         }
         if (params.sort === "name_asc") {
           queryBuilder
             .orderByRaw(`${groupAlias}.name COLLATE "C" asc`)
-            .orderBy(`${groupAlias}.sort_order`, "asc");
+            .orderBy(`${groupAlias}.sort_order`, "asc")
+            .orderBy(`${groupAlias}.id`, "asc");
           return;
         }
         if (params.sort === "name_desc") {
           queryBuilder
             .orderByRaw(`${groupAlias}.name COLLATE "C" desc`)
-            .orderBy(`${groupAlias}.sort_order`, "asc");
+            .orderBy(`${groupAlias}.sort_order`, "asc")
+            .orderBy(`${groupAlias}.id`, "asc");
           return;
         }
         queryBuilder
           .orderBy(`${groupAlias}.sort_order`, "asc")
-          .orderBy(`${groupAlias}.updated_at`, "desc");
+          .orderBy(`${groupAlias}.updated_at`, "desc")
+          .orderBy(`${groupAlias}.id`, "asc");
       })
       .offset((params.page - 1) * params.page_size)
       .limit(params.page_size);
@@ -1872,8 +1902,13 @@ export class PublicRepository {
     const parentAlias = "parent_record";
     const brandAlias = "brand_record";
     const variantAlias = "variant_record";
-    const searchPattern = `%${params.q}%`;
-    const prefixPattern = `${params.q}%`;
+    const {
+      textPattern: searchPattern,
+      textPrefixPattern: prefixPattern,
+      slugQuery,
+      slugPattern: slugSearchPattern,
+      slugPrefixPattern,
+    } = publicSearchPatterns(params.q);
     const groups = (await this.knexService
       .db({ [groupAlias]: PRODUCT_GROUP_TABLE })
       .leftJoin(
@@ -1919,7 +1954,7 @@ export class PublicRepository {
       .andWhere((builder) => {
         builder
           .whereRaw("?? ILIKE ?", [`${groupAlias}.name`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${groupAlias}.slug`, searchPattern]);
+          .orWhereRaw("?? ILIKE ?", [`${groupAlias}.slug`, slugSearchPattern]);
       })
       .select(
         `${groupAlias}.id`,
@@ -1935,7 +1970,7 @@ export class PublicRepository {
           when lower(${groupAlias}.slug) like lower(?) then 3
           else 4
         end`,
-        [params.q, params.q, prefixPattern, prefixPattern],
+        [params.q, slugQuery, prefixPattern, slugPrefixPattern],
       )
       .orderBy(`${groupAlias}.sort_order`, "asc")
       .orderBy(`${groupAlias}.updated_at`, "desc")
@@ -2003,7 +2038,7 @@ export class PublicRepository {
           ])
           .orWhereRaw("?? ILIKE ?", [`${variantAlias}.sku`, searchPattern])
           .orWhereRaw("?? ILIKE ?", [`${groupAlias}.name`, searchPattern])
-          .orWhereRaw("?? ILIKE ?", [`${groupAlias}.slug`, searchPattern]);
+          .orWhereRaw("?? ILIKE ?", [`${groupAlias}.slug`, slugSearchPattern]);
       })
       .select(
         `${variantAlias}.model_code`,
@@ -2052,7 +2087,7 @@ export class PublicRepository {
                 `%${params.q}%`,
               ]).orWhereRaw("LOWER(??) LIKE ?", [
                 `${catAlias}.slug`,
-                `%${params.q}%`,
+                slugSearchPattern,
               ]);
             })
             .select(
@@ -2085,7 +2120,7 @@ export class PublicRepository {
                 `%${params.q}%`,
               ]).orWhereRaw("LOWER(??) LIKE ?", [
                 `${brandSecondaryAlias}.slug`,
-                `%${params.q}%`,
+                slugSearchPattern,
               ]);
             })
             .select(
@@ -2120,7 +2155,7 @@ export class PublicRepository {
                 `%${params.q}%`,
               ]).orWhereRaw("LOWER(??) LIKE ?", [
                 `${serviceAlias}.slug`,
-                `%${params.q}%`,
+                slugSearchPattern,
               ]);
             })
             .select(
@@ -2147,7 +2182,7 @@ export class PublicRepository {
                 `%${params.q}%`,
               ]).orWhereRaw("LOWER(??) LIKE ?", [
                 `${projectAlias}.slug`,
-                `%${params.q}%`,
+                slugSearchPattern,
               ]);
             })
             .select(
@@ -2175,7 +2210,7 @@ export class PublicRepository {
                 `%${params.q}%`,
               ]).orWhereRaw("LOWER(??) LIKE ?", [
                 `${newsAlias}.slug`,
-                `%${params.q}%`,
+                slugSearchPattern,
               ]);
             })
             .select(
@@ -2203,7 +2238,7 @@ export class PublicRepository {
                 `%${params.q}%`,
               ]).orWhereRaw("LOWER(??) LIKE ?", [
                 `${pageAlias}.slug`,
-                `%${params.q}%`,
+                slugSearchPattern,
               ]);
             })
             .select(
@@ -2242,6 +2277,61 @@ export class PublicRepository {
         });
       },
     );
+  }
+  async publicModelCodeSummaryMap(
+    productGroupIds: string[],
+  ): Promise<Map<string, { count: number; codes: Array<{ id: string; code: string }> }>> {
+    if (productGroupIds.length === 0) return new Map();
+
+    const db = this.knexService.db;
+    const rankedCodes = db(PRODUCT_VARIANT_TABLE)
+      .whereIn("product_group_id", productGroupIds)
+      .whereNull("deleted_at")
+      .where({
+        status: "active",
+        review_status: "approved",
+        publish_status: "published",
+      })
+      .whereNotNull("model_code")
+      .whereRaw("btrim(model_code) <> ''")
+      .select("id", "product_group_id", "model_code")
+      .select(db.raw("row_number() over (partition by product_group_id order by sort_order asc, created_at asc, id asc) as code_rank"))
+      .select(db.raw("count(*) over (partition by product_group_id) as code_count"))
+      .as("ranked_codes");
+    const rows = await db(rankedCodes)
+      .where("code_rank", "<=", 1)
+      .select<
+        Array<{
+          id: string;
+          product_group_id: string;
+          model_code: string;
+          code_count: string | number;
+        }>
+      >("id", "product_group_id", "model_code", "code_count");
+
+    return new Map(
+      rows.map((row) => [
+        row.product_group_id,
+        {
+          count: Number(row.code_count),
+          codes: [{ id: row.id, code: row.model_code.trim() }],
+        },
+      ]),
+    );
+  }
+  async publicPriceSummaryMap(
+    productGroupIds: string[],
+  ): Promise<Map<string, PublicProductPriceSummary>> {
+    if (productGroupIds.length === 0) return new Map();
+
+    const rows = await this.knexService.db(PRODUCT_VARIANT_TABLE)
+      .whereIn('product_group_id', productGroupIds)
+      .whereNull('deleted_at')
+      .where({ status: 'active', review_status: 'approved', publish_status: 'published' })
+      .select<PublicPriceRow[]>(
+        'product_group_id', 'public_price_mode', 'public_price_amount'
+      );
+    return buildPublicPriceSummaryMap(productGroupIds, rows);
   }
   async publicDocumentCountMap(
     productGroupIds: string[],
@@ -2759,13 +2849,19 @@ export class PublicRepository {
       }),
     }));
   }
-  async publicProductGroupExists(productGroupId: string): Promise<boolean> {
+  async publicProductGroupIds(
+    productGroupIds: string[],
+    db: Knex | Knex.Transaction = this.knexService.db
+  ): Promise<Set<string>> {
+    if (productGroupIds.length === 0) {
+      return new Set();
+    }
+
     const groupAlias = "group_record";
     const categoryAlias = "category_record";
     const parentAlias = "parent_record";
     const brandAlias = "brand_record";
-    const row = await this.knexService
-      .db({ [groupAlias]: PRODUCT_GROUP_TABLE })
+    const rows = (await db({ [groupAlias]: PRODUCT_GROUP_TABLE })
       .leftJoin(
         { [categoryAlias]: PRODUCT_CATEGORY_TABLE },
         `${categoryAlias}.id`,
@@ -2781,7 +2877,7 @@ export class PublicRepository {
         `${brandAlias}.id`,
         `${groupAlias}.brand_id`,
       )
-      .where(`${groupAlias}.id`, productGroupId)
+      .whereIn(`${groupAlias}.id`, productGroupIds)
       .whereNull(`${groupAlias}.deleted_at`)
       .where(`${groupAlias}.status`, "active")
       .where(`${groupAlias}.review_status`, "approved")
@@ -2807,25 +2903,35 @@ export class PublicRepository {
             .where(`${brandAlias}.status`, "active");
         });
       })
-      .first(`${groupAlias}.id`);
-    return Boolean(row);
+      .select(`${groupAlias}.id as id`)) as Array<{ id: string }>;
+    return new Set(rows.map((row) => row.id));
   }
-  async publicVariantExistsForGroup(
-    productGroupId: string,
-    productVariantId: string,
-  ): Promise<boolean> {
-    const row = await this.knexService
-      .db(PRODUCT_VARIANT_TABLE)
+  async publicVariantKeys(
+    references: Array<{ product_group_id: string; product_variant_id: string }>,
+    db: Knex | Knex.Transaction = this.knexService.db
+  ): Promise<Set<string>> {
+    if (references.length === 0) {
+      return new Set();
+    }
+
+    const rows = (await db(PRODUCT_VARIANT_TABLE)
+      .whereIn(
+        "id",
+        Array.from(new Set(references.map((item) => item.product_variant_id))),
+      )
       .where({
-        id: productVariantId,
-        product_group_id: productGroupId,
         status: "active",
         review_status: "approved",
         publish_status: "published",
       })
       .whereNull("deleted_at")
-      .first("id");
-    return Boolean(row);
+      .select("id", "product_group_id")) as Array<{
+      id: string;
+      product_group_id: string;
+    }>;
+    return new Set(
+      rows.map((row) => `${row.product_group_id}:${row.id}`),
+    );
   }
   async findPublicFileById(
     fileId: string,
@@ -2900,19 +3006,106 @@ export class PublicRepository {
     email: string | null;
     address: string | null;
     message: string | null;
+    project_name: string | null;
+    project_context: string | null;
+    project_requirements: Array<{ label: string; value: string }>;
     ip_address: string | null;
     user_agent: string | null;
     items: Array<{
       product_group_id: string;
       product_variant_id: string | null;
       quantity: number | null;
+      quantity_raw: string | null;
+      quantity_unit: string | null;
+      quantity_state: 'confirmed' | 'unspecified';
       notes: string | null;
     }>;
   }): Promise<{
+    status: "created";
     quote_request: CreatedQuoteRow;
     items: CreatedQuoteItemRow[];
+  } | {
+    status: "invalid_product_group";
+    product_group_id: string;
+  } | {
+    status: "invalid_product_variant";
+    product_group_id: string;
+    product_variant_id: string;
   }> {
     return this.knexService.db.transaction(async (trx) => {
+      const productGroupIds = Array.from(
+        new Set(input.items.map((item) => item.product_group_id))
+      ).sort();
+      const productVariantIds = Array.from(
+        new Set(
+          input.items
+            .map((item) => item.product_variant_id)
+            .filter((id): id is string => Boolean(id))
+        )
+      ).sort();
+
+      // Keep lock order aligned with variant writes (variant -> group) to
+      // prevent deadlocks while making the final visibility check atomic.
+      const lockedVariants = productVariantIds.length > 0
+        ? (await trx(PRODUCT_VARIANT_TABLE)
+          .whereIn("id", productVariantIds)
+          .orderBy("id", "asc")
+          .forUpdate()
+          .select("id", "public_price_mode", "public_price_amount")) as Array<{
+            id: string;
+            public_price_mode: string;
+            public_price_amount: number | null;
+          }>
+        : [];
+      const lockedVariantMap = new Map(lockedVariants.map((variant) => [variant.id, variant]));
+      const lockedProductGroups = productGroupIds.length > 0
+        ? await trx(PRODUCT_GROUP_TABLE)
+          .whereIn("id", productGroupIds)
+          .orderBy("id", "asc")
+          .forUpdate()
+          .select<Array<{ id: string; category_id: string; brand_id: string | null }>>(
+            "id",
+            "category_id",
+            "brand_id"
+          )
+        : [];
+      if (lockedProductGroups.length > 0) {
+        await lockProductGroupReferenceRows(trx, lockedProductGroups);
+      }
+
+      const variantReferences = input.items.flatMap((item) =>
+        item.product_variant_id
+          ? [{
+              product_group_id: item.product_group_id,
+              product_variant_id: item.product_variant_id
+            }]
+          : []
+      );
+      const [publicProductGroupIds, publicVariantKeys] = await Promise.all([
+        this.publicProductGroupIds(productGroupIds, trx),
+        this.publicVariantKeys(variantReferences, trx)
+      ]);
+      for (const item of input.items) {
+        if (!publicProductGroupIds.has(item.product_group_id)) {
+          return {
+            status: "invalid_product_group" as const,
+            product_group_id: item.product_group_id
+          };
+        }
+        if (
+          item.product_variant_id &&
+          !publicVariantKeys.has(
+            `${item.product_group_id}:${item.product_variant_id}`
+          )
+        ) {
+          return {
+            status: "invalid_product_variant" as const,
+            product_group_id: item.product_group_id,
+            product_variant_id: item.product_variant_id
+          };
+        }
+      }
+
       const customerId = await this.resolveCustomerProfileId(trx, {
         full_name: input.full_name,
         phone: input.phone,
@@ -2928,6 +3121,9 @@ export class PublicRepository {
           email: input.email,
           address: input.address,
           message: input.message,
+          project_name: input.project_name,
+          project_context: input.project_context,
+          project_requirements: JSON.stringify(input.project_requirements),
           status: "new",
           assigned_to: null,
           ip_address: input.ip_address,
@@ -2941,6 +3137,9 @@ export class PublicRepository {
           "email",
           "address",
           "message",
+          "project_name",
+          "project_context",
+          "project_requirements",
           "status",
           "created_at",
         ])) as CreatedQuoteRow[];
@@ -2953,6 +3152,12 @@ export class PublicRepository {
               product_group_id: item.product_group_id,
               product_variant_id: item.product_variant_id,
               quantity: item.quantity,
+              quantity_raw: item.quantity_raw,
+              quantity_unit: item.quantity_unit,
+              quantity_state: item.quantity_state,
+              public_price_amount_at_request: publicPriceAmountAtRequest(
+                item.product_variant_id ? lockedVariantMap.get(item.product_variant_id) : null
+              ),
               notes: item.notes,
             })),
           )
@@ -2962,10 +3167,14 @@ export class PublicRepository {
             "product_group_id",
             "product_variant_id",
             "quantity",
+            "quantity_raw",
+            "quantity_unit",
+            "quantity_state",
+            "public_price_amount_at_request",
             "notes",
           ])) as CreatedQuoteItemRow[];
       }
-      return { quote_request: quoteRequest, items: createdItems };
+      return { status: "created" as const, quote_request: quoteRequest, items: createdItems };
     });
   }
   private buildPublicPricedVariantExistsQuery(
@@ -2979,6 +3188,8 @@ export class PublicRepository {
         `${groupAlias}.id`,
       ])
       .whereNull("variant_record.deleted_at")
+      .whereNotNull('variant_record.public_price_amount')
+      .where('variant_record.public_price_amount', '>', 0)
       .where({
         "variant_record.status": "active",
         "variant_record.review_status": "approved",
@@ -3127,7 +3338,16 @@ export class PublicRepository {
       )
       .where(`${usageAlias}.file_id`, fileId)
       .where(`${usageAlias}.entity_type`, entityType)
-      .where(`${usageAlias}.field_name`, "content_html")
+      .andWhere((builder) => {
+        builder.where(`${usageAlias}.field_name`, "content_html");
+        if (entityType === "page_content") {
+          builder.orWhere(
+            `${usageAlias}.field_name`,
+            "like",
+            `${PAGE_CONTENT_EXTRA_BLOCK_FIELD_PREFIX}%`,
+          );
+        }
+      })
       .whereNull(`${usageAlias}.deleted_at`)
       .whereNull(`${ownerAlias}.deleted_at`)
       .where(`${ownerAlias}.review_status`, "approved")
@@ -3798,6 +4018,14 @@ export class PublicRepository {
     const normalizedName = this.normalizeCustomerName(input.full_name);
     const normalizedPhone = this.normalizePhone(input.phone);
     const normalizedEmail = this.normalizeEmail(input.email);
+    const identityLockKey = [
+      "customer-profile",
+      normalizedName,
+      normalizedPhone ? `phone:${normalizedPhone}` : `email:${normalizedEmail ?? "none"}`,
+    ].join(":");
+    await trx.raw("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", [
+      identityLockKey,
+    ]);
     const existing = await trx<CustomerProfileMatchRow>(CUSTOMER_PROFILE_TABLE)
       .select("id", "full_name", "phone", "email", "company_name", "deleted_at")
       .whereRaw(
@@ -3827,6 +4055,7 @@ export class PublicRepository {
       })
       .orderByRaw("CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END ASC")
       .orderBy("created_at", "asc")
+      .forUpdate()
       .first();
     if (!existing) {
       const [created] = await trx(CUSTOMER_PROFILE_TABLE)

@@ -6,7 +6,7 @@ export const CONTACT_DELETED_SCOPES = ['active', 'deleted', 'all'] as const;
 
 export type ContactStatus = (typeof CONTACT_ALLOWED_STATUSES)[number];
 export type ContactDeletedScope = (typeof CONTACT_DELETED_SCOPES)[number];
-export type ContactStatusFilter = ContactStatus | 'all';
+type ContactStatusFilter = ContactStatus | 'all';
 
 export interface ContactRecord {
   id: string;

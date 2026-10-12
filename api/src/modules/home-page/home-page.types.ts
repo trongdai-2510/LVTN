@@ -15,13 +15,13 @@ export const HOME_SECTION_TYPES = [
 export type HomeSectionType = (typeof HOME_SECTION_TYPES)[number];
 
 export const HOME_SECTION_LIST_MODES = ['auto', 'manual'] as const;
-export type HomeSectionListMode = (typeof HOME_SECTION_LIST_MODES)[number];
+type HomeSectionListMode = (typeof HOME_SECTION_LIST_MODES)[number];
 
 export const FEATURED_PRODUCTS_SORTS = ['popular', 'newest'] as const;
-export type FeaturedProductsSort = (typeof FEATURED_PRODUCTS_SORTS)[number];
+type FeaturedProductsSort = (typeof FEATURED_PRODUCTS_SORTS)[number];
 
 export const TRUST_STRIP_MODES = ['auto', 'manual'] as const;
-export type TrustStripMode = (typeof TRUST_STRIP_MODES)[number];
+type TrustStripMode = (typeof TRUST_STRIP_MODES)[number];
 
 // ---- Config shapes per section_type ----
 

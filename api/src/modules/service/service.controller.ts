@@ -83,14 +83,14 @@ export class ServiceController {
   @Delete(':id/product-groups/:productGroupId')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('service_product_group.update')
-  detachProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string) {
-    return this.serviceService.detachProductGroup(id, productGroupId);
+  detachProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.serviceService.detachProductGroup(id, productGroupId, currentUser);
   }
 
   @Post(':id/product-groups/:productGroupId/restore')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('service_product_group.update')
-  restoreProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string) {
-    return this.serviceService.restoreProductGroup(id, productGroupId);
+  restoreProductGroup(@Param('id') id: string, @Param('productGroupId') productGroupId: string, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.serviceService.restoreProductGroup(id, productGroupId, currentUser);
   }
 }

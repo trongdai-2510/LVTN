@@ -5,6 +5,8 @@ import type { Response } from "express";
 
 import { AppError } from "../../common/errors/app-error";
 import { ErrorCodes } from "../../common/errors/error-codes";
+import { buildContentDisposition } from "../../common/http/contentdisposition";
+import { normalizeSafeNavigationTarget } from "../../common/navigation/safeNavigationTarget";
 import { getPaginationParams } from "../../common/pagination/pagination";
 import {
   sanitizeRichTextHtml,
@@ -43,7 +45,6 @@ import type {
   PublicContactRequestCreateResponse,
   PublicFileSummary,
   PublicMenu,
-  PublicMenuItemNode,
   PublicNewsListResponse,
   PublicPageContentDetailResponse,
   PublicProjectDetailResponse,
@@ -62,7 +63,12 @@ import type {
   PublicServiceListResponse,
   PublicSiteShellResponse,
   PublicSpecGroup,
+  PublicExtraBlocksPayload,
+  PublicExtraBlockItem,
+  PublicPageContentLayout,
 } from "./public.types";
+import { normalizePublicQuoteQuantity } from "./publicQuote";
+import { buildPublicMenuTree, hiddenSystemPageTargets, SYSTEM_PAGE_SLUGS } from "./publicMenuTree";
 import { PublicRepository } from "./public.repository";
 
 type PublicRequestMeta = {
@@ -92,7 +98,7 @@ type PublicSpecFilterMatcher = {
   spec_value: string;
 };
 
-type PublicParsedSpecFilterSelection = {
+export type PublicParsedSpecFilterSelection = {
   group_key: string;
   option_key: string;
   matchers: PublicSpecFilterMatcher[];
@@ -125,6 +131,12 @@ const PUBLIC_POWER_SPEC_LABELS = [
   "power",
   "watt",
   "wattage",
+];
+const PUBLIC_POWER_FACTOR_SPEC_LABELS = [
+  "he so cong suat",
+  "power factor",
+  "cos phi",
+  "cosfi",
 ];
 const PUBLIC_LENGTH_SPEC_LABELS = ["chieu dai", "do dai", "length"];
 const PUBLIC_SIZE_SPEC_LABELS = [
@@ -185,6 +197,7 @@ function collapsePublicSpecWhitespace(value: string): string {
 
 function normalizePublicSpecText(value: string): string {
   return value
+    .replace(/[đĐ]/g, "d")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -386,6 +399,12 @@ function matchesPublicAliases(
     (alias) => normalizedLabel === alias || normalizedLabel.includes(alias),
   );
 }
+function isPublicPowerFactorLabel(normalizedLabel: string): boolean {
+  return (
+    normalizedLabel === "pf" ||
+    matchesPublicAliases(normalizedLabel, PUBLIC_POWER_FACTOR_SPEC_LABELS)
+  );
+}
 
 function derivePublicSpecFacet(
   specName: string,
@@ -395,6 +414,10 @@ function derivePublicSpecFacet(
   const cleanName = collapsePublicSpecWhitespace(specName);
   const cleanValue = collapsePublicSpecWhitespace(specValue);
   const normalizedName = normalizePublicSpecText(cleanName);
+  const isPowerFactor = isPublicPowerFactorLabel(normalizedName);
+  const isPowerSpec =
+    !isPowerFactor &&
+    matchesPublicAliases(normalizedName, PUBLIC_POWER_SPEC_LABELS);
 
   if (
     normalizedName.length === 0 ||
@@ -406,8 +429,7 @@ function derivePublicSpecFacet(
   }
 
   const powerValue =
-    matchesPublicAliases(normalizedName, PUBLIC_POWER_SPEC_LABELS) ||
-    normalizedName === PUBLIC_GENERIC_SPEC_LABEL
+    isPowerSpec || normalizedName === PUBLIC_GENERIC_SPEC_LABEL
       ? normalizePublicPowerDisplay(cleanValue)
       : null;
 
@@ -597,7 +619,8 @@ function derivePublicSpecFacet(
 
   if (
     normalizedName === PUBLIC_GENERIC_SPEC_LABEL ||
-    matchesPublicAliases(normalizedName, PUBLIC_POWER_SPEC_LABELS) ||
+    isPowerSpec ||
+    isPowerFactor ||
     matchesPublicAliases(normalizedName, PUBLIC_LENGTH_SPEC_LABELS) ||
     matchesPublicAliases(normalizedName, PUBLIC_SIZE_SPEC_LABELS) ||
     matchesPublicAliases(normalizedName, PUBLIC_LIGHT_COLOR_SPEC_LABELS) ||
@@ -657,6 +680,9 @@ function parsePublicSpecFilterToken(
   token: string,
 ): PublicParsedSpecFilterSelection | null {
   try {
+    if (token.length === 0 || token.length > 4096) {
+      return null;
+    }
     const decoded = JSON.parse(
       Buffer.from(token, "base64url").toString("utf8"),
     ) as {
@@ -668,7 +694,12 @@ function parsePublicSpecFilterToken(
     if (
       typeof decoded.group_key !== "string" ||
       typeof decoded.option_key !== "string" ||
-      !Array.isArray(decoded.matchers)
+      decoded.group_key.length === 0 ||
+      decoded.group_key.length > 80 ||
+      decoded.option_key.length === 0 ||
+      decoded.option_key.length > 160 ||
+      !Array.isArray(decoded.matchers) ||
+      decoded.matchers.length > 50
     ) {
       return null;
     }
@@ -678,7 +709,11 @@ function parsePublicSpecFilterToken(
         !matcher ||
         typeof matcher !== "object" ||
         typeof (matcher as { spec_name?: unknown }).spec_name !== "string" ||
-        typeof (matcher as { spec_value?: unknown }).spec_value !== "string"
+        typeof (matcher as { spec_value?: unknown }).spec_value !== "string" ||
+        (matcher as { spec_name: string }).spec_name.trim().length === 0 ||
+        (matcher as { spec_name: string }).spec_name.length > 80 ||
+        (matcher as { spec_value: string }).spec_value.trim().length === 0 ||
+        (matcher as { spec_value: string }).spec_value.length > 160
       ) {
         return [];
       }
@@ -746,12 +781,27 @@ function normalizeBannerCtaButtons(
   return buttons.length > 0 ? buttons : null;
 }
 
+const PUBLIC_PRODUCT_FILTER_MAX_TOKENS = 50;
+
+function assertPublicFilterTokenCount(tokens: string[], field: string): void {
+  if (tokens.length <= PUBLIC_PRODUCT_FILTER_MAX_TOKENS) {
+    return;
+  }
+
+  throw new AppError({
+    code: ErrorCodes.VALIDATION_ERROR,
+    message: `${field} may contain at most ${PUBLIC_PRODUCT_FILTER_MAX_TOKENS} values.`,
+    statusCode: HttpStatus.BAD_REQUEST,
+    details: { field, limit: PUBLIC_PRODUCT_FILTER_MAX_TOKENS }
+  });
+}
+
 function normalizePublicSpecFilterTokens(value: string | undefined): string[] {
   if (!value) {
     return [];
   }
 
-  return [
+  const tokens = [
     ...new Set(
       value
         .split(",")
@@ -759,14 +809,19 @@ function normalizePublicSpecFilterTokens(value: string | undefined): string[] {
         .filter(Boolean),
     ),
   ];
+  assertPublicFilterTokenCount(tokens, "spec_filters");
+  return tokens;
 }
 
-function normalizePublicSlugFilterTokens(value: string | undefined): string[] {
+function normalizePublicSlugFilterTokens(
+  value: string | undefined,
+  field = "filter"
+): string[] {
   if (!value) {
     return [];
   }
 
-  return [
+  const tokens = [
     ...new Set(
       value
         .split(",")
@@ -774,6 +829,8 @@ function normalizePublicSlugFilterTokens(value: string | undefined): string[] {
         .filter(Boolean),
     ),
   ];
+  assertPublicFilterTokenCount(tokens, field);
+  return tokens;
 }
 
 function normalizePublicStatusFilterTokens(
@@ -783,7 +840,7 @@ function normalizePublicStatusFilterTokens(
     return [];
   }
 
-  return normalizePublicSlugFilterTokens(value).flatMap((token) => {
+  return normalizePublicSlugFilterTokens(value, "status").flatMap((token) => {
     if (token === "contact" || token === "has_price") {
       return [token];
     }
@@ -1120,13 +1177,15 @@ export class PublicService {
     const socialLinks = companyInfo
       ? await this.publicRepository.activeSocialLinks(companyInfo.id)
       : [];
+    const publishedSystemSlugs = await this.publicRepository.publishedSystemPageSlugs(SYSTEM_PAGE_SLUGS);
+    const hiddenMenuTargets = hiddenSystemPageTargets(publishedSystemSlugs);
 
     const [headerMenu, footerQuickMenu, footerSupportMenu, footerLegalMenu] =
       await Promise.all([
-        this.buildMenuForPosition("header"),
-        this.buildMenuForPosition("footer_quick"),
-        this.buildMenuForPosition("footer_support"),
-        this.buildMenuForPosition("footer_legal"),
+        this.buildMenuForPosition("header", hiddenMenuTargets),
+        this.buildMenuForPosition("footer_quick", hiddenMenuTargets),
+        this.buildMenuForPosition("footer_support", hiddenMenuTargets),
+        this.buildMenuForPosition("footer_legal", hiddenMenuTargets),
       ]);
 
     return {
@@ -1189,7 +1248,10 @@ export class PublicService {
     const normalizedCategoryFilter = this.normalizeCategoryFilter(
       query.category_id,
     );
-    const requestedBrandSlugs = normalizePublicSlugFilterTokens(query.brands);
+    const requestedBrandSlugs = normalizePublicSlugFilterTokens(
+      query.brands,
+      "brands"
+    );
     const normalizedStatusFilters = normalizePublicStatusFilterTokens(
       query.status,
     );
@@ -1300,9 +1362,15 @@ export class PublicService {
       result.items.map((item) => item.thumbnail_file_id),
     );
     this.traceProductListTiming("file-map", traceStartedAt);
-    const [variantCountMap, documentCountMap, highlightSpecMap] =
+    const [variantCountMap, modelCodeSummaryMap, publicPriceSummaryMap, documentCountMap, highlightSpecMap] =
       await Promise.all([
         this.publicRepository.publicVariantCountMap(
+          result.items.map((item) => item.id),
+        ),
+        this.publicRepository.publicModelCodeSummaryMap(
+          result.items.map((item) => item.id),
+        ),
+        this.publicRepository.publicPriceSummaryMap(
           result.items.map((item) => item.id),
         ),
         this.publicRepository.publicDocumentCountMap(
@@ -1348,6 +1416,13 @@ export class PublicService {
             ? (fileMap.get(item.thumbnail_file_id) ?? null)
             : null,
           variant_count: variantCountMap.get(item.id) ?? 0,
+          model_code_summary: modelCodeSummaryMap.get(item.id) ?? null,
+          public_price_summary: publicPriceSummaryMap.get(item.id) ?? {
+            display_mode: 'contact_for_quote' as const,
+            display_amount: null,
+            priced_variant_count: 0,
+            variant_count: 0
+          },
           document_count: documentCountMap.get(item.id) ?? 0,
           highlight_specs:
             curatedHighlightSpecs.length > 0
@@ -1904,9 +1979,15 @@ export class PublicService {
       ...pinnedProducts.map((product) => product.thumbnail_file_id),
     ];
     const fileMap = await this.publicRepository.activeFileMap(fileIds);
-    const [variantCountMap, documentCountMap, highlightSpecMap] =
+    const [variantCountMap, modelCodeSummaryMap, publicPriceSummaryMap, documentCountMap, highlightSpecMap] =
       await Promise.all([
         this.publicRepository.publicVariantCountMap(
+          pinnedProducts.map((item) => item.id),
+        ),
+        this.publicRepository.publicModelCodeSummaryMap(
+          pinnedProducts.map((item) => item.id),
+        ),
+        this.publicRepository.publicPriceSummaryMap(
           pinnedProducts.map((item) => item.id),
         ),
         this.publicRepository.publicDocumentCountMap(
@@ -1990,6 +2071,8 @@ export class PublicService {
         pinnedProducts,
         fileMap,
         variantCountMap,
+        modelCodeSummaryMap,
+        publicPriceSummaryMap,
         documentCountMap,
         highlightSpecMap,
       ),
@@ -2190,29 +2273,24 @@ export class PublicService {
     const id = assertUuid("file_id", fileId);
 
     const productFile = await this.publicProductFileRepository
-      .findPublicProductImageFileById(id)
-      .catch(() => null);
+      .findPublicProductImageFileById(id);
 
     if (productFile && isWatermarkableMimeType(productFile.mime_type)) {
-      try {
-        const imageBuffer = await this.readPublicFileBuffer(productFile);
-        if (!imageBuffer) {
-          throw this.notFound("Public file was not found.");
-        }
-        const watermarked = await applyWatermark(imageBuffer);
-
-        response.setHeader("Content-Type", "image/png");
-        response.setHeader("X-Content-Type-Options", "nosniff");
-        response.setHeader("Cache-Control", "private, no-store");
-        response.setHeader(
-          "Content-Disposition",
-          this.inlineContentDisposition(productFile.original_filename),
-        );
-        response.end(watermarked);
-        return;
-      } catch {
-        // Fallback: serve original file
+      const imageBuffer = await this.readPublicFileBuffer(productFile);
+      if (!imageBuffer) {
+        throw this.notFound("Public file was not found.");
       }
+      const watermarked = await applyWatermark(imageBuffer);
+
+      response.setHeader("Content-Type", "image/png");
+      response.setHeader("X-Content-Type-Options", "nosniff");
+      response.setHeader("Cache-Control", "private, no-store");
+      response.setHeader(
+        "Content-Disposition",
+        this.inlineContentDisposition(productFile.original_filename),
+      );
+      response.end(watermarked);
+      return;
     }
 
     const file = await this.publicRepository.findPublicFileById(id);
@@ -2337,37 +2415,49 @@ export class PublicService {
     body: CreatePublicQuoteRequestDto,
     requestMeta: PublicRequestMeta,
   ): Promise<PublicQuoteRequestCreateResponse> {
-    const normalizedItems = body.items ?? [];
+    const normalizedItems = (body.items ?? []).map((item, index) => {
+      const quantityResult = normalizePublicQuoteQuantity(item);
+      if (!quantityResult.ok) {
+        throw this.validationError(quantityResult.message, {
+          field: `items.${index}.${quantityResult.field}`,
+          item_index: index
+        });
+      }
+      return { ...item, ...quantityResult.value };
+    });
+
+    const productGroupIds = Array.from(
+      new Set(normalizedItems.map((item) => item.product_group_id)),
+    );
+    const variantReferences = normalizedItems.flatMap((item) =>
+      item.product_variant_id
+        ? [
+            {
+              product_group_id: item.product_group_id,
+              product_variant_id: item.product_variant_id,
+            },
+          ]
+        : [],
+    );
+    const [publicProductGroupIds, publicVariantKeys] = await Promise.all([
+      this.publicRepository.publicProductGroupIds(productGroupIds),
+      this.publicRepository.publicVariantKeys(variantReferences),
+    ]);
 
     for (const item of normalizedItems) {
-      const productGroupExists =
-        await this.publicRepository.publicProductGroupExists(
-          item.product_group_id,
-        );
-      if (!productGroupExists) {
+      if (!publicProductGroupIds.has(item.product_group_id)) {
         throw this.notFound("Referenced public product group was not found.");
       }
 
-      if (item.product_variant_id) {
-        const variantExists =
-          await this.publicRepository.publicVariantExistsForGroup(
-            item.product_group_id,
-            item.product_variant_id,
-          );
-        if (!variantExists) {
-          const productGroupStillExists =
-            await this.publicRepository.publicProductGroupExists(
-              item.product_group_id,
-            );
-          if (!productGroupStillExists) {
-            throw this.notFound(
-              "Referenced public product group was not found.",
-            );
-          }
-          throw this.conflict(
-            "Referenced product variant does not belong to the selected public product group or is not publicly visible.",
-          );
-        }
+      if (
+        item.product_variant_id &&
+        !publicVariantKeys.has(
+          `${item.product_group_id}:${item.product_variant_id}`,
+        )
+      ) {
+        throw this.conflict(
+          "Referenced product variant does not belong to the selected public product group or is not publicly visible.",
+        );
       }
     }
 
@@ -2378,22 +2468,41 @@ export class PublicService {
       email: body.email ?? null,
       address: body.address ?? null,
       message: body.message ?? null,
+      project_name: body.project_name ?? null,
+      project_context: body.project_context ?? null,
+      project_requirements: body.project_requirements ?? [],
       ip_address: requestMeta.ip_address,
       user_agent: requestMeta.user_agent,
       items: normalizedItems.map((item) => ({
         product_group_id: item.product_group_id,
         product_variant_id: item.product_variant_id ?? null,
-        quantity: typeof item.quantity === "number" ? item.quantity : null,
+        quantity: item.quantity,
+        quantity_raw: item.quantity_raw,
+        quantity_unit: item.quantity_unit,
+        quantity_state: item.quantity_state,
         notes: item.notes ?? null,
       })),
     });
 
-    return created;
+    if (created.status === "invalid_product_group") {
+      throw this.notFound("Referenced public product group was not found.");
+    }
+    if (created.status === "invalid_product_variant") {
+      throw this.conflict(
+        "Referenced product variant does not belong to the selected public product group or is not publicly visible."
+      );
+    }
+
+    return {
+      quote_request: created.quote_request,
+      items: created.items
+    };
   }
 
   private async buildMenuForPosition(
     position:
       "header" | "footer_quick" | "footer_support" | "footer_legal" | "mobile",
+    hiddenTargets: ReadonlySet<string> = new Set(),
   ): Promise<PublicMenu | null> {
     const menu = await this.publicRepository.activeMenuByPosition(position);
     if (!menu) return null;
@@ -2404,50 +2513,8 @@ export class PublicService {
       id: menu.id,
       name: menu.name,
       position: menu.position,
-      items: this.buildMenuTree(items),
+      items: buildPublicMenuTree(items, hiddenTargets),
     };
-  }
-
-  private buildMenuTree(
-    items: Array<{
-      id: string;
-      menu_id: string;
-      parent_id: string | null;
-      title: string;
-      link_type: "internal" | "external" | "anchor" | "group";
-      link_target: string | null;
-      sort_order: number;
-      open_in_new_tab?: boolean | null;
-      icon_name?: string | null;
-      description?: string | null;
-    }>,
-  ): PublicMenuItemNode[] {
-    const nodes = new Map<string, PublicMenuItemNode>();
-    for (const item of items) {
-      nodes.set(item.id, {
-        id: item.id,
-        parent_id: item.parent_id,
-        title: item.title,
-        link_type: item.link_type,
-        link_target: item.link_target,
-        sort_order: item.sort_order,
-        open_in_new_tab: Boolean(item.open_in_new_tab),
-        icon_name: item.icon_name ?? null,
-        description: item.description ?? null,
-        children: [],
-      });
-    }
-
-    const roots: PublicMenuItemNode[] = [];
-    for (const node of nodes.values()) {
-      if (node.parent_id && nodes.has(node.parent_id)) {
-        nodes.get(node.parent_id)?.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
-
-    return roots;
   }
 
   private async attachRelatedProductGroupFiles(
@@ -2482,12 +2549,16 @@ export class PublicService {
         PublicProductGroupListItem,
         | "thumbnail_file"
         | "variant_count"
+        | "model_code_summary"
+        | "public_price_summary"
         | "document_count"
         | "highlight_specs"
       >
     >,
     fileMap: Map<string, PublicFileSummary>,
     variantCountMap: Map<string, number>,
+    modelCodeSummaryMap: Map<string, { count: number; codes: Array<{ id: string; code: string }> }>,
+    publicPriceSummaryMap: Map<string, PublicProductGroupListItem["public_price_summary"]>,
     documentCountMap: Map<string, number>,
     highlightSpecMap: Map<
       string,
@@ -2500,6 +2571,13 @@ export class PublicService {
         ? (fileMap.get(item.thumbnail_file_id) ?? null)
         : null,
       variant_count: variantCountMap.get(item.id) ?? 0,
+      model_code_summary: modelCodeSummaryMap.get(item.id) ?? null,
+      public_price_summary: publicPriceSummaryMap.get(item.id) ?? {
+        display_mode: 'contact_for_quote',
+        display_amount: null,
+        priced_variant_count: 0,
+        variant_count: 0
+      },
       document_count: documentCountMap.get(item.id) ?? 0,
       highlight_specs: highlightSpecMap.get(item.id) ?? [],
     }));
@@ -2675,6 +2753,15 @@ export class PublicService {
     });
   }
 
+  private validationError(message: string, details: Record<string, unknown>): AppError {
+    return new AppError({
+      code: ErrorCodes.VALIDATION_ERROR,
+      message,
+      statusCode: HttpStatus.BAD_REQUEST,
+      details
+    });
+  }
+
   private normalizeCategoryFilter(value: string | undefined): string | null {
     if (!value) {
       return null;
@@ -2688,6 +2775,8 @@ export class PublicService {
           .filter(Boolean),
       ),
     ];
+
+    assertPublicFilterTokenCount(normalizedIds, "category_id");
 
     for (const categoryId of normalizedIds) {
       if (!PublicService.UUID_PATTERN.test(categoryId)) {
@@ -2714,12 +2803,12 @@ export class PublicService {
  */
 function normalizePublicExtraBlocks(
   raw: unknown,
-  fileMap: Map<string, import("./public.types").PublicFileSummary>,
-): import("./public.types").PublicExtraBlocksPayload {
-  if (!raw || typeof raw !== "object") return { blocks: [] };
-  const payload = raw as { blocks?: unknown };
-  if (!Array.isArray(payload.blocks)) return { blocks: [] };
-  const blocks: import("./public.types").PublicExtraBlockItem[] = [];
+  fileMap: Map<string, PublicFileSummary>,
+): PublicExtraBlocksPayload {
+  if (!raw || typeof raw !== "object") return { blocks: [], layout: null };
+  const payload = raw as { blocks?: unknown; layout?: unknown };
+  if (!Array.isArray(payload.blocks)) return { blocks: [], layout: null };
+  const blocks: PublicExtraBlockItem[] = [];
   for (const entry of payload.blocks) {
     if (!entry || typeof entry !== "object") continue;
     const block = entry as Record<string, unknown>;
@@ -2798,7 +2887,29 @@ function normalizePublicExtraBlocks(
       });
     }
   }
-  return { blocks };
+  return { blocks, layout: normalizePublicPageLayout(payload.layout) };
+}
+
+function normalizePublicPageLayout(
+  raw: unknown,
+): PublicPageContentLayout | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const sections = (raw as { sections?: unknown }).sections;
+  if (!Array.isArray(sections)) return null;
+  const normalized = sections
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+    )
+    .map((entry) => ({
+      id: typeof entry.id === "string" ? entry.id : "",
+      visible: entry.visible === true,
+    }))
+    .filter((entry) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.id));
+  if (normalized.length === 0 || !normalized.some((entry) => entry.visible)) {
+    return null;
+  }
+  return { sections: normalized };
 }
 
 function collectExtraBlockImageIds(raw: unknown): string[] {
@@ -2825,7 +2936,7 @@ function normalizeLink(
 ): { label: string | null; target: string } | null {
   if (!raw || typeof raw !== "object") return null;
   const link = raw as Record<string, unknown>;
-  const target = typeof link.target === "string" ? link.target.trim() : "";
+  const target = normalizeSafeNavigationTarget(link.target);
   if (!target) return null;
   const label =
     typeof link.label === "string" && link.label.trim()
@@ -2838,20 +2949,4 @@ function buildWatermarkedImageFilename(filename: string): string {
   const baseName =
     filename.trim().replace(/\.[^.]+$/, "") || "song-thanh-product-image";
   return `${baseName}-song-thanh.png`;
-}
-
-function buildContentDisposition(
-  disposition: "inline" | "attachment",
-  filename: string,
-): string {
-  const fallbackName = filename.trim() || "song-thanh-file";
-  const quotedFilename = fallbackName.replace(/["\\/\r\n]/g, "_");
-  return `${disposition}; filename="${quotedFilename}"; filename*=UTF-8''${encodeHeaderFilename(fallbackName)}`;
-}
-
-function encodeHeaderFilename(value: string): string {
-  return encodeURIComponent(value).replace(
-    /['()*]/g,
-    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
-  );
 }

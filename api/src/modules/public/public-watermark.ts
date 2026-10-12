@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import sharp from 'sharp';
+// API emits CommonJS without esModuleInterop; sharp's require export is callable.
+const sharp: typeof import('sharp').default = require('sharp');
 
 const WATERMARK_LOGO_PATH = resolve(process.cwd(), 'assets', 'watermark-logo.png');
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -34,7 +35,6 @@ async function applyOpacity(pngBuffer: Buffer, opacity: number): Promise<Buffer>
     .png()
     .toBuffer();
 }
-
 async function getWatermarkLogo(): Promise<CachedLogo> {
   if (watermarkLogoCache) {
     return watermarkLogoCache;
@@ -94,8 +94,4 @@ export async function applyWatermark(imageBuffer: Buffer): Promise<Buffer> {
     .composite([{ input: resizedWatermark, top, left }])
     .png()
     .toBuffer();
-}
-
-export function resetWatermarkCache(): void {
-  watermarkLogoCache = null;
 }

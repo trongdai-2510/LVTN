@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
+import { normalizeSafeNavigationTarget } from '../../common/navigation/safeNavigationTarget';
 import {
   PAGE_CONTENT_DELETED_SCOPES,
   PAGE_CONTENT_PUBLISH_STATUSES,
@@ -10,6 +11,7 @@ import {
   type ExtraBlocksPayload,
   type ExtraBlockItem,
   type ImageCardTone,
+  type PageContentLayout,
   type PageContentDeletedScope,
   type PageContentPublishStatus,
   type PageContentReviewStatus,
@@ -107,7 +109,7 @@ export function normalizeExtraBlocks(value: unknown): ExtraBlocksPayload | undef
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw validationError('extra_blocks must be an object with a "blocks" array.', { field: 'extra_blocks' });
   }
-  const payload = value as { blocks?: unknown };
+  const payload = value as { blocks?: unknown; layout?: unknown };
   const rawBlocks = payload.blocks;
   if (typeof rawBlocks === 'undefined') return { blocks: [] };
   if (!Array.isArray(rawBlocks)) {
@@ -123,7 +125,88 @@ export function normalizeExtraBlocks(value: unknown): ExtraBlocksPayload | undef
       field: 'extra_blocks.blocks'
     });
   }
-  return { blocks };
+  const slotKeys = blocks
+    .filter((block) => block.type === 'image_card' && block.slot_key)
+    .map((block) => (block.type === 'image_card' ? block.slot_key : null));
+  if (new Set(slotKeys).size !== slotKeys.length) {
+    throw validationError('extra_blocks image-card slot_key values must be unique.', {
+      field: 'extra_blocks.blocks'
+    });
+  }
+  const layout = normalizePageContentLayout(payload.layout);
+  return layout ? { blocks, layout } : { blocks };
+}
+
+function normalizePageContentLayout(value: unknown): PageContentLayout | null {
+  if (typeof value === 'undefined' || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw validationError('extra_blocks.layout must be an object.', {
+      field: 'extra_blocks.layout'
+    });
+  }
+  const sections = (value as { sections?: unknown }).sections;
+  if (!Array.isArray(sections) || sections.length === 0 || sections.length > 20) {
+    throw validationError('extra_blocks.layout.sections must contain between 1 and 20 sections.', {
+      field: 'extra_blocks.layout.sections'
+    });
+  }
+
+  const normalized = sections.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw validationError(`extra_blocks.layout.sections[${index}] must be an object.`, {
+        field: `extra_blocks.layout.sections[${index}]`
+      });
+    }
+    const section = entry as Record<string, unknown>;
+    const id = normalizeRequiredText(
+      `extra_blocks.layout.sections[${index}].id`,
+      section.id,
+      64
+    );
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
+      throw validationError(
+        `extra_blocks.layout.sections[${index}].id must be lowercase and hyphen-separated.`,
+        { field: `extra_blocks.layout.sections[${index}].id` }
+      );
+    }
+    if (typeof section.visible !== 'boolean') {
+      throw validationError(`extra_blocks.layout.sections[${index}].visible must be a boolean.`, {
+        field: `extra_blocks.layout.sections[${index}].visible`
+      });
+    }
+    return { id, visible: section.visible };
+  });
+
+  const ids = normalized.map((section) => section.id);
+  if (new Set(ids).size !== ids.length) {
+    throw validationError('extra_blocks.layout section ids must be unique.', {
+      field: 'extra_blocks.layout.sections'
+    });
+  }
+  if (!normalized.some((section) => section.visible)) {
+    throw validationError('extra_blocks.layout must keep at least one section visible.', {
+      field: 'extra_blocks.layout.sections'
+    });
+  }
+  return { sections: normalized };
+}
+
+export function hasRenderableExtraBlockContent(
+  payload: ExtraBlocksPayload | null | undefined
+): boolean {
+  return (payload?.blocks ?? []).some((block) => {
+    if (block.type === 'image_card') return true;
+    return block.items.length > 0;
+  });
+}
+
+export function requiresManagedBodyForPublication(
+  contentType: PageContentType | undefined,
+  slug: string | undefined
+): boolean {
+  // The catalog is a structured public page. Its category and product modules
+  // remain meaningful when the optional editorial introduction is empty.
+  return contentType !== 'page' || slug !== 'san-pham';
 }
 
 function normalizeBlockItem(raw: unknown, index: number): ExtraBlockItem {
@@ -269,6 +352,11 @@ function normalizeBulletItems(value: unknown, blockIndex: number) {
         field: `extra_blocks.blocks[${blockIndex}].items[${i}].text`
       });
     }
+    if (item.text.trim().length > 1000) {
+      throw validationError(`extra_blocks.blocks[${blockIndex}].items[${i}].text is too long (max 1000).`, {
+        field: `extra_blocks.blocks[${blockIndex}].items[${i}].text`
+      });
+    }
     return { text: item.text.trim(), link: normalizeBlockLink(item.link, blockIndex, i) };
   });
 }
@@ -296,9 +384,19 @@ function normalizeCardItems(value: unknown, blockIndex: number) {
         field: `extra_blocks.blocks[${blockIndex}].items[${i}].title`
       });
     }
+    if (item.title.trim().length > 255) {
+      throw validationError(`extra_blocks.blocks[${blockIndex}].items[${i}].title is too long (max 255).`, {
+        field: `extra_blocks.blocks[${blockIndex}].items[${i}].title`
+      });
+    }
     let description: string | null = null;
     if (typeof item.description === 'string') {
       const trimmed = item.description.trim();
+      if (trimmed.length > 1000) {
+        throw validationError(`extra_blocks.blocks[${blockIndex}].items[${i}].description is too long (max 1000).`, {
+          field: `extra_blocks.blocks[${blockIndex}].items[${i}].description`
+        });
+      }
       description = trimmed || null;
     }
     return {
@@ -326,14 +424,27 @@ function normalizeBlockLink(
     // link object hiện diện nhưng không có target → coi như không có link
     return null;
   }
+  const safeTarget = normalizeSafeNavigationTarget(target);
+  if (!safeTarget) {
+    throw validationError(
+      `extra_blocks.blocks[${blockIndex}].items[${itemIndex}].link.target must be a safe site path, page anchor, or HTTP(S) URL.`,
+      { field: `extra_blocks.blocks[${blockIndex}].items[${itemIndex}].link.target` }
+    );
+  }
   let label: string | null = null;
   if (typeof link.label === 'string') {
     const trimmed = link.label.trim();
+    if (trimmed.length > 120) {
+      throw validationError(
+        `extra_blocks.blocks[${blockIndex}].items[${itemIndex}].link.label is too long (max 120).`,
+        { field: `extra_blocks.blocks[${blockIndex}].items[${itemIndex}].link.label` }
+      );
+    }
     label = trimmed || null;
   }
-  return { target, label };
+  return { target: safeTarget, label };
 }
 
-export function validationError(message: string, details?: Record<string, unknown>): AppError {
+function validationError(message: string, details?: Record<string, unknown>): AppError {
   return new AppError({ code: ErrorCodes.VALIDATION_ERROR, message, statusCode: HttpStatus.BAD_REQUEST, details: details ?? null });
 }

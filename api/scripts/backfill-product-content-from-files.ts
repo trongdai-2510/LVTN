@@ -9,7 +9,6 @@ import type { Knex } from 'knex';
 
 import { AppModule } from '../src/app.module';
 import { KnexService } from '../src/db/knex.service';
-import { createDatabaseConfig } from '../src/config/database';
 import { normalizeWorkbookHeader } from '../src/modules/import-workspace/import-column-mapping';
 import { readWorkbookFixture } from '../src/modules/import-workspace/intake/workbook-reader';
 import { ImportWorkspaceRepository } from '../src/modules/import-workspace/import-workspace.repository';
@@ -154,11 +153,6 @@ interface VariantAttributeState {
   deleted_at: Date | string | null;
 }
 
-interface VariantMatch {
-  normalized_code: string;
-  variants: DbVariantRow[];
-}
-
 interface SpecCandidate {
   label: string;
   value: string;
@@ -173,13 +167,6 @@ interface PlannedSpecOperation {
   candidate: SpecCandidate;
   display_order: number;
   row_to_restore: VariantAttributeState | null;
-}
-
-interface DescriptionPlan {
-  product_group_id: string;
-  product_group_name: string;
-  matched_codes: string[];
-  next_detailed_description: string;
 }
 
 interface DescriptionDetail {
@@ -1812,7 +1799,7 @@ function parseJsonSpecField(
   const candidates: SpecCandidate[] = [];
   const seenPairs = new Set<string>();
 
-  parsed.forEach((item, index) => {
+  parsed.forEach((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       return;
     }

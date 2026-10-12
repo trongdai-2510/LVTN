@@ -18,12 +18,12 @@ const ts = requireFromApi('typescript');
 
 const API_ROOT = path.join(ROOT, 'api');
 const API_SOURCE = path.join(API_ROOT, 'src');
-const OUTPUT_DIR = path.join(ROOT, 'docs', 'qa', 'generated');
+const OUTPUT_DIR = path.join(ROOT, 'tmp', 'qa-artifacts', 'generated');
 const DDL_PATH = path.join(
   ROOT,
   'database',
   'ddl',
-  'song_thanh_physical_schema_v2.sql'
+  'song_thanh_deployment_schema_20260730.sql'
 );
 
 function walkFiles(root, predicate) {

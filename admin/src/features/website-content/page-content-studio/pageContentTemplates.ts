@@ -35,10 +35,6 @@ export type PageContentTemplate = {
   defaultContent?: PageContentTemplateDefaults;
 };
 
-export type PageContentWarning = {
-  label: string;
-  tone: 'warning' | 'danger' | 'info';
-};
 
 type PageContentTemplateDefaults = {
   title?: string;
@@ -53,6 +49,7 @@ export type PageTemplateBlock = {
   title: string;
   owner: 'this_page' | 'module' | 'settings' | 'template';
   ownerLabel: string;
+  required?: boolean;
   href?: string;
   description?: string;
   items?: Array<{ title: string; description?: string }>;
@@ -70,8 +67,9 @@ const CORE_CAPABILITY_TEMPLATE_BLOCK: PageTemplateBlock = {
   id: 'about-core-capabilities',
   title: 'Năng lực cốt lõi',
   owner: 'template',
-  ownerLabel: 'Đang dùng mẫu website',
-  description: 'Block này đang hiện ngoài trang Giới thiệu nhưng chưa có nơi lưu riêng trong API.',
+  ownerLabel: 'Nội dung dự phòng của website',
+  description:
+    'Website chỉ dùng block mẫu này khi trang Giới thiệu chưa có khối nội dung phụ. Khi thêm bất kỳ khối phụ nào, toàn bộ vùng mẫu này được thay bằng các khối đã nhập trong trang.',
   items: [
     {
       title: 'Thiết bị điện',
@@ -99,13 +97,15 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Hero giới thiệu',
       owner: 'module',
       ownerLabel: 'Banner',
+      required: true,
       href: '/banners?position=gioi-thieu'
     },
     {
       id: 'about-company-content',
       title: 'Nội dung công ty',
       owner: 'this_page',
-      ownerLabel: 'Sửa tại màn này'
+      ownerLabel: 'Sửa tại màn này',
+      required: true
     },
     CORE_CAPABILITY_TEMPLATE_BLOCK,
     {
@@ -126,34 +126,27 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
   products: [
     {
       id: 'products-hero',
-      title: 'Hero trang sản phẩm',
+      title: 'Banner chiến dịch sản phẩm',
       owner: 'module',
       ownerLabel: 'Banner',
       href: '/banners?position=san-pham',
-      description: 'Ảnh và CTA đầu trang sản phẩm. Quản lý tại Banner để website công khai lấy đúng hero sản phẩm.'
+      description: 'Chiến dịch nằm đầu trang sản phẩm. Quản lý ảnh và CTA tại Banner để website lấy đúng dữ liệu đã công khai.'
     },
     {
-      id: 'products-intro',
-      title: 'Lời mở đầu trang sản phẩm',
+      id: 'products-catalog',
+      title: 'Giới thiệu và tra cứu sản phẩm',
       owner: 'this_page',
-      ownerLabel: 'Sửa tại màn này',
-      description: 'Tiêu đề, mô tả ngắn, nội dung giới thiệu và các khối phụ cho trang /san-pham và danh sách sản phẩm.'
-    },
-    {
-      id: 'products-categories',
-      title: 'Cây danh mục sản phẩm',
-      owner: 'module',
-      ownerLabel: 'Danh mục sản phẩm',
-      href: '/product-categories',
-      description: 'Danh mục cha/con dùng để khách lọc và đi vào danh sách sản phẩm.'
-    },
-    {
-      id: 'products-groups',
-      title: 'Nhóm sản phẩm public',
-      owner: 'module',
-      ownerLabel: 'Sản phẩm',
+      ownerLabel: 'Trang này + Cụm sản phẩm',
+      required: true,
       href: '/product-groups',
-      description: 'Danh sách product_group, ảnh, mô tả, brand, trạng thái duyệt và xuất bản.'
+      description: 'Tiêu đề và mô tả được sửa tại màn này; ô tìm kiếm, danh mục, thương hiệu và sản phẩm lấy từ Cụm sản phẩm.'
+    },
+    {
+      id: 'products-supporting',
+      title: 'Nội dung hỗ trợ tra cứu',
+      owner: 'this_page',
+      ownerLabel: 'Khối nội dung phụ',
+      description: 'Hướng dẫn chọn hàng, lưu ý kỹ thuật hoặc lối tắt đến các nhóm sản phẩm thường được hỏi.'
     }
   ],
   capability_profile: [
@@ -162,6 +155,7 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Hero hồ sơ năng lực',
       owner: 'module',
       ownerLabel: 'Banner',
+      required: true,
       href: '/banners?position=ho-so-nang-luc',
       description: 'Banner đầu trang hồ sơ năng lực. Đây là chỗ quản lý ảnh banner, khác với ảnh đại diện/chia sẻ của trang nội dung.'
     },
@@ -173,10 +167,18 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       description: 'Tiêu đề, mô tả ngắn, nội dung giới thiệu, SEO và các khối phụ hiển thị trước phần xem hồ sơ.'
     },
     {
+      id: 'capability-supporting',
+      title: 'Điểm nhấn năng lực',
+      owner: 'this_page',
+      ownerLabel: 'Khối nội dung phụ',
+      description: 'Tóm tắt năng lực, phạm vi cung cấp hoặc các bằng chứng đã được xác thực trước phần hồ sơ.'
+    },
+    {
       id: 'capability-document',
       title: 'PDF và ảnh từng trang hồ sơ',
       owner: 'template',
       ownerLabel: 'Asset website hiện có',
+      required: true,
       description: 'Contract hiện chưa có field PDF riêng cho Page Content, nên file PDF và ảnh từng trang vẫn dùng asset hiện có của website.'
     }
   ],
@@ -186,6 +188,7 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Hero dịch vụ',
       owner: 'module',
       ownerLabel: 'Banner',
+      required: true,
       href: '/banners?position=dich-vu',
       description: 'Ảnh và CTA đầu trang. Dùng ảnh bối cảnh dịch vụ, đội ngũ, công trình hoặc hỗ trợ kỹ thuật, không dùng ảnh sản phẩm rời nếu dễ gây hiểu nhầm.'
     },
@@ -194,6 +197,7 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Lời mở đầu trang dịch vụ',
       owner: 'this_page',
       ownerLabel: 'Sửa tại màn này',
+      required: true,
       description: 'Một đoạn ngắn nói cho khách biết Song Thanh hỗ trợ những nhu cầu dịch vụ nào.'
     },
     {
@@ -201,8 +205,31 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Danh sách dịch vụ',
       owner: 'module',
       ownerLabel: 'Dịch vụ',
+      required: true,
       href: '/services',
       description: 'Tên, mô tả và ảnh đại diện của từng dịch vụ. Nội dung nên viết theo nhu cầu khách hàng.'
+    },
+    {
+      id: 'services-when',
+      title: 'Khi nào cần liên hệ',
+      owner: 'module',
+      ownerLabel: 'Dịch vụ',
+      href: '/services',
+      description: 'Tổng hợp dấu hiệu và tình huống thực tế từ trường “Khi nào cần liên hệ” của từng dịch vụ.'
+    },
+    {
+      id: 'services-process',
+      title: 'Quy trình & thông tin cần chuẩn bị',
+      owner: 'this_page',
+      ownerLabel: 'Khối nội dung phụ',
+      description: 'Khi chưa có khối phụ, website dùng mẫu quy trình và thông tin cần chuẩn bị. Các khối phụ tại màn này sẽ thay vùng mẫu đó.'
+    },
+    {
+      id: 'services-story',
+      title: 'Nội dung tư vấn mở rộng',
+      owner: 'this_page',
+      ownerLabel: 'Nội dung chính',
+      description: 'Nội dung biên tập mở rộng được nhập trong trường nội dung chính của trang Dịch vụ.'
     },
     {
       id: 'services-cta',
@@ -210,7 +237,7 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       owner: 'settings',
       ownerLabel: 'Cấu hình website',
       href: '/website-settings',
-      description: 'Hotline và thông tin liên hệ lấy từ cấu hình website.'
+      description: 'Hotline và thông tin liên hệ lấy từ cấu hình website. Chữ CTA dùng mẫu cố định của giao diện.'
     }
   ],
   projects: [
@@ -223,23 +250,35 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       description: 'Ảnh và CTA đầu trang dự án.'
     },
     {
-      id: 'projects-intro',
-      title: 'Lời dẫn trang dự án',
+      id: 'projects-evidence',
+      title: 'Lời mở đầu danh mục dự án',
       owner: 'this_page',
-      ownerLabel: 'Sửa tại màn này'
+      ownerLabel: 'Sửa tại màn này',
+      required: true,
+      description: 'Tiêu đề, mô tả ngắn và nội dung giới thiệu của danh mục. Ảnh đầu trang lấy từ Banner; các dự án hiển thị lấy từ module Dự án.'
     },
     {
       id: 'projects-list',
-      title: 'Danh sách dự án',
+      title: 'Hồ sơ dự án',
       owner: 'module',
       ownerLabel: 'Dự án',
-      href: '/projects'
+      required: true,
+      href: '/projects',
+      description: 'Tên, khách hàng, địa điểm, mô tả, ảnh, câu chuyện triển khai và nhóm sản phẩm liên quan lấy từ từng hồ sơ. Chỉ mô tả phần Song Thanh thực hiện khi có thông tin đã xác nhận.'
+    },
+    {
+      id: 'projects-story',
+      title: 'Nội dung chứng minh bổ sung',
+      owner: 'this_page',
+      ownerLabel: 'Nội dung & khối phụ',
+      description: 'Các bằng chứng, tiêu chí triển khai hoặc nội dung biên tập bổ sung cho toàn bộ danh mục dự án.'
     },
     {
       id: 'projects-cta',
       title: 'CTA dự án',
       owner: 'template',
-      ownerLabel: 'Đang dùng mẫu website'
+      ownerLabel: 'Đang dùng mẫu website',
+      description: 'Khối liên hệ cuối trang hiện dùng nội dung cố định của website; trang này chỉ đổi thứ tự hoặc ẩn khối, chưa sửa được câu chữ.'
     }
   ],
   brands: [
@@ -248,6 +287,7 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Hero trang thương hiệu',
       owner: 'module',
       ownerLabel: 'Banner',
+      required: true,
       href: '/banners?position=doi-tac-thuong-hieu',
       description: 'Ảnh và CTA đầu trang thương hiệu. Quản lý bằng module Banner để giữ cùng một luồng với các hero website khác.'
     },
@@ -255,20 +295,30 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       id: 'brands-intro',
       title: 'Lời giới thiệu thương hiệu',
       owner: 'this_page',
-      ownerLabel: 'Sửa tại màn này'
+      ownerLabel: 'Sửa tại màn này',
+      required: true
     },
     {
       id: 'brands-grid',
       title: 'Logo và mô tả thương hiệu',
       owner: 'module',
       ownerLabel: 'Thương hiệu',
+      required: true,
       href: '/brands'
+    },
+    {
+      id: 'brands-supporting',
+      title: 'Hướng dẫn chọn thương hiệu',
+      owner: 'this_page',
+      ownerLabel: 'Nội dung & khối phụ',
+      description: 'Giải thích cách tra cứu hãng và mối liên hệ giữa thương hiệu với nhóm sản phẩm.'
     },
     {
       id: 'brands-cta',
       title: 'CTA liên hệ',
       owner: 'template',
-      ownerLabel: 'Đang dùng mẫu website'
+      ownerLabel: 'Đang dùng mẫu website',
+      description: 'Khối liên hệ cuối trang hiện dùng nội dung cố định của website; trang này chỉ đổi thứ tự hoặc ẩn khối, chưa sửa được câu chữ.'
     }
   ],
   news_index: [
@@ -285,23 +335,24 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Lời mở đầu trang tin tức',
       owner: 'this_page',
       ownerLabel: 'Sửa tại màn này',
+      required: true,
       description: 'Tiêu đề, mô tả ngắn, nội dung giới thiệu và SEO cho landing tin tức.'
     },
     {
-      id: 'news-index-list',
-      title: 'Danh sách bài viết',
+      id: 'news-index-feed',
+      title: 'Dòng tin & chuyên mục',
       owner: 'module',
-      ownerLabel: 'Bài tin tức',
+      ownerLabel: 'Tin tức',
+      required: true,
       href: '/page-contents',
-      description: 'Các record content_type=news đã duyệt và xuất bản.'
+      description: 'Bài nổi bật, các bài mới và chuyên mục được tổ chức thành một không gian đọc, không phải lưới thẻ chung chung.'
     },
     {
-      id: 'news-index-categories',
-      title: 'Chuyên mục tin tức',
-      owner: 'module',
-      ownerLabel: 'Chuyên mục',
-      href: '/page-contents',
-      description: 'Nhóm chuyên mục và bộ lọc đang hiển thị trên trang Tin tức.'
+      id: 'news-index-supporting',
+      title: 'Nội dung tòa soạn bổ sung',
+      owner: 'this_page',
+      ownerLabel: 'Nội dung & khối phụ',
+      description: 'Lời dẫn chuyên môn, chủ đề cần ưu tiên hoặc khối nội dung phụ của landing Tin tức.'
     }
   ],
   contact: [
@@ -310,6 +361,7 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       title: 'Hero trang liên hệ',
       owner: 'module',
       ownerLabel: 'Banner',
+      required: true,
       href: '/banners?position=lien-he',
       description: 'Ảnh và CTA đầu trang liên hệ.'
     },
@@ -317,27 +369,24 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       id: 'contact-intro',
       title: 'Tiêu đề và SEO',
       owner: 'this_page',
-      ownerLabel: 'Sửa tại màn này'
+      ownerLabel: 'Sửa tại màn này',
+      required: true
     },
     {
-      id: 'contact-info',
-      title: 'Hotline, email, địa chỉ, bản đồ',
+      id: 'contact-request',
+      title: 'Bàn tiếp nhận liên hệ',
+      owner: 'template',
+      ownerLabel: 'Form & kênh liên hệ',
+      required: true,
+      description: 'Form, hotline, email và địa chỉ được đặt cùng ngữ cảnh để khách chọn cách liên hệ phù hợp.'
+    },
+    {
+      id: 'contact-map',
+      title: 'Địa chỉ & bản đồ',
       owner: 'settings',
       ownerLabel: 'Cấu hình website',
-      href: '/website-settings'
-    },
-    {
-      id: 'contact-form',
-      title: 'Form khách gửi',
-      owner: 'template',
-      ownerLabel: 'Website public'
-    },
-    {
-      id: 'contact-requests',
-      title: 'Yêu cầu liên hệ đã gửi',
-      owner: 'module',
-      ownerLabel: 'Liên hệ',
-      href: '/contacts'
+      href: '/website-settings',
+      description: 'Thông tin vị trí công khai. Yêu cầu khách đã gửi chỉ được quản lý nội bộ, không thuộc bố cục website.'
     }
   ]
 };
@@ -361,7 +410,7 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     imageLabel: 'Ảnh công ty',
     imageHint: 'Ảnh này dùng trong khối Công ty Song Thanh. Hero/banner quản lý ở Banner.',
     seoHint: 'Tối ưu cho tên công ty, thiết bị điện và vật tư công nghiệp.',
-    primarySource: 'Khối Công ty Song Thanh lấy từ record này. Hero từ Banner, liên hệ từ Cấu hình website, brand từ Thương hiệu.',
+    primarySource: 'Màn này quản lý tiêu đề, phần giới thiệu, ảnh công ty, khối nội dung phụ và SEO. Banner, thông tin liên hệ và thương hiệu được cập nhật ở các khu vực liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=gioi-thieu', description: 'Hero trang giới thiệu' },
       { label: 'Cấu hình website', href: '/website-settings', description: 'Pháp nhân, hotline, email, địa chỉ' },
@@ -390,16 +439,16 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     excerptPlaceholder: 'Một đoạn ngắn giới thiệu cách khách tra cứu danh mục và nhóm sản phẩm Song Thanh.',
     bodyLabel: 'Lời giới thiệu trang sản phẩm',
     bodyHint: 'Viết ngắn gọn về phạm vi sản phẩm và cách khách nên bắt đầu tra cứu. Không thêm giỏ hàng, khuyến mãi hoặc thông tin e-commerce.',
-    imageLabel: 'Ảnh đại diện trang sản phẩm',
-    imageHint: 'Dùng cho chia sẻ link hoặc khối phụ. Hero/banner đầu trang quản lý ở Banner vị trí san-pham.',
+    imageLabel: 'Ảnh chia sẻ & xem trước',
+    imageHint: 'Ảnh này chỉ dùng khi chia sẻ đường dẫn hoặc xem trước; banner đầu trang được quản lý tại mục Banner.',
     seoHint: 'Tối ưu cho danh mục sản phẩm, thiết bị điện, vật tư công nghiệp và nhu cầu tra cứu sản phẩm Song Thanh.',
-    primarySource: 'Hero lấy từ Banner position=san-pham. Lời mở đầu, nội dung phụ, ảnh chia sẻ và SEO lấy từ record này. Danh mục lấy từ Danh mục sản phẩm, danh sách lấy từ Sản phẩm.',
+    primarySource: 'Màn này quản lý lời mở đầu, khối nội dung phụ, ảnh chia sẻ và SEO. Banner, danh mục và danh sách sản phẩm được cập nhật ở các khu vực liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=san-pham', description: 'Hero trang sản phẩm' },
       { label: 'Danh mục sản phẩm', href: '/product-categories', description: 'Cây danh mục public' },
       { label: 'Thương hiệu', href: '/brands', description: 'Logo, tên hãng và trạng thái brand public' },
       { label: 'Sản phẩm', href: '/product-groups', description: 'Product group public, ảnh, mô tả và trạng thái hiển thị' },
-      { label: 'Biến thể sản phẩm', href: '/product-variants', description: 'Model, SKU và cấu hình nằm dưới từng product_group' },
+      { label: 'Biến thể / SKU', href: '/product-variants', description: 'Model, mã hàng và cấu hình cụ thể của từng sản phẩm' },
       { label: 'Tài liệu kỹ thuật', href: '/technical-documents', description: 'Catalogue, datasheet và tài liệu gắn với sản phẩm' },
       { label: 'Nhập dữ liệu', href: '/import', description: 'Luồng import kiểm soát, không đưa raw data thẳng ra public' }
     ],
@@ -429,7 +478,7 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     imageLabel: 'Ảnh đại diện trang hồ sơ năng lực',
     imageHint: 'Dùng cho chia sẻ link hoặc khối phụ. Banner đầu trang quản lý ở Banner vị trí ho-so-nang-luc.',
     seoHint: 'Tối ưu cho hồ sơ năng lực Song Thanh, năng lực cung cấp thiết bị điện và vật tư công nghiệp.',
-    primarySource: 'Hero lấy từ Banner position=ho-so-nang-luc. Tiêu đề, mô tả, nội dung phụ và SEO lấy từ record này. PDF và ảnh từng trang hiện vẫn là asset website theo contract hiện tại.',
+    primarySource: 'Màn này quản lý tiêu đề, mô tả, khối nội dung phụ và SEO. Banner được quản lý riêng; PDF và ảnh từng trang hiện vẫn lấy từ dữ liệu website hiện có.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=ho-so-nang-luc', description: 'Hero trang hồ sơ năng lực' },
       { label: 'Kho tệp', href: '/files', description: 'Quản lý metadata file dùng cho ảnh chia sẻ và khối phụ' }
@@ -460,7 +509,7 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     imageLabel: 'Ảnh đại diện trang dịch vụ',
     imageHint: 'Dùng khi chia sẻ link. Hero/banner quản lý ở Banner. Nếu chọn ảnh ở đây, ưu tiên ảnh bối cảnh dịch vụ hoặc đội ngũ, không dùng ảnh sản phẩm đơn lẻ.',
     seoHint: 'Tập trung vào dịch vụ thiết bị điện, vật tư công nghiệp và tư vấn kỹ thuật.',
-    primarySource: 'Hero lấy từ Banner position=dich-vu. Lời mở đầu và ảnh chia sẻ lấy từ record này. Tên, mô tả, ảnh từng dịch vụ lấy từ module Dịch vụ. CTA lấy từ Cấu hình website.',
+    primarySource: 'Màn này quản lý lời mở đầu, ảnh chia sẻ và SEO. Banner, từng dịch vụ và thông tin kêu gọi liên hệ được cập nhật ở các khu vực liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=dich-vu', description: 'Hero trang dịch vụ, ảnh và CTA đầu trang' },
       { label: 'Dịch vụ', href: '/services', description: 'Quản lý tên, mô tả và ảnh từng dịch vụ hiển thị ngoài website' },
@@ -468,8 +517,8 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     ],
     defaultContent: {
       title: 'Dịch vụ kỹ thuật cho công trình và doanh nghiệp',
-      excerpt: 'Song Thanh hỗ trợ khách hàng chọn đúng thiết bị, xây dựng phương án vật tư, xử lý bảo trì và hướng dẫn vận hành theo nhu cầu thực tế.',
-      content_html: '<p>Khách hàng có thể bắt đầu bằng nhu cầu thực tế: cần chọn đúng thiết bị, cần phương án trước khi triển khai, cần xử lý sự cố hoặc cần hướng dẫn đội ngũ vận hành. Song Thanh tiếp nhận thông tin và phản hồi theo đúng nhóm dịch vụ phù hợp.</p>',
+      excerpt: 'Xem các dịch vụ đang được Song Thanh công khai và trao đổi nhu cầu cụ thể để chọn hướng hỗ trợ phù hợp.',
+      content_html: '<p>Khách hàng có thể bắt đầu bằng nhu cầu của công trình hoặc hệ thống đang vận hành. Hãy xem phạm vi từng dịch vụ và gửi thông tin sẵn có để trao đổi phương án phù hợp.</p>',
       seo_title: 'Dịch vụ kỹ thuật thiết bị điện | Song Thanh',
       seo_description: 'Dịch vụ tư vấn, thiết kế, bảo trì và hướng dẫn vận hành thiết bị điện, vật tư công nghiệp và hệ thống kỹ thuật từ Song Thanh.'
     }
@@ -492,14 +541,14 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     imageLabel: 'Ảnh đại diện trang dự án',
     imageHint: 'Ưu tiên ảnh công trình thật nếu có quyền sử dụng.',
     seoHint: 'Tối ưu cho dự án thiết bị điện, vật tư công trình và năng lực cung cấp.',
-    primarySource: 'Intro lấy từ record này. Hero lấy từ Banner position=du-an. Danh sách dự án lấy từ module Dự án.',
+    primarySource: 'Màn này quản lý lời mở đầu, khối nội dung phụ và SEO. Banner và danh sách dự án được cập nhật ở các khu vực liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=du-an', description: 'Hero trang dự án' },
       { label: 'Dự án', href: '/projects', description: 'Quản lý hồ sơ dự án public' }
     ],
     defaultContent: {
-      title: 'Hồ Sơ Năng Lực & Dự Án Tiêu Biểu',
-      excerpt: 'Tổng hợp các dự án và năng lực cung cấp thiết bị điện, vật tư công trình đã được Song Thanh công khai.',
+      title: 'Dự án đã thực hiện',
+      excerpt: 'Khám phá các hồ sơ công trình và nhóm thiết bị liên quan đã được Song Thanh công khai.',
       seo_title: 'Dự án và hồ sơ năng lực | Song Thanh',
       seo_description: 'Xem dự án, công trình tiêu biểu và năng lực cung cấp thiết bị điện, vật tư công nghiệp của Song Thanh.'
     }
@@ -519,10 +568,10 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     excerptPlaceholder: 'Một câu giải thích đây là danh sách thương hiệu trong catalog.',
     bodyLabel: 'Lời giới thiệu thương hiệu',
     bodyHint: 'Viết trung tính, không claim đối tác chính thức nếu chưa xác nhận.',
-    imageLabel: 'Ảnh đại diện phụ trang thương hiệu',
-    imageHint: 'Không dùng làm banner. Banner đầu trang quản lý ở Banner vị trí doi-tac-thuong-hieu; ảnh chia sẻ quản lý trong SEO và chia sẻ.',
+    imageLabel: 'Ảnh chia sẻ & xem trước',
+    imageHint: 'Ảnh này chỉ dùng khi chia sẻ đường dẫn hoặc xem trước; logo từng hãng và banner đầu trang được quản lý ở khu vực riêng.',
     seoHint: 'Tối ưu cho thương hiệu thiết bị điện, đèn LED và vật tư công nghiệp.',
-    primarySource: 'Hero lấy từ Banner position=doi-tac-thuong-hieu. Intro lấy từ record này. Logo và trạng thái brand lấy từ module Thương hiệu.',
+    primarySource: 'Màn này quản lý lời mở đầu, ảnh chia sẻ và SEO. Banner, logo và trạng thái từng thương hiệu được cập nhật ở các khu vực liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=doi-tac-thuong-hieu', description: 'Hero trang thương hiệu' },
       { label: 'Thương hiệu', href: '/brands', description: 'Logo, slug và trạng thái brand' },
@@ -553,7 +602,7 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     imageLabel: 'Ảnh đại diện trang tin tức',
     imageHint: 'Dùng cho chia sẻ link. Banner đầu trang quản lý ở Banner vị trí tin-tuc.',
     seoHint: 'Tối ưu cho tin tức kỹ thuật, hướng dẫn chọn sản phẩm và cập nhật từ Song Thanh.',
-    primarySource: 'Hero lấy từ Banner position=tin-tuc. Tiêu đề, mô tả, nội dung phụ và SEO lấy từ record này. Danh sách bài viết lấy từ các record content_type=news.',
+    primarySource: 'Màn này quản lý tiêu đề trang tin, mô tả, khối nội dung phụ và SEO. Banner và danh sách bài viết đã xuất bản được lấy từ các khu vực liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=tin-tuc', description: 'Hero trang tin tức' },
       { label: 'Bài tin tức', href: '/page-contents', description: 'Tạo và quản lý các bài viết content_type=news' }
@@ -584,7 +633,7 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     imageLabel: 'Ảnh chia sẻ trang liên hệ',
     imageHint: 'Dùng cho chia sẻ link. Ảnh hero đầu trang quản lý ở Banner vị trí lien-he.',
     seoHint: 'Tối ưu cho tên công ty, khu vực và nhu cầu liên hệ báo giá.',
-    primarySource: 'Hero lấy từ Banner position=lien-he. Hotline, email, địa chỉ, giờ làm việc và bản đồ lấy từ Cấu hình website.',
+    primarySource: 'Màn này quản lý phần giới thiệu và SEO. Banner, hotline, email, địa chỉ, giờ làm việc và bản đồ được cập nhật ở các khu vực liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=lien-he', description: 'Ảnh hero trang liên hệ' },
       { label: 'Cấu hình website', href: '/website-settings', description: 'Hotline, email, bản đồ' },
@@ -617,7 +666,7 @@ const NEWS_TEMPLATE: PageContentTemplate = {
   imageLabel: 'Ảnh đại diện bài viết',
   imageHint: 'Ảnh hoặc sơ đồ có ích, không dùng ảnh quá chung chung.',
   seoHint: 'SEO title và description bám đúng nội dung bài, không nhồi từ khóa.',
-  primarySource: 'Toàn bộ bài viết lấy từ record này.',
+  primarySource: 'Màn này quản lý toàn bộ nội dung bài viết, ảnh đại diện và SEO.',
   relatedModules: []
 };
 
@@ -639,7 +688,7 @@ const GENERIC_TEMPLATE: PageContentTemplate = {
   imageLabel: 'Ảnh đại diện',
   imageHint: 'Dùng cho chia sẻ link và các block cần thumbnail.',
   seoHint: 'Bổ sung SEO nếu trang có mục tiêu tìm kiếm rõ.',
-  primarySource: 'Record này quản lý title, excerpt, nội dung, ảnh và SEO.',
+  primarySource: 'Màn này quản lý tiêu đề, mô tả ngắn, nội dung, ảnh đại diện và SEO.',
   relatedModules: []
 };
 
@@ -701,50 +750,4 @@ export function buildPublicPath(form: Record<string, string>) {
   if (!slug) return '';
   if ((form.content_type || 'page') === 'news') return `/tin-tuc/${slug}`;
   return `/${slug}`;
-}
-
-export function stripHtml(value: string) {
-  return value
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function clampText(value: string, length = 160) {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= length) return normalized;
-  return `${normalized.slice(0, length).trim()}...`;
-}
-
-export function buildContentWarnings(
-  form: Record<string, string>,
-  template: PageContentTemplate
-): PageContentWarning[] {
-  const warnings: PageContentWarning[] = [];
-  const text = stripHtml(form.content_html ?? '');
-
-  if (!form.title?.trim()) warnings.push({ label: 'Thiếu tiêu đề', tone: 'danger' });
-  if (!form.slug?.trim()) warnings.push({ label: 'Thiếu đường dẫn', tone: 'danger' });
-  if (!form.excerpt?.trim()) warnings.push({ label: 'Thiếu mô tả ngắn', tone: 'warning' });
-  if (isBodyExpected(template) && !text) warnings.push({ label: 'Thiếu nội dung', tone: 'warning' });
-  if (isImageExpected(template) && !form.featured_image_file_id?.trim()) {
-    warnings.push({ label: 'Thiếu ảnh', tone: 'warning' });
-  }
-  if (!form.seo_description?.trim()) warnings.push({ label: 'Thiếu mô tả SEO', tone: 'info' });
-  if ((form.review_status ?? '') !== 'approved') warnings.push({ label: 'Chưa duyệt', tone: 'info' });
-  if ((form.publish_status ?? '') !== 'published') warnings.push({ label: 'Đang ẩn', tone: 'info' });
-
-  return warnings;
-}
-
-function isBodyExpected(template: PageContentTemplate) {
-  return ['about', 'products', 'capability_profile', 'news_index', 'news', 'generic'].includes(template.mode);
-}
-
-function isImageExpected(template: PageContentTemplate) {
-  return ['about', 'news', 'generic'].includes(template.mode);
 }

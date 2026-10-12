@@ -70,7 +70,9 @@ test('workflow approval guard allows super admin and rejects support roles', () 
     (error) =>
       error instanceof AppError &&
       error.statusCode === 403 &&
-      error.code === 'PERMISSION_DENIED'
+      error.code === 'PERMISSION_DENIED' &&
+      error.message.includes('Chỉ Super Admin') &&
+      !error.message.includes('ủy quyền')
   );
 
   assert.equal(

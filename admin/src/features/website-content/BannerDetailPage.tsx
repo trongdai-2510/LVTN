@@ -53,12 +53,16 @@ import {
   AdminFileThumbnail,
   type AdminPreviewFile
 } from '@/features/website-content/AdminFileThumbnail';
+import { BannerDestinationPicker } from '@/features/website-content/BannerDestinationPicker';
+import { BannerPagePicker, isBannerPagePath } from '@/features/website-content/BannerPagePicker';
+import { BANNER_LEGACY_PAGE_PATHS } from '@/features/website-content/bannerPositions';
 import { apiClient } from '@/lib/api-client';
 import { byId, endpoints } from '@/lib/api-endpoints';
 import { cn } from '@/lib/cn';
 import { scrollToFirstError } from '@/lib/form-focus';
 import { formatDate, formatValue } from '@/lib/formatters';
 import { PERMISSIONS } from '@/lib/permissions';
+import { isSafeNavigationTarget } from '@/lib/safeNavigationTarget';
 import { consumeAdminFlash, pushAdminFlash } from '@/lib/admin-flash';
 
 type RecordMap = Record<string, unknown>;
@@ -102,19 +106,7 @@ type CtaErrors = { text?: string; url?: string }[];
 
 const isNew = (id: string) => id === 'new';
 
-const BANNER_POSITION_OPTIONS = [
-  { value: 'hero', label: 'Hero (Trang chủ)' },
-  { value: 'san-pham', label: 'Hero (Trang Sản phẩm)' },
-  { value: 'gioi-thieu', label: 'Hero (Trang Giới thiệu)' },
-  { value: 'ho-so-nang-luc', label: 'Hero (Trang Hồ sơ năng lực)' },
-  { value: 'dich-vu', label: 'Hero (Trang Dịch vụ)' },
-  { value: 'du-an', label: 'Hero (Trang Dự án)' },
-  { value: 'tin-tuc', label: 'Hero (Trang Tin tức)' },
-  { value: 'doi-tac-thuong-hieu', label: 'Hero (Trang Đối tác thương hiệu)' },
-  { value: 'lien-he', label: 'Hero (Trang Liên hệ)' },
-  { value: 'chinh-sach-van-chuyen', label: 'Hero (Trang Chính sách vận chuyển)' },
-  { value: 'brand-hero', label: 'Hero (Trang thương hiệu)' }
-];
+const PUBLIC_SITE_URL = process.env.NEXT_PUBLIC_PUBLIC_SITE_URL?.replace(/\/$/, '') || 'http://localhost:3000';
 
 const BANNER_STATUS_OPTIONS: Array<{ value: BannerStatus; label: string }> = [
   { value: 'inactive', label: 'Bản nháp' },
@@ -126,10 +118,10 @@ const BANNER_LINK_TYPE_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: 'internal', label: 'Liên kết nội bộ', description: 'Đường dẫn bắt đầu bằng /' },
-  { value: 'external', label: 'Liên kết ngoài', description: 'URL http hoặc https' },
-  { value: 'anchor', label: 'Liên kết tới anchor', description: 'Ví dụ #lien-he' },
-  { value: 'none', label: 'Không liên kết', description: 'Banner chỉ hiển thị hình ảnh' }
+  { value: 'none', label: 'Không mở trang nào', description: 'Chỉ hiển thị banner' },
+  { value: 'internal', label: 'Mở trang trong website', description: 'Tìm và chọn theo tên trang' },
+  { value: 'external', label: 'Mở website khác', description: 'Nhập địa chỉ website' },
+  { value: 'anchor', label: 'Cuộn đến mục trên trang', description: 'Dùng khi trang có mục cụ thể' }
 ];
 
 const BANNER_DISPLAY_MODES: Array<{ value: BannerDisplayMode; label: string; description: string; icon: typeof ImageIcon }> = [
@@ -162,7 +154,13 @@ const BANNER_TITLE_SIZE_OPTIONS: Array<{ value: BannerTitleSize; label: string }
 ];
 const BANNER_TITLE_SIZES: BannerTitleSize[] = BANNER_TITLE_SIZE_OPTIONS.map((option) => option.value);
 const BANNER_PREVIEW_FULL_WIDTH = 1440;
-const BANNER_PREVIEW_FULL_HEIGHT = 680;
+const BANNER_PREVIEW_MOBILE_WIDTH = 390;
+const BANNER_PREVIEW_HOME_DESKTOP_HEIGHT = 560;
+const BANNER_PREVIEW_HOME_MOBILE_HEIGHT = 340;
+const BANNER_PREVIEW_PAGE_DESKTOP_HEIGHT = 480;
+const BANNER_PREVIEW_PAGE_IMAGE_HEIGHT = 403;
+const BANNER_PREVIEW_PAGE_MOBILE_HEIGHT = 300;
+const BANNER_PREVIEW_PAGE_MOBILE_IMAGE_HEIGHT = 180;
 const BANNER_HERO_TITLE_SIZE_CLASS: Record<BannerTitleSize, string> = {
   small: 'text-[28px] leading-[34px] sm:text-[32px] sm:leading-[38px]',
   medium: 'text-[36px] leading-[42px] sm:text-[44px] sm:leading-[50px] lg:text-[48px] lg:leading-[54px]',
@@ -170,22 +168,9 @@ const BANNER_HERO_TITLE_SIZE_CLASS: Record<BannerTitleSize, string> = {
 };
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
-const PAGE_SUGGESTIONS = [
-  { label: 'Trang chủ', value: '/' },
-  { label: 'Sản phẩm', value: '/san-pham' },
-  { label: 'Dịch vụ', value: '/dich-vu' },
-  { label: 'Dự án', value: '/du-an' },
-  { label: 'Giới thiệu', value: '/gioi-thieu' },
-  { label: 'Hồ sơ năng lực', value: '/ho-so-nang-luc' },
-  { label: 'Liên hệ', value: '/lien-he' },
-  { label: 'Thương hiệu', value: '/doi-tac-thuong-hieu' },
-  { label: 'Tin tức', value: '/tin-tuc' }
-];
-
-const IMAGE_UPLOAD_MAX_LABEL = '25 MB';
 const BANNER_FORM_ID = 'banner-detail-form';
 
-function emptyBannerForm(position = 'hero'): BannerForm {
+function emptyBannerForm(position = ''): BannerForm {
   return {
     title: '',
     description: '',
@@ -207,9 +192,9 @@ function emptyBannerForm(position = 'hero'): BannerForm {
 }
 
 function normalizeInitialBannerPosition(value: string | null) {
-  if (!value) return 'hero';
+  if (!value) return '';
   const normalized = value.trim();
-  return BANNER_POSITION_OPTIONS.some((option) => option.value === normalized) ? normalized : 'hero';
+  return isBannerPagePath(normalized) ? normalized : BANNER_LEGACY_PAGE_PATHS[normalized] ?? '';
 }
 
 export function BannerDetailPage({ id }: { id: string }) {
@@ -246,13 +231,6 @@ export function BannerDetailPage({ id }: { id: string }) {
     [form, initialForm]
   );
   const imageLinkDisabled = form.cta_buttons.length > 0;
-
-  const positionOptions = useMemo(() => {
-    if (!form.position || BANNER_POSITION_OPTIONS.some((opt) => opt.value === form.position)) {
-      return BANNER_POSITION_OPTIONS;
-    }
-    return [{ value: form.position, label: `Vị trí hiện tại: ${form.position}` }, ...BANNER_POSITION_OPTIONS];
-  }, [form.position]);
 
   useEffect(() => {
     if (createMode) {
@@ -381,7 +359,7 @@ export function BannerDetailPage({ id }: { id: string }) {
     setForm((current) => ({
       ...current,
       link_type: linkType,
-      link_target: linkType === 'none' ? '' : current.link_target
+      link_target: current.link_type === linkType ? current.link_target : ''
     }));
     setFieldErrors((current) => clearFieldError(clearFieldError(current, 'link_type'), 'link_target'));
   }
@@ -431,8 +409,8 @@ export function BannerDetailPage({ id }: { id: string }) {
       const url = btn.url.trim();
       if (!text) next.text = 'Vui lòng nhập nhãn nút';
       if (!url) next.url = 'Vui lòng nhập đường dẫn';
-      else if (!url.startsWith('/') && !url.startsWith('#') && !url.startsWith('http')) {
-        next.url = 'Đường dẫn phải bắt đầu bằng /, # hoặc https://';
+      else if (!isSafeNavigationTarget(url)) {
+        next.url = 'Chọn trang đích hoặc nhập đường dẫn /, # hay URL http(s) hợp lệ.';
       }
       return next;
     });
@@ -538,7 +516,6 @@ export function BannerDetailPage({ id }: { id: string }) {
 
   return (
     <section data-banner-detail-page="true" className="admin-page pb-6">
-      <style>{'[data-admin-breadcrumbs="true"]{display:none}'}</style>
       <UnsavedChangesGuard when={dirty && !saving} />
 
       <div className="space-y-3">
@@ -578,12 +555,16 @@ export function BannerDetailPage({ id }: { id: string }) {
         </div>
       ) : null}
       <form id={BANNER_FORM_ID} onSubmit={handleSave} ref={formRef}>
-        <div className="admin-two-column-form">
+        <div data-banner-preview-workspace="true" className="mt-4">
+          <BannerScaledPreview
+            form={form}
+            imageFile={imageFile}
+            mobileImageFile={mobileImageFile}
+          />
+        </div>
+        <div className="admin-two-column-form mt-4">
           {/* ── LEFT COLUMN ── */}
-          <div className="space-y-4">
-            {/* Live preview */}
-            <BannerScaledPreview form={form} imageFile={imageFile} />
-
+          <div data-banner-creative="true" className="order-2 space-y-4 xl:order-none">
             {/* Kiểu banner */}
             <Card className="overflow-hidden">
               <div className="admin-card-header">
@@ -742,26 +723,24 @@ export function BannerDetailPage({ id }: { id: string }) {
             </Card>
 
             {/* Liên kết */}
-            <Card className={cn('overflow-hidden transition-opacity', imageLinkDisabled && 'opacity-50')}>
+            <Card className={cn('overflow-hidden transition-opacity', imageLinkDisabled && 'bg-muted/30')}>
               <div className="admin-card-header">
-                <h2 className="text-sm font-semibold text-text">Liên kết khi click vào ảnh</h2>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Chỉ áp dụng khi người dùng click vào ảnh/banner, không tự tạo nút CTA.
-                </p>
+                <h2 className="text-sm font-semibold text-text">Khi khách click vào banner</h2>
                 {imageLinkDisabled ? (
-                  <p className="mt-1 text-xs font-medium text-amber-700">Đang bị vô hiệu vì banner đã có nút bấm</p>
+                  <p className="mt-1 text-xs font-medium text-amber-700">Banner đã có nút bấm riêng, nên ảnh không cần liên kết.</p>
                 ) : null}
               </div>
-              <div className={cn('admin-card-body admin-form-stack', imageLinkDisabled && 'pointer-events-none')}>
-                <BannerField fieldKey="link_type" label="Kiểu liên kết" required error={fieldErrors.link_type}>
-                  <div className="grid gap-3 sm:grid-cols-2">
+              <div className="admin-card-body admin-form-stack">
+                <BannerField fieldKey="link_type" label="Click vào ảnh sẽ" required error={fieldErrors.link_type}>
+                  <div aria-label="Click vào ảnh sẽ" className="grid gap-3 sm:grid-cols-2" role="group">
                     {BANNER_LINK_TYPE_OPTIONS.map((option) => {
                       const selected = form.link_type === option.value;
                       return (
                         <button
                           key={option.value}
                           type="button"
-                          disabled={readOnly}
+                          aria-pressed={selected}
+                          disabled={readOnly || imageLinkDisabled}
                           className={cn(
                             'group min-h-[56px] rounded-sm border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
                             selected ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-panel text-text hover:border-primary/50'
@@ -783,18 +762,30 @@ export function BannerDetailPage({ id }: { id: string }) {
 
                 {form.link_type !== 'none' ? (
                   <BannerField fieldKey="link_target" label={linkTargetLabel(form.link_type)} required error={fieldErrors.link_target} htmlFor="banner-link-target">
-                    <div className="relative">
-                      <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        id="banner-link-target"
-                        className={cn('pl-9', fieldErrors.link_target ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
-                        placeholder={linkTargetPlaceholder(form.link_type)}
+                    {form.link_type === 'internal' ? (
+                      <BannerDestinationPicker
+                        inputId="banner-link-target"
                         value={form.link_target}
-                        readOnly={readOnly}
-                        inputMode={form.link_type === 'external' ? 'url' : 'text'}
-                        onChange={(e) => updateField('link_target', e.target.value)}
+                        onChange={(value) => updateField('link_target', value)}
+                        readOnly={readOnly || imageLinkDisabled}
+                        error={fieldErrors.link_target}
+                        placeholder="Chọn trang hoặc sản phẩm"
+                        allowExternal={false}
                       />
-                    </div>
+                    ) : (
+                      <div className="relative">
+                        <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="banner-link-target"
+                          className={cn('pl-9', fieldErrors.link_target ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
+                          placeholder={linkTargetPlaceholder(form.link_type)}
+                          value={form.link_target}
+                          readOnly={readOnly || imageLinkDisabled}
+                          inputMode={form.link_type === 'external' ? 'url' : 'text'}
+                          onChange={(e) => updateField('link_target', e.target.value)}
+                        />
+                      </div>
+                    )}
                   </BannerField>
                 ) : null}
               </div>
@@ -802,7 +793,8 @@ export function BannerDetailPage({ id }: { id: string }) {
           </div>
 
           {/* ── RIGHT SIDEBAR ── */}
-          <div className="space-y-4 xl:sticky xl:top-[calc(var(--topbar-height)+16px)] xl:self-start">
+          <div className="contents xl:sticky xl:top-[calc(var(--topbar-height)+16px)] xl:block xl:self-start">
+            <div data-banner-required="true" className="order-1 space-y-4">
             {/* Hình ảnh banner */}
             <BannerImageCard
               value={form.image_file_id}
@@ -824,12 +816,11 @@ export function BannerDetailPage({ id }: { id: string }) {
               <div className="admin-card-body admin-form-stack">
                 <BannerField
                   fieldKey="title"
-                  label="Tên banner nội bộ"
+                  label="Tiêu đề banner"
                   required
                   error={fieldErrors.title}
                   htmlFor="banner-title"
                   aside={`${form.title.length}/255`}
-                  hint="Dùng để quản lý, tìm kiếm và làm mô tả thay thế cho ảnh banner."
                 >
                   <Input
                     id="banner-title"
@@ -842,18 +833,8 @@ export function BannerDetailPage({ id }: { id: string }) {
                   />
                 </BannerField>
 
-                <BannerField fieldKey="position" label="Vị trí hiển thị" required error={fieldErrors.position} htmlFor="banner-position">
-                  <Select
-                    id="banner-position"
-                    value={form.position}
-                    disabled={readOnly}
-                    className={fieldErrors.position ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : ''}
-                    onChange={(e) => updateField('position', e.target.value)}
-                  >
-                    {positionOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </Select>
+                <BannerField fieldKey="position" label="Hiển thị tại trang" required error={fieldErrors.position} htmlFor="banner-position">
+                  <BannerPagePicker inputId="banner-position" value={form.position} readOnly={readOnly} error={fieldErrors.position} onChange={(value) => updateField('position', value)} />
                 </BannerField>
 
                 <BannerField fieldKey="status" label="Trạng thái" required error={fieldErrors.status} htmlFor="banner-status">
@@ -869,10 +850,36 @@ export function BannerDetailPage({ id }: { id: string }) {
                     ))}
                   </Select>
                 </BannerField>
+                {isBannerPagePath(BANNER_LEGACY_PAGE_PATHS[form.position] ?? form.position) ? (
+                  <a className="inline-flex min-h-9 items-center gap-1 text-xs font-semibold text-primary hover:underline" href={`${PUBLIC_SITE_URL}${BANNER_LEGACY_PAGE_PATHS[form.position] ?? form.position}`} rel="noopener noreferrer" target="_blank">Mở trang đã chọn <ArrowRight className="h-3.5 w-3.5" /></a>
+                ) : null}
+
+                <BannerField
+                  fieldKey="sort_order"
+                  label="Thứ tự hiển thị"
+                  error={fieldErrors.sort_order}
+                  htmlFor="banner-sort-order"
+                  hint="Số nhỏ hơn sẽ được hiển thị trước trong cùng một vị trí."
+                >
+                  <Input
+                    id="banner-sort-order"
+                    type="number"
+                    inputMode="numeric"
+                    min={-32768}
+                    max={32767}
+                    step={1}
+                    value={form.sort_order}
+                    readOnly={readOnly}
+                    className={fieldErrors.sort_order ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : ''}
+                    onChange={(event) => updateField('sort_order', event.target.value)}
+                  />
+                </BannerField>
 
               </div>
             </Card>
+            </div>
 
+            <div className="order-3 space-y-4 xl:mt-4">
             {/* Ghi chú */}
             <Card className="overflow-hidden">
               <div className="admin-card-header">
@@ -937,6 +944,7 @@ export function BannerDetailPage({ id }: { id: string }) {
                 ) : null}
               </div>
             </Card>
+            </div>
           </div>
         </div>
       </form>
@@ -962,12 +970,41 @@ export function BannerDetailPage({ id }: { id: string }) {
   );
 }
 
-function BannerScaledPreview({ form, imageFile }: { form: BannerForm; imageFile: AdminPreviewFile | null }) {
+function BannerScaledPreview({
+  form,
+  imageFile,
+  mobileImageFile
+}: {
+  form: BannerForm;
+  imageFile: AdminPreviewFile | null;
+  mobileImageFile: AdminPreviewFile | null;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [previewMode, setPreviewMode] = useState<'desktop' | 'mobile'>('desktop');
   const [scale, setScale] = useState(1);
-  const previewImageUrl = useBannerPreviewImageUrl(imageFile);
+  const desktopPreviewImageUrl = useBannerPreviewImageUrl(imageFile);
+  const mobilePreviewImageUrl = useBannerPreviewImageUrl(mobileImageFile);
+  const previewImageUrl =
+    previewMode === 'mobile' ? mobilePreviewImageUrl || desktopPreviewImageUrl : desktopPreviewImageUrl;
+  const previewWidth = previewMode === 'mobile' ? BANNER_PREVIEW_MOBILE_WIDTH : BANNER_PREVIEW_FULL_WIDTH;
   const cp = form.content_position;
   const isImageOnly = form.display_mode === 'image_only';
+  const isPagePlacement = form.position !== 'hero' && form.position !== '/';
+  const isListingPlacement = form.position === 'san-pham-danh-sach' || form.position === '/san-pham/danh-sach';
+  const previewHeight =
+    isListingPlacement
+      ? previewMode === 'mobile' ? 220 : 280
+      : previewMode === 'mobile'
+      ? isPagePlacement
+        ? isImageOnly
+          ? BANNER_PREVIEW_PAGE_MOBILE_IMAGE_HEIGHT
+          : BANNER_PREVIEW_PAGE_MOBILE_HEIGHT
+        : BANNER_PREVIEW_HOME_MOBILE_HEIGHT
+      : isPagePlacement
+        ? isImageOnly
+          ? BANNER_PREVIEW_PAGE_IMAGE_HEIGHT
+          : BANNER_PREVIEW_PAGE_DESKTOP_HEIGHT
+        : BANNER_PREVIEW_HOME_DESKTOP_HEIGHT;
   const title = form.title.trim();
   const description = form.description.trim();
   const titleColor = normalizeBannerHexColor(form.title_color, '#ffffff');
@@ -993,33 +1030,78 @@ function BannerScaledPreview({ form, imageFile }: { form: BannerForm; imageFile:
 
     const update = () => {
       const available = el.getBoundingClientRect().width;
-      setScale(available / BANNER_PREVIEW_FULL_WIDTH);
+      setScale(Math.min(1, available / previewWidth));
     };
 
     update();
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(el);
     return () => resizeObserver.disconnect();
-  }, []);
+  }, [previewWidth]);
 
   const scaledPreview = (
     <div>
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-text">Xem trước banner</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Kiểm tra ảnh và vị trí nội dung theo thiết bị.</p>
+        </div>
+        <div
+          aria-label="Chế độ xem banner"
+          className="inline-flex w-fit rounded-sm border border-border bg-panel p-1"
+          role="group"
+        >
+          {([
+            ['desktop', 'Máy tính'],
+            ['mobile', 'Điện thoại']
+          ] as const).map(([value, label]) => (
+            <button
+              aria-pressed={previewMode === value}
+              className={cn(
+                'inline-flex min-h-9 items-center rounded-sm px-3 text-xs font-semibold transition-colors',
+                previewMode === value
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:bg-muted hover:text-text'
+              )}
+              key={value}
+              onClick={() => setPreviewMode(value)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div
         ref={containerRef}
-        className="w-full overflow-hidden rounded-lg bg-slate-900"
-        style={{ height: BANNER_PREVIEW_FULL_HEIGHT * scale }}
+        className={cn(
+          'mx-auto w-full overflow-hidden rounded-lg shadow-sm',
+          previewMode === 'mobile' && isPagePlacement && isImageOnly
+            ? 'bg-white'
+            : 'bg-slate-900'
+        )}
+        data-banner-preview-mode={previewMode}
+        style={{
+          height: previewHeight * scale,
+          maxWidth: previewMode === 'mobile' ? BANNER_PREVIEW_MOBILE_WIDTH : undefined
+        }}
       >
         <div
           style={{
-            width: BANNER_PREVIEW_FULL_WIDTH,
+            width: previewWidth,
             transform: `scale(${scale})`,
             transformOrigin: 'top left'
           }}
         >
           <section
-            aria-label="Banner trang chủ"
-            className="relative min-h-[520px] overflow-hidden bg-slate-900 lg:min-h-[680px]"
-            style={{ height: BANNER_PREVIEW_FULL_HEIGHT }}
+            aria-label="Bản xem trước banner"
+            className={cn(
+              'relative overflow-hidden',
+              previewMode === 'mobile' && isPagePlacement && isImageOnly && !isListingPlacement
+                ? 'bg-white'
+                : 'bg-slate-900'
+            )}
+            style={{ height: previewHeight }}
           >
             <div
               aria-hidden={false}
@@ -1028,7 +1110,12 @@ function BannerScaledPreview({ form, imageFile }: { form: BannerForm; imageFile:
               {previewImageUrl ? (
                 <img
                   alt={title || 'Preview banner'}
-                  className="absolute inset-0 h-full w-full object-cover"
+                  className={cn(
+                    'absolute inset-0 h-full w-full',
+                    previewMode === 'mobile' && isPagePlacement && isImageOnly && !isListingPlacement
+                      ? 'object-contain'
+                      : 'object-cover'
+                  )}
                   loading="lazy"
                   src={previewImageUrl}
                 />
@@ -1040,7 +1127,14 @@ function BannerScaledPreview({ form, imageFile }: { form: BannerForm; imageFile:
               )}
               {!isImageOnly ? <div className="absolute inset-0 bg-slate-950/55" /> : null}
               {!isImageOnly ? (
-                <div className={cn('mx-auto w-full px-4 sm:px-6 lg:px-8 max-w-[1360px] relative z-10 flex min-h-[520px] flex-col lg:min-h-[680px]', verticalClass)}>
+                <div
+                  className={cn(
+                    'relative z-10 mx-auto flex w-full flex-col px-4 sm:px-6 lg:px-8',
+                    previewMode === 'mobile' ? 'max-w-[390px]' : 'max-w-[1360px]',
+                    verticalClass
+                  )}
+                  style={{ minHeight: previewHeight }}
+                >
                   <div className={cn('flex flex-col gap-4', horizontalClass)}>
                     {title ? (
                       <h1
@@ -1076,12 +1170,22 @@ function BannerScaledPreview({ form, imageFile }: { form: BannerForm; imageFile:
                     ) : null}
                   </div>
                 </div>
+              ) : form.cta_buttons.length > 0 ? (
+                <div className="absolute bottom-5 left-5 z-20 flex flex-wrap gap-3 rounded-lg bg-white/90 p-2">
+                  {form.cta_buttons.map((btn, index) => <span className="inline-flex min-h-12 items-center rounded-lg px-4 font-semibold" key={index} style={previewCtaStyle(btn)}>{btn.text.trim() || 'Nút bấm'}</span>)}
+                </div>
               ) : null}
             </div>
           </section>
         </div>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">Preview thu nhỏ, render theo desktop FE 1440px rồi scale xuống.</p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {previewMode === 'mobile'
+          ? mobilePreviewImageUrl
+            ? 'Đang dùng ảnh dành riêng cho điện thoại.'
+            : 'Chưa có ảnh điện thoại; website sẽ dùng ảnh máy tính làm dự phòng.'
+          : 'Bản xem trước máy tính được thu theo đúng tỷ lệ hiển thị.'}
+      </p>
     </div>
   );
 
@@ -1153,7 +1257,6 @@ function CtaButtonEditor({
   onRemove: () => void;
   errors?: CtaErrors[number];
 }) {
-  const ctaUrlListId = `banner-cta-url-suggestions-${index}`;
   const ctaTextInputId = `banner-cta-text-${index}`;
   const ctaUrlInputId = `banner-cta-url-${index}`;
   const ctaTextKey = `cta_buttons[${index}].text`;
@@ -1191,22 +1294,15 @@ function CtaButtonEditor({
             {errors?.text ? <p className="mt-1 text-xs text-red-600">{errors.text}</p> : null}
           </div>
           <div data-field={ctaUrlKey}>
-            <label className="mb-1 block text-[11px] font-medium text-slate-600" htmlFor={ctaUrlInputId}>URL <span className="text-red-600">*</span></label>
-            <Input
-              id={ctaUrlInputId}
-              aria-invalid={errors?.url ? true : undefined}
-              list={ctaUrlListId}
-              placeholder="/san-pham, #anchor hoặc https://..."
+            <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor={ctaUrlInputId}>Đích đến của nút <span className="text-red-600">*</span></label>
+            <BannerDestinationPicker
+              inputId={ctaUrlInputId}
               value={button.url}
+              onChange={(url) => onChange({ url })}
               readOnly={readOnly}
-              className={cn('h-11 text-xs md:h-8', errors?.url ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
-              onChange={(e) => onChange({ url: e.target.value })}
+              error={errors?.url}
+              placeholder="Chọn trang hoặc sản phẩm"
             />
-            <datalist id={ctaUrlListId}>
-              {PAGE_SUGGESTIONS.map((page) => (
-                <option key={page.value} value={page.value}>{page.label}</option>
-              ))}
-            </datalist>
             {errors?.url ? <p className="mt-1 text-xs text-red-600">{errors.url}</p> : null}
           </div>
         </div>
@@ -1573,7 +1669,6 @@ function useFileRecord(fileId: string): AdminPreviewFile | null {
 function BannerDetailSkeleton() {
   return (
     <div className="admin-page pb-6">
-      <style>{'[data-admin-breadcrumbs="true"]{display:none}'}</style>
       <Skeleton className="h-24 w-full" />
       <div className="admin-two-column-form">
         <div className="space-y-4">
@@ -1612,7 +1707,7 @@ function bannerRecordToForm(record: RecordMap): BannerForm {
     title_size: normalizeBannerTitleSize(record.title_size),
     title_color: normalizeBannerHexColor(record.title_color, '#ffffff'),
     description_color: normalizeBannerHexColor(record.description_color, '#ffffff'),
-    position: String(record.position ?? 'hero') || 'hero',
+    position: String(record.position ?? ''),
     status: normalizeBannerStatus(record.status),
     image_file_id: String(record.image_file_id ?? ''),
     image_mobile_file_id: String(record.image_mobile_file_id ?? ''),
@@ -1687,8 +1782,10 @@ function validateBannerForm(form: BannerForm): FieldErrors {
 
   if (!form.position.trim()) {
     errors.position = 'Vị trí hiển thị không được để trống.';
-  } else if (form.position.trim().length > 32) {
-    errors.position = 'Vị trí hiển thị không được vượt quá 32 ký tự.';
+  } else if (form.position.trim().length > 512) {
+    errors.position = 'Đường dẫn trang không được vượt quá 512 ký tự.';
+  } else if (!isBannerPagePath(form.position.trim()) && !BANNER_LEGACY_PAGE_PATHS[form.position.trim()] && form.position.trim() !== 'brand-hero') {
+    errors.position = 'Chọn một trang trong danh sách hoặc nhập đường dẫn nội bộ hợp lệ.';
   }
 
   if (!['active', 'inactive'].includes(form.status)) {
@@ -1706,7 +1803,7 @@ function validateBannerForm(form: BannerForm): FieldErrors {
   if (!hasCtaButtons) {
     if (form.link_type === 'internal') {
       if (!form.link_target.trim()) errors.link_target = 'Nhập đường dẫn nội bộ cho banner.';
-      else if (!form.link_target.trim().startsWith('/')) errors.link_target = 'Đường dẫn nội bộ phải bắt đầu bằng /.';
+      else if (!form.link_target.trim().startsWith('/') || !isSafeNavigationTarget(form.link_target)) errors.link_target = 'Đường dẫn nội bộ phải bắt đầu bằng / và không có ký tự không an toàn.';
     }
     if (form.link_type === 'external') {
       if (!form.link_target.trim()) errors.link_target = 'Nhập URL ngoài cho banner.';
@@ -1714,7 +1811,7 @@ function validateBannerForm(form: BannerForm): FieldErrors {
     }
     if (form.link_type === 'anchor') {
       if (!form.link_target.trim()) errors.link_target = 'Nhập anchor cho banner.';
-      else if (!form.link_target.trim().startsWith('#')) errors.link_target = 'Anchor phải bắt đầu bằng #.';
+      else if (!form.link_target.trim().startsWith('#') || !isSafeNavigationTarget(form.link_target)) errors.link_target = 'Anchor phải bắt đầu bằng # hợp lệ.';
     }
   }
 
@@ -1722,21 +1819,31 @@ function validateBannerForm(form: BannerForm): FieldErrors {
     errors.notes = 'Ghi chú không được vượt quá 200 ký tự.';
   }
 
+  const sortOrder = Number(form.sort_order);
+  if (
+    !form.sort_order.trim() ||
+    !Number.isInteger(sortOrder) ||
+    sortOrder < -32768 ||
+    sortOrder > 32767
+  ) {
+    errors.sort_order = 'Thứ tự hiển thị phải là số nguyên từ -32768 đến 32767.';
+  }
+
   return errors;
 }
 
 function linkTargetPlaceholder(linkType: BannerLinkType) {
-  if (linkType === 'internal') return '/san-pham';
-  if (linkType === 'external') return 'https://example.com';
-  if (linkType === 'anchor') return '#lien-he';
+  if (linkType === 'internal') return 'Chọn trang đích';
+  if (linkType === 'external') return 'https://ten-website.com';
+  if (linkType === 'anchor') return '#ten-muc';
   return '';
 }
 
 function linkTargetLabel(linkType: BannerLinkType) {
-  if (linkType === 'internal') return 'Liên kết nội bộ';
-  if (linkType === 'external') return 'Liên kết ngoài';
-  if (linkType === 'anchor') return 'Anchor';
-  return 'Link target';
+  if (linkType === 'internal') return 'Trang sẽ mở';
+  if (linkType === 'external') return 'Địa chỉ website';
+  if (linkType === 'anchor') return 'Mục cần cuộn tới';
+  return 'Trang đích';
 }
 
 function normalizeBannerLinkType(value: unknown): BannerLinkType {
@@ -1839,7 +1946,7 @@ function isAllowedBannerImage(file: File) {
 function isValidHttpUrl(value: string) {
   try {
     const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password;
   } catch {
     return false;
   }

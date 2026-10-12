@@ -17,7 +17,7 @@ import { byId, endpoints } from '@/lib/api-endpoints';
 import {
   ArrowDown,
   ArrowUp,
-  ImageIcon,
+  Image as ImageIcon,
   Plus,
   Save,
   Trash2
@@ -36,6 +36,7 @@ interface GalleryImageRecord {
 interface ProductImageGalleryCardProps {
   productGroupId: string;
   canEdit: boolean;
+  onSaved?: () => Promise<void>;
 }
 
 interface DraftItem {
@@ -73,7 +74,7 @@ function dedupeDraftItems(items: DraftItem[]): { items: DraftItem[]; duplicateCo
   };
 }
 
-export function ProductImageGalleryCard({ productGroupId, canEdit }: ProductImageGalleryCardProps) {
+export function ProductImageGalleryCard({ productGroupId, canEdit, onSaved }: ProductImageGalleryCardProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<DraftItem[]>([]);
@@ -185,6 +186,7 @@ export function ProductImageGalleryCard({ productGroupId, canEdit }: ProductImag
       setDraft(items);
       setInitial(items);
       setCollapsedDuplicateCount(0);
+      await onSaved?.();
       setDialog({ tone: 'success', title: 'Đã lưu thư viện ảnh', description: `${items.length} ảnh được lưu.` });
     } catch (error) {
       setDialog({
@@ -212,27 +214,23 @@ export function ProductImageGalleryCard({ productGroupId, canEdit }: ProductImag
   const isAtLimit = draft.length >= PRODUCT_IMAGE_GALLERY_MAX_IMAGES;
 
   return (
-    <section className="rounded-sm border border-border bg-panel p-4">
-      <header className="mb-4 flex items-start justify-between gap-3">
+    <section className="rounded-sm border border-border bg-panel">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <ImageIcon className="h-4 w-4 text-primary" />
-            <h2 className="text-sm font-semibold text-text">Thư viện ảnh sản phẩm</h2>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${isOverLimit ? 'bg-red-50 text-red-700' : 'bg-muted text-muted-foreground'}`}>
-              {draft.length}/{PRODUCT_IMAGE_GALLERY_MAX_IMAGES} ảnh
+            <h2 className="text-base font-semibold text-text">Thư viện ảnh sản phẩm</h2>
+            <span className={`text-xs font-medium ${isOverLimit ? 'text-red-700' : 'text-muted-foreground'}`}>
+              {draft.length} ảnh
             </span>
           </div>
-          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-            Quản lý nhiều ảnh cho sản phẩm. Thứ tự ở đây sẽ áp dụng trên trang chi tiết. Ảnh đầu thường dùng làm ảnh
-            chính của carousel.
-          </p>
           {isOverLimit ? (
-            <p className="mt-2 text-[12px] font-semibold text-red-600">
+            <p className="mt-1 text-xs font-semibold text-red-700">
               Thư viện đang vượt giới hạn {PRODUCT_IMAGE_GALLERY_MAX_IMAGES} ảnh. Xóa bớt ảnh trước khi lưu thay đổi.
             </p>
           ) : null}
           {collapsedDuplicateCount > 0 ? (
-            <p className="mt-2 text-[12px] font-semibold text-amber-700">
+            <p className="mt-1 text-xs font-semibold text-amber-700">
               Đã ẩn {collapsedDuplicateCount} ảnh trùng cùng tệp. Lưu thư viện để ghi lại danh sách sạch.
             </p>
           ) : null}
@@ -246,28 +244,25 @@ export function ProductImageGalleryCard({ productGroupId, canEdit }: ProductImag
       </header>
 
       {loading ? (
-        <div className="space-y-2">
+        <div className="space-y-2 p-4 sm:p-5" role="status" aria-label="Đang tải thư viện ảnh">
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />
         </div>
       ) : draft.length === 0 ? (
-        <div className="rounded-sm border border-dashed border-border bg-muted/30 px-4 py-8 text-center">
-          <p className="text-[13px] text-muted-foreground">Chưa có ảnh nào.</p>
-          <p className="mt-1 text-[12px] text-muted-foreground">
-            Bấm nút bên dưới để thêm ảnh từ thư viện file.
-          </p>
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+          Chưa có ảnh nào trong thư viện.
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="divide-y divide-border">
           {draft.map((item, index) => (
             <li
               key={item.uid}
-              className="flex items-start gap-3 rounded-sm border border-border bg-white p-2"
+              className="relative grid grid-cols-[64px_minmax(0,1fr)] gap-x-3 gap-y-2 px-4 py-3 sm:grid-cols-[24px_64px_minmax(0,1fr)_40px] sm:px-5"
             >
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-xs bg-primary/10 text-[11px] font-bold text-primary">
+              <span className="absolute left-4 top-3 z-10 inline-flex h-6 w-6 items-center justify-center rounded-br-sm bg-primary text-[11px] font-bold text-white sm:static sm:col-start-1 sm:row-start-1 sm:rounded-sm sm:bg-slate-100 sm:text-primary">
                 {String(index + 1).padStart(2, '0')}
               </span>
-              <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xs border border-border bg-muted/40">
+              <div className="col-start-1 row-start-1 h-16 w-16 overflow-hidden rounded-xs border border-border bg-muted/40 sm:col-start-2 sm:row-span-2">
                 <AdminFileThumbnail
                   file={
                     item.file ?? {
@@ -280,15 +275,17 @@ export function ProductImageGalleryCard({ productGroupId, canEdit }: ProductImag
                   className="h-full w-full object-cover"
                 />
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] font-semibold text-text">
+              <div className="col-start-2 row-start-1 min-w-0 sm:col-start-3">
+                <p className="truncate text-sm font-semibold text-text">
                   {item.file?.original_filename || `Ảnh ${index + 1}`}
                 </p>
                 {item.product_variant_id ? (
-                  <p className="mt-0.5 text-[11px] font-semibold text-primary">
+                  <p className="mt-0.5 text-xs font-medium text-primary">
                     Ảnh riêng biến thể
                   </p>
                 ) : null}
+              </div>
+              <div className="col-span-2 row-start-2 min-w-0 sm:col-span-1 sm:col-start-3">
                 <label className="sr-only" htmlFor={`product-image-alt-${item.uid}`}>
                   Mô tả ảnh {index + 1}
                 </label>
@@ -297,11 +294,11 @@ export function ProductImageGalleryCard({ productGroupId, canEdit }: ProductImag
                   value={item.alt_text}
                   disabled={!canEdit}
                   onChange={(e) => updateAlt(index, e.target.value)}
-                  placeholder="Mô tả alt (tùy chọn — hỗ trợ SEO/accessibility)"
-                  className="mt-1.5 h-11 text-[12px] md:h-8"
+                  placeholder="Mô tả ảnh (không bắt buộc)"
+                  className="h-11 w-full text-sm md:h-8"
                 />
               </div>
-              <div className="flex shrink-0 flex-col gap-1">
+              <div className="col-span-2 row-start-3 flex justify-end gap-1 sm:col-span-1 sm:col-start-4 sm:row-span-3 sm:row-start-1 sm:flex-col sm:justify-start">
                 <button
                   aria-label={`Đưa ảnh ${index + 1} lên trên`}
                   type="button"
@@ -339,7 +336,7 @@ export function ProductImageGalleryCard({ productGroupId, canEdit }: ProductImag
       )}
 
       {canEdit ? (
-        <div className="mt-4 border-t border-border pt-4">
+        <div className="border-t border-border px-4 py-4 sm:px-5">
           {pickerOpen ? (
             <div className="space-y-2 rounded-sm border border-primary/30 bg-primary/5 p-3">
               <p className="text-[12px] font-semibold text-primaryStrong">Chọn ảnh từ thư viện file</p>

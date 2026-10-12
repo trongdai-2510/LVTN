@@ -1,8 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import type { Knex } from 'knex';
 
+import { AppError } from '../../common/errors/app-error';
+import { ErrorCodes } from '../../common/errors/error-codes';
 import {
   extractPublicFileIdsFromHtml,
+  lockActiveManagedFiles,
   syncManagedFileUsage,
   syncManagedFileUsageSet,
   type FileUsageDatabase
@@ -24,6 +27,7 @@ import {
   type PageContentRecord,
   type PageContentReviewStatus
 } from './page-content.types';
+import { NEWS_CATEGORY_TABLE } from '../news-category/news-category.types';
 
 interface ListFilters {
   q: string | null;
@@ -33,6 +37,13 @@ interface ListFilters {
   content_type: 'page' | 'news' | 'all';
   deleted_scope: PageContentDeletedScope;
 }
+
+export type PageContentWriteOutcome =
+  | { status: 'updated' }
+  | { status: 'not_found' }
+  | { status: 'archived' }
+  | { status: 'not_archived' }
+  | { status: 'stale'; current_updated_at: Date };
 
 @Injectable()
 export class PageContentRepository {
@@ -59,7 +70,44 @@ export class PageContentRepository {
         `${alias}.updated_by`,
         `${alias}.created_at`,
         `${alias}.updated_at`,
-        `${alias}.deleted_at`
+        `${alias}.deleted_at`,
+        this.knexService.db.raw(
+          `(
+            NULLIF(
+              BTRIM(
+                REGEXP_REPLACE(
+                  REGEXP_REPLACE(COALESCE(${alias}.content_html, ''), '<[^>]*>', '', 'g'),
+                  '&nbsp;',
+                  ' ',
+                  'gi'
+                )
+              ),
+              ''
+            ) IS NOT NULL
+            OR EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(
+                CASE
+                  WHEN jsonb_typeof(COALESCE(${alias}.extra_blocks, '{}'::jsonb)->'blocks') = 'array'
+                    THEN COALESCE(${alias}.extra_blocks, '{}'::jsonb)->'blocks'
+                  ELSE '[]'::jsonb
+                END
+              ) AS content_block
+              WHERE content_block->>'type' = 'image_card'
+                OR (
+                  content_block->>'type' IN ('bullet_list', 'card_grid')
+                  AND jsonb_typeof(content_block->'items') = 'array'
+                  AND jsonb_array_length(content_block->'items') > 0
+                )
+            )
+          ) AS has_meaningful_body`
+        ),
+        this.knexService.db.raw(
+          `NULLIF(BTRIM(COALESCE(${alias}.seo_title, '')), '') IS NOT NULL AS has_seo_title`
+        ),
+        this.knexService.db.raw(
+          `NULLIF(BTRIM(COALESCE(${alias}.seo_description, '')), '') IS NOT NULL AS has_seo_description`
+        )
       )
       .orderByRaw(`CASE WHEN ${alias}.deleted_at IS NULL THEN 0 ELSE 1 END ASC`)
       .orderBy(`${alias}.updated_at`, 'desc')
@@ -101,12 +149,27 @@ export class PageContentRepository {
     return rows.length === ids.length;
   }
 
+  async activeNewsCategoryExists(categoryId: string): Promise<boolean> {
+    const row = await this.knexService
+      .db(NEWS_CATEGORY_TABLE)
+      .where({ id: categoryId })
+      .whereNull('deleted_at')
+      .first('id');
+    return Boolean(row);
+  }
+
   async create(
     input: Required<Pick<PageContentMutationInput, 'title' | 'slug'>> &
       PageContentMutationInput,
     actorId: number
   ): Promise<PageContentRecord> {
     return this.knexService.db.transaction(async (trx) => {
+      await this.lockActiveNewsCategory(
+        trx,
+        input.content_type ?? 'page',
+        input.news_category_id ?? null
+      );
+      await this.lockReferencedFiles(trx, input);
       const [row] = await trx<PageContentRecord>(PAGE_CONTENT_TABLE)
         .insert({
           title: input.title,
@@ -145,14 +208,19 @@ export class PageContentRepository {
   async update(
     id: string,
     input: PageContentMutationInput,
-    actorId: number
-  ): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+    actorId: number,
+    expectedUpdatedAt?: string
+  ): Promise<PageContentWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<PageContentRecord>(PAGE_CONTENT_TABLE)
         .where({ id })
         .forUpdate()
         .first();
-      if (!existing) return;
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
       const nextFeatured = typeof input.featured_image_file_id === 'undefined' ? existing.featured_image_file_id : input.featured_image_file_id;
       const nextOg = typeof input.seo_og_image_file_id === 'undefined' ? existing.seo_og_image_file_id : input.seo_og_image_file_id;
       const nextContentHtml =
@@ -163,6 +231,18 @@ export class PageContentRepository {
         typeof input.extra_blocks === 'undefined'
           ? existing.extra_blocks
           : input.extra_blocks;
+      const nextContentType = input.content_type ?? existing.content_type;
+      const nextNewsCategoryId =
+        typeof input.news_category_id === 'undefined'
+          ? existing.news_category_id
+          : input.news_category_id;
+      await this.lockActiveNewsCategory(trx, nextContentType, nextNewsCategoryId);
+      await this.lockReferencedFiles(trx, {
+        featured_image_file_id: nextFeatured,
+        seo_og_image_file_id: nextOg,
+        content_html: nextContentHtml,
+        extra_blocks: nextExtraBlocks
+      });
       const patch: Record<string, unknown> = { updated_by: actorId };
       for (const field of ['title', 'slug', 'content_type', 'excerpt', 'content_html', 'featured_image_file_id', 'review_status', 'publish_status', 'seo_title', 'seo_description', 'seo_og_image_file_id', 'news_category_id', 'published_at', 'is_featured'] as const) {
         if (typeof input[field] !== 'undefined') patch[field] = input[field];
@@ -189,15 +269,25 @@ export class PageContentRepository {
         existing.extra_blocks,
         nextExtraBlocks
       );
+      return { status: 'updated' };
     });
   }
 
-  async archive(id: string, actorId: number): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async archive(
+    id: string,
+    actorId: number,
+    expectedUpdatedAt?: string
+  ): Promise<PageContentWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<PageContentRecord>(PAGE_CONTENT_TABLE)
         .where({ id })
         .forUpdate()
         .first();
+      if (!existing) return { status: 'not_found' };
+      if (existing.deleted_at) return { status: 'archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
       await trx(PAGE_CONTENT_TABLE).where({ id }).whereNull('deleted_at').update({ deleted_at: trx.fn.now(), updated_by: actorId });
       await this.syncFileUsage(trx, id, PAGE_CONTENT_FEATURED_IMAGE_FIELD_NAME, existing?.featured_image_file_id ?? null, null);
       await this.syncFileUsage(trx, id, PAGE_CONTENT_OG_IMAGE_FIELD_NAME, existing?.seo_og_image_file_id ?? null, null);
@@ -213,15 +303,31 @@ export class PageContentRepository {
         existing?.extra_blocks ?? { blocks: [] },
         { blocks: [] }
       );
+      return { status: 'updated' };
     });
   }
 
-  async restore(id: string, actorId: number): Promise<void> {
-    await this.knexService.db.transaction(async (trx) => {
+  async restore(
+    id: string,
+    actorId: number,
+    expectedUpdatedAt?: string
+  ): Promise<PageContentWriteOutcome> {
+    return this.knexService.db.transaction(async (trx) => {
       const existing = await trx<PageContentRecord>(PAGE_CONTENT_TABLE)
         .where({ id })
         .forUpdate()
         .first();
+      if (!existing) return { status: 'not_found' };
+      if (!existing.deleted_at) return { status: 'not_archived' };
+      if (isStaleWrite(existing.updated_at, expectedUpdatedAt)) {
+        return { status: 'stale', current_updated_at: existing.updated_at };
+      }
+      await this.lockActiveNewsCategory(
+        trx,
+        existing.content_type,
+        existing.news_category_id
+      );
+      await this.lockReferencedFiles(trx, existing);
       await trx(PAGE_CONTENT_TABLE).where({ id }).whereNotNull('deleted_at').update({ deleted_at: null, updated_by: actorId });
       await this.syncFileUsage(trx, id, PAGE_CONTENT_FEATURED_IMAGE_FIELD_NAME, null, existing?.featured_image_file_id ?? null);
       await this.syncFileUsage(trx, id, PAGE_CONTENT_OG_IMAGE_FIELD_NAME, null, existing?.seo_og_image_file_id ?? null);
@@ -237,6 +343,7 @@ export class PageContentRepository {
         { blocks: [] },
         existing?.extra_blocks ?? { blocks: [] }
       );
+      return { status: 'updated' };
     });
   }
 
@@ -260,6 +367,47 @@ export class PageContentRepository {
         previousFiles.get(fieldName) ?? null,
         nextFiles.get(fieldName) ?? null
       );
+    }
+  }
+
+  private async lockReferencedFiles(
+    db: FileUsageDatabase,
+    input: Pick<
+      PageContentMutationInput,
+      | 'featured_image_file_id'
+      | 'seo_og_image_file_id'
+      | 'content_html'
+      | 'extra_blocks'
+    >
+  ): Promise<void> {
+    const fileIds = [
+      input.featured_image_file_id,
+      input.seo_og_image_file_id,
+      ...extractPublicFileIdsFromHtml(input.content_html),
+      ...(input.extra_blocks?.blocks ?? [])
+        .filter((block) => block.type === 'image_card')
+        .map((block) => block.image_file_id)
+    ].filter((id): id is string => Boolean(id));
+    await lockActiveManagedFiles(db, FILE_METADATA_TABLE, fileIds);
+  }
+
+  private async lockActiveNewsCategory(
+    db: FileUsageDatabase,
+    contentType: PageContentRecord['content_type'],
+    categoryId: string | null | undefined
+  ): Promise<void> {
+    if (contentType !== 'news' || !categoryId) return;
+    const category = await db(NEWS_CATEGORY_TABLE)
+      .where({ id: categoryId })
+      .forUpdate()
+      .first<{ id: string; deleted_at: Date | string | null }>(['id', 'deleted_at']);
+    if (!category || category.deleted_at) {
+      throw new AppError({
+        code: ErrorCodes.NOT_FOUND,
+        message: 'Referenced news category was not found.',
+        statusCode: HttpStatus.NOT_FOUND,
+        details: { field: 'news_category_id', news_category_id: categoryId }
+      });
     }
   }
 
@@ -332,4 +480,9 @@ export class PageContentRepository {
     const row = (await query.clone().countDistinct({ total: column }).first()) as { total?: string | number } | undefined;
     return Number(row?.total ?? 0);
   }
+}
+
+function isStaleWrite(actualUpdatedAt: Date, expectedUpdatedAt?: string): boolean {
+  if (!expectedUpdatedAt) return false;
+  return new Date(actualUpdatedAt).getTime() !== new Date(expectedUpdatedAt).getTime();
 }

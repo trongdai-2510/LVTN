@@ -1,20 +1,26 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 
+import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
 import { AppError } from '../../common/errors/app-error';
 import { ErrorCodes } from '../../common/errors/error-codes';
 import { createPaginationMeta, getPaginationParams } from '../../common/pagination/pagination';
 import { slugifyText } from '../../common/text/slugify-text';
 import { normalizeOptionalLocalDate } from '../../common/validation/date-filter';
+import { isVisibilityOnlyUnpublish, reopenPublishedContentAfterMajorEdit } from '../../common/workflow/public-content-review';
 import { ProductGroupService } from '../product-group/product-group.service';
 import {
   BulkUpdateProductVariantsDto,
   CreateProductVariantDto,
   CreateVariantAttributeDto,
   ProductVariantListQueryDto,
+  ProductVariantVersionDto,
   UpdateProductVariantDto,
   UpdateVariantAttributeDto
 } from './product-variant.dto';
 import {
+  PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH,
+  PRODUCT_VARIANT_NAME_MAX_LENGTH,
+  VARIANT_ATTRIBUTE_NAME_MAX_LENGTH,
   assertUuid,
   normalizeDeletedScope,
   normalizeNullableUuid,
@@ -135,17 +141,30 @@ export class ProductVariantService {
     throw this.conflict('Unable to allocate a unique generated SKU.');
   }
 
-  async updateProductVariant(productVariantId: string, input: UpdateProductVariantDto) {
+  async updateProductVariant(productVariantId: string, input: UpdateProductVariantDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_variant_id', productVariantId);
     const current = await this.productVariantRepository.findById(id);
     if (!current) throw this.notFound('Product variant was not found.');
     if (current.deleted_at) throw this.conflict('Product variant is archived.');
-    const mutation = await this.normalizeUpdateInput(id, input, current);
     const imageFileId =
       typeof input.image_file_id === 'undefined'
         ? undefined
         : await this.normalizeVariantImageFileInput(input.image_file_id);
-    await this.productVariantRepository.update(id, mutation, imageFileId);
+    const existingImage = typeof imageFileId === 'undefined'
+      ? null
+      : await this.productVariantRepository.findAdminById(id);
+    const imageChanged = typeof imageFileId !== 'undefined' &&
+      imageFileId !== (existingImage?.image_file_id ?? null);
+    const mutation = await this.normalizeUpdateInput(
+      id, input, current, currentUser?.roles.includes('super_admin') ?? false, imageChanged
+    );
+    const outcome = await this.productVariantRepository.update(
+      id,
+      mutation,
+      imageFileId,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getProductVariantDetail(id);
   }
 
@@ -190,7 +209,8 @@ export class ProductVariantService {
         const effectiveMutation = this.compactMutation(current, normalizedMutation);
 
         if (!dryRun && Object.keys(effectiveMutation).length > 0) {
-          await this.productVariantRepository.update(id, effectiveMutation);
+          const outcome = await this.productVariantRepository.update(id, effectiveMutation);
+          this.assertWriteOutcome(outcome);
         }
 
         updatedCount += 1;
@@ -229,31 +249,30 @@ export class ProductVariantService {
     };
   }
 
-  async archiveProductVariant(productVariantId: string) {
+  async archiveProductVariant(productVariantId: string, input: ProductVariantVersionDto) {
     const id = assertUuid('product_variant_id', productVariantId);
     const current = await this.productVariantRepository.findById(id);
     if (!current) throw this.notFound('Product variant was not found.');
     if (current.deleted_at) throw this.conflict('Product variant is already archived.');
-    const counts = await this.productVariantRepository.dependencyCounts(id);
-    if (counts.active_quote_items > 0) {
-      throw new AppError({
-        code: 'PRODUCT_VARIANT_ARCHIVE_BLOCKED',
-        message: 'Product variant cannot be archived because active quote items still reference it.',
-        statusCode: HttpStatus.CONFLICT,
-        details: { ...counts }
-      });
-    }
-    await this.productVariantRepository.archive(id);
+    const outcome = await this.productVariantRepository.archive(
+      id,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getProductVariantDetail(id);
   }
 
-  async restoreProductVariant(productVariantId: string) {
+  async restoreProductVariant(productVariantId: string, input: ProductVariantVersionDto) {
     const id = assertUuid('product_variant_id', productVariantId);
     const current = await this.productVariantRepository.findById(id);
     if (!current) throw this.notFound('Product variant was not found.');
     if (!current.deleted_at) throw this.conflict('Product variant is not archived.');
     await this.productGroupService.assertProductGroupUsableForBusiness(current.product_group_id);
-    await this.productVariantRepository.restore(id);
+    const outcome = await this.productVariantRepository.restore(
+      id,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getProductVariantDetail(id);
   }
 
@@ -266,14 +285,58 @@ export class ProductVariantService {
     };
   }
 
-  async createVariantAttribute(productVariantId: string, input: CreateVariantAttributeDto) {
+  private assertWriteOutcome(
+    outcome: Awaited<ReturnType<ProductVariantRepository['update']>>
+  ): void {
+    if (outcome.status === 'updated') return;
+    if (outcome.status === 'not_found') {
+      throw this.notFound('Product variant was not found.');
+    }
+    if (outcome.status === 'stale') {
+      throw new AppError({
+        code: 'PRODUCT_VARIANT_VERSION_CONFLICT',
+        message:
+          'Biến thể sản phẩm đã được thay đổi bởi một phiên quản trị khác. Hãy tải lại dữ liệu mới trước khi lưu tiếp.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { current_updated_at: outcome.current_updated_at }
+      });
+    }
+    if (outcome.status === 'blocked') {
+      throw new AppError({
+        code: 'PRODUCT_VARIANT_ARCHIVE_BLOCKED',
+        message: 'Product variant cannot be archived because active quote items still reference it.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { ...outcome.dependency_counts }
+      });
+    }
+    if (outcome.status === 'move_blocked') {
+      throw new AppError({
+        code: 'PRODUCT_VARIANT_MOVE_BLOCKED_BY_DOCUMENTS',
+        message:
+          'Product variant cannot move to another group while active technical documents still reference it.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { active_documents: outcome.active_documents }
+      });
+    }
+    throw this.conflict(
+      outcome.status === 'archived'
+        ? 'Product variant is archived.'
+        : 'Product variant is not archived.'
+    );
+  }
+
+  async createVariantAttribute(productVariantId: string, input: CreateVariantAttributeDto, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_variant_id', productVariantId);
     await this.assertVariantEditable(id);
     const created = await this.productVariantRepository.createAttribute(id, {
-      attribute_name: normalizeRequiredText('attribute_name', input.attribute_name),
+      attribute_name: normalizeRequiredText(
+        'attribute_name',
+        input.attribute_name,
+        VARIANT_ATTRIBUTE_NAME_MAX_LENGTH
+      ),
       attribute_value: normalizeRequiredText('attribute_value', input.attribute_value),
       display_order: input.display_order ?? 0
-    });
+    }, !currentUser?.roles.includes('super_admin'));
     return {
       attribute: created,
       items: await this.productVariantRepository.listAttributes(id)
@@ -283,7 +346,8 @@ export class ProductVariantService {
   async updateVariantAttribute(
     productVariantId: string,
     attributeId: string,
-    input: UpdateVariantAttributeDto
+    input: UpdateVariantAttributeDto,
+    currentUser: CurrentUserContext | null
   ) {
     const id = assertUuid('product_variant_id', productVariantId);
     const normalizedAttributeId = assertUuid('attribute_id', attributeId);
@@ -296,7 +360,13 @@ export class ProductVariantService {
     if (current.deleted_at) throw this.conflict('Variant attribute is archived.');
     await this.productVariantRepository.updateAttribute(id, normalizedAttributeId, {
       ...(typeof input.attribute_name !== 'undefined'
-        ? { attribute_name: normalizeRequiredText('attribute_name', input.attribute_name) }
+        ? {
+            attribute_name: normalizeRequiredText(
+              'attribute_name',
+              input.attribute_name,
+              VARIANT_ATTRIBUTE_NAME_MAX_LENGTH
+            )
+          }
         : {}),
       ...(typeof input.attribute_value !== 'undefined'
         ? { attribute_value: normalizeRequiredText('attribute_value', input.attribute_value) }
@@ -304,7 +374,7 @@ export class ProductVariantService {
       ...(typeof input.display_order !== 'undefined'
         ? { display_order: input.display_order }
         : {})
-    });
+    }, !currentUser?.roles.includes('super_admin'));
     return {
       attribute: await this.productVariantRepository.findAttributeById(
         id,
@@ -314,7 +384,7 @@ export class ProductVariantService {
     };
   }
 
-  async archiveVariantAttribute(productVariantId: string, attributeId: string) {
+  async archiveVariantAttribute(productVariantId: string, attributeId: string, currentUser: CurrentUserContext | null) {
     const id = assertUuid('product_variant_id', productVariantId);
     const normalizedAttributeId = assertUuid('attribute_id', attributeId);
     await this.assertVariantEditable(id);
@@ -324,7 +394,7 @@ export class ProductVariantService {
     );
     if (!current) throw this.notFound('Variant attribute was not found.');
     if (current.deleted_at) throw this.conflict('Variant attribute is already archived.');
-    await this.productVariantRepository.archiveAttribute(id, normalizedAttributeId);
+    await this.productVariantRepository.archiveAttribute(id, normalizedAttributeId, !currentUser?.roles.includes('super_admin'));
     return {
       items: await this.productVariantRepository.listAttributes(id)
     };
@@ -333,10 +403,14 @@ export class ProductVariantService {
   private async normalizeCreateInput(input: CreateProductVariantDto) {
     const productGroupId = assertUuid('product_group_id', input.product_group_id);
     await this.productGroupService.assertProductGroupUsableForBusiness(productGroupId);
-    const variantName = normalizeRequiredText('variant_name', input.variant_name);
+    const variantName = normalizeRequiredText(
+      'variant_name',
+      input.variant_name,
+      PRODUCT_VARIANT_NAME_MAX_LENGTH
+    );
     const sku =
       typeof input.sku === 'string' && input.sku.trim() !== ''
-        ? normalizeRequiredText('sku', input.sku)
+        ? normalizeRequiredText('sku', input.sku, PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH)
         : await this.generateSku(variantName);
     const price = resolvePriceState({
       currentMode: 'contact_for_quote',
@@ -346,11 +420,22 @@ export class ProductVariantService {
     });
     const mutation = {
       product_group_id: productGroupId,
-      external_code: normalizeNullableText(input.external_code) ?? null,
+      external_code:
+        normalizeNullableText(
+          'external_code',
+          input.external_code,
+          PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH
+        ) ?? null,
       sku,
-      model_code: normalizeNullableText(input.model_code) ?? null,
+      model_code:
+        normalizeNullableText(
+          'model_code',
+          input.model_code,
+          PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH
+        ) ?? null,
       variant_name: variantName,
-      detailed_description: normalizeNullableText(input.detailed_description) ?? null,
+      detailed_description:
+        normalizeNullableText('detailed_description', input.detailed_description) ?? null,
       public_price_mode: price.public_price_mode,
       public_price_amount: price.public_price_amount,
       review_status: normalizeReviewStatus(input.review_status) ?? 'draft',
@@ -383,17 +468,48 @@ export class ProductVariantService {
       | 'status'
       | 'sort_order'
     >,
-    currentRecord?: ProductVariantRecord
+    currentRecord?: ProductVariantRecord,
+    actorIsSuperAdmin = false,
+    imageChanged = false
   ): Promise<ProductVariantMutationInput> {
     const current = currentRecord ?? (await this.productVariantRepository.findById(id));
     if (!current) throw this.notFound('Product variant was not found.');
     const mutation: ProductVariantMutationInput = {};
     if (typeof input.product_group_id !== 'undefined') mutation.product_group_id = assertUuid('product_group_id', input.product_group_id);
-    if (typeof input.external_code !== 'undefined') mutation.external_code = normalizeNullableText(input.external_code) ?? null;
-    if (typeof input.sku !== 'undefined') mutation.sku = normalizeRequiredText('sku', input.sku);
-    if (typeof input.model_code !== 'undefined') mutation.model_code = normalizeNullableText(input.model_code) ?? null;
-    if (typeof input.variant_name !== 'undefined') mutation.variant_name = normalizeRequiredText('variant_name', input.variant_name);
-    if (typeof input.detailed_description !== 'undefined') mutation.detailed_description = normalizeNullableText(input.detailed_description) ?? null;
+    if (typeof input.external_code !== 'undefined') {
+      mutation.external_code =
+        normalizeNullableText(
+          'external_code',
+          input.external_code,
+          PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH
+        ) ?? null;
+    }
+    if (typeof input.sku !== 'undefined') {
+      mutation.sku = normalizeRequiredText(
+        'sku',
+        input.sku,
+        PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH
+      );
+    }
+    if (typeof input.model_code !== 'undefined') {
+      mutation.model_code =
+        normalizeNullableText(
+          'model_code',
+          input.model_code,
+          PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH
+        ) ?? null;
+    }
+    if (typeof input.variant_name !== 'undefined') {
+      mutation.variant_name = normalizeRequiredText(
+        'variant_name',
+        input.variant_name,
+        PRODUCT_VARIANT_NAME_MAX_LENGTH
+      );
+    }
+    if (typeof input.detailed_description !== 'undefined') {
+      mutation.detailed_description =
+        normalizeNullableText('detailed_description', input.detailed_description) ?? null;
+    }
     if (typeof input.review_status !== 'undefined') mutation.review_status = normalizeReviewStatus(input.review_status);
     if (typeof input.publish_status !== 'undefined') mutation.publish_status = normalizePublishStatus(input.publish_status);
     if (typeof input.status !== 'undefined') mutation.status = normalizeStatus(input.status);
@@ -410,6 +526,21 @@ export class ProductVariantService {
       mutation.public_price_amount = price.public_price_amount;
     }
 
+    if (isVisibilityOnlyUnpublish(input)) return mutation;
+
+    reopenPublishedContentAfterMajorEdit(current, mutation, [
+      'product_group_id', 'external_code', 'sku', 'model_code', 'variant_name',
+      'detailed_description', 'public_price_mode', 'public_price_amount',
+      'status', 'sort_order'
+    ], actorIsSuperAdmin);
+    if (imageChanged) {
+      const reviewMutation = { ...mutation, image_changed: true };
+      reopenPublishedContentAfterMajorEdit(
+        { ...current, image_changed: false }, reviewMutation, ['image_changed'], actorIsSuperAdmin
+      );
+      mutation.review_status = reviewMutation.review_status;
+      mutation.publish_status = reviewMutation.publish_status;
+    }
     const next = { ...current, ...mutation };
     await this.productGroupService.assertProductGroupUsableForBusiness(next.product_group_id);
     await this.assertUniqueIdentifiers(mutation, id);
@@ -605,14 +736,20 @@ export class ProductVariantService {
   }
 
   private async generateSku(variantName: string): Promise<string> {
-    const base = `SKU-${slugifyText(variantName).toUpperCase()}`;
+    const prefix = 'SKU-';
+    const normalizedName = slugifyText(variantName).toUpperCase();
+    const base = `${prefix}${normalizedName.slice(0, PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH - prefix.length)}`
+      .replace(/-+$/g, '');
     let candidate = base;
     let suffix = 2;
 
     while (
       await this.productVariantRepository.uniqueValueExists('sku', candidate)
     ) {
-      candidate = `${base}-${suffix}`;
+      const suffixText = `-${suffix}`;
+      candidate = `${base
+        .slice(0, PRODUCT_VARIANT_IDENTIFIER_MAX_LENGTH - suffixText.length)
+        .replace(/-+$/g, '')}${suffixText}`;
       suffix += 1;
     }
 

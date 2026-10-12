@@ -3,6 +3,17 @@ import type { NextConfig } from 'next';
 const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:4000';
 const isProduction = process.env.NODE_ENV === 'production';
 
+function configuredOrigin(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !url.username && !url.password
+      ? url.origin
+      : '';
+  } catch {
+    return '';
+  }
+}
+
 function buildContentSecurityPolicy() {
   const localDevelopmentSources = isProduction
     ? ''
@@ -10,6 +21,10 @@ function buildContentSecurityPolicy() {
   const localDevelopmentConnections = isProduction
     ? ''
     : ' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*';
+  // Match the browser-side API and preview defaults. Production CSP must not
+  // block configured HTTP origins when admin is served on a different port.
+  const browserApiOrigin = configuredOrigin(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000');
+  const publicFrameSource = configuredOrigin(process.env.NEXT_PUBLIC_PUBLIC_SITE_URL || 'http://localhost:3000');
   const directives = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -18,10 +33,10 @@ function buildContentSecurityPolicy() {
     "object-src 'none'",
     `script-src 'self' 'unsafe-inline'${isProduction ? '' : " 'unsafe-eval'"}`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data: blob: https:${localDevelopmentSources}`,
+    `img-src 'self' data: blob: https:${localDevelopmentSources}${browserApiOrigin ? ` ${browserApiOrigin}` : ''}`,
     "font-src 'self' data:",
-    `connect-src 'self' https: wss:${localDevelopmentConnections}`,
-    "frame-src 'self' https:"
+    `connect-src 'self' https: wss:${localDevelopmentConnections}${browserApiOrigin ? ` ${browserApiOrigin}` : ''}`,
+    `frame-src 'self' https:${localDevelopmentSources}${publicFrameSource ? ` ${publicFrameSource}` : ''}`
   ];
 
   return directives.join('; ');
@@ -38,6 +53,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  agentRules: false,
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,

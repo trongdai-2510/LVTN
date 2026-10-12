@@ -8,6 +8,7 @@ import { ProductGroupService } from '../product-group/product-group.service';
 import {
   CreateTechnicalDocumentDto,
   TechnicalDocumentListQueryDto,
+  TechnicalDocumentVersionDto,
   UpdateTechnicalDocumentDto
 } from './technical-document.dto';
 import {
@@ -94,20 +95,43 @@ export class TechnicalDocumentService {
     if (!existing) throw this.notFound('Technical document was not found.');
     if (existing.deleted_at) throw this.conflict('Technical document is archived.');
     const mutation = await this.normalizeUpdateInput(input);
-    await this.technicalDocumentRepository.update(id, mutation);
+    await this.assertReferencesUsable({
+      product_group_id: mutation.product_group_id ?? existing.product_group_id,
+      product_variant_id:
+        typeof mutation.product_variant_id === 'undefined'
+          ? existing.product_variant_id
+          : mutation.product_variant_id,
+      file_id: mutation.file_id ?? existing.file_id
+    });
+    const outcome = await this.technicalDocumentRepository.update(
+      id,
+      mutation,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getTechnicalDocumentDetail(id);
   }
 
-  async archiveTechnicalDocument(technicalDocumentId: string) {
+  async archiveTechnicalDocument(
+    technicalDocumentId: string,
+    input: TechnicalDocumentVersionDto
+  ) {
     const id = assertUuid('technical_document_id', technicalDocumentId);
     const existing = await this.technicalDocumentRepository.findById(id);
     if (!existing) throw this.notFound('Technical document was not found.');
     if (existing.deleted_at) throw this.conflict('Technical document is already archived.');
-    await this.technicalDocumentRepository.archive(id);
+    const outcome = await this.technicalDocumentRepository.archive(
+      id,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getTechnicalDocumentDetail(id);
   }
 
-  async restoreTechnicalDocument(technicalDocumentId: string) {
+  async restoreTechnicalDocument(
+    technicalDocumentId: string,
+    input: TechnicalDocumentVersionDto
+  ) {
     const id = assertUuid('technical_document_id', technicalDocumentId);
     const existing = await this.technicalDocumentRepository.findById(id);
     if (!existing) throw this.notFound('Technical document was not found.');
@@ -117,7 +141,11 @@ export class TechnicalDocumentService {
       product_variant_id: existing.product_variant_id,
       file_id: existing.file_id
     });
-    await this.technicalDocumentRepository.restore(id);
+    const outcome = await this.technicalDocumentRepository.restore(
+      id,
+      input.expected_updated_at
+    );
+    this.assertWriteOutcome(outcome);
     return this.getTechnicalDocumentDetail(id);
   }
 
@@ -137,8 +165,30 @@ export class TechnicalDocumentService {
       status: normalizeStatus(input.status) ?? 'active',
       sort_order: input.sort_order ?? 0
     };
-    await this.assertReferencesUsable(mutation);
     return mutation;
+  }
+
+  private assertWriteOutcome(
+    outcome: Awaited<ReturnType<TechnicalDocumentRepository['update']>>
+  ): void {
+    if (outcome.status === 'updated') return;
+    if (outcome.status === 'not_found') {
+      throw this.notFound('Technical document was not found.');
+    }
+    if (outcome.status === 'stale') {
+      throw new AppError({
+        code: 'TECHNICAL_DOCUMENT_VERSION_CONFLICT',
+        message:
+          'Tài liệu kỹ thuật đã được thay đổi bởi một phiên quản trị khác. Hãy tải lại dữ liệu mới trước khi lưu tiếp.',
+        statusCode: HttpStatus.CONFLICT,
+        details: { current_updated_at: outcome.current_updated_at }
+      });
+    }
+    throw this.conflict(
+      outcome.status === 'archived'
+        ? 'Technical document is archived.'
+        : 'Technical document is not archived.'
+    );
   }
 
   private async normalizeUpdateInput(input: UpdateTechnicalDocumentDto): Promise<TechnicalDocumentMutationInput> {

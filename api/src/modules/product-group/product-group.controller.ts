@@ -1,6 +1,8 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 
 import { AuthGuard } from '../../common/auth/auth.guard';
+import { CurrentUser } from '../../common/auth/current-user.decorator';
+import type { CurrentUser as CurrentUserContext } from '../../common/auth/auth.types';
 import { RequirePermissions } from '../../common/permissions/permission.decorator';
 import { PermissionGuard } from '../../common/permissions/permission.guard';
 import { WorkflowApprovalGuard } from '../../common/workflow/workflow-approval.guard';
@@ -9,6 +11,7 @@ import {
   CreateProductGroupDto,
   CreateProductHighlightSpecDto,
   ProductGroupListQueryDto,
+  ProductGroupVersionDto,
   ProductHighlightSpecQueryDto,
   ProductHighlightSpecSuggestionsQueryDto,
   ReorderProductHighlightSpecsDto,
@@ -43,8 +46,8 @@ export class ProductGroupController {
 
   @Put(':id')
   @RequirePermissions('product_group.update')
-  updateProductGroup(@Param('id') id: string, @Body() body: UpdateProductGroupDto) {
-    return this.productGroupService.updateProductGroup(id, body);
+  updateProductGroup(@Param('id') id: string, @Body() body: UpdateProductGroupDto, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.productGroupService.updateProductGroup(id, body, currentUser);
   }
 
   @Post('bulk-status')
@@ -75,9 +78,10 @@ export class ProductGroupController {
   @RequirePermissions('product_group.update')
   createProductHighlightSpec(
     @Param('id') id: string,
-    @Body() body: CreateProductHighlightSpecDto
+    @Body() body: CreateProductHighlightSpecDto,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.productGroupService.createProductHighlightSpec(id, body);
+    return this.productGroupService.createProductHighlightSpec(id, body, currentUser);
   }
 
   @Put(':id/highlight-specs/:highlightId')
@@ -85,9 +89,10 @@ export class ProductGroupController {
   updateProductHighlightSpec(
     @Param('id') id: string,
     @Param('highlightId') highlightId: string,
-    @Body() body: UpdateProductHighlightSpecDto
+    @Body() body: UpdateProductHighlightSpecDto,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.productGroupService.updateProductHighlightSpec(id, highlightId, body);
+    return this.productGroupService.updateProductHighlightSpec(id, highlightId, body, currentUser);
   }
 
   @Post(':id/highlight-specs/reorder')
@@ -95,9 +100,10 @@ export class ProductGroupController {
   @RequirePermissions('product_group.update')
   reorderProductHighlightSpecs(
     @Param('id') id: string,
-    @Body() body: ReorderProductHighlightSpecsDto
+    @Body() body: ReorderProductHighlightSpecsDto,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.productGroupService.reorderProductHighlightSpecs(id, body);
+    return this.productGroupService.reorderProductHighlightSpecs(id, body, currentUser);
   }
 
   @Post(':id/highlight-specs/:highlightId/archive')
@@ -105,9 +111,10 @@ export class ProductGroupController {
   @RequirePermissions('product_group.update')
   archiveProductHighlightSpec(
     @Param('id') id: string,
-    @Param('highlightId') highlightId: string
+    @Param('highlightId') highlightId: string,
+    @CurrentUser() currentUser: CurrentUserContext | null
   ) {
-    return this.productGroupService.archiveProductHighlightSpec(id, highlightId);
+    return this.productGroupService.archiveProductHighlightSpec(id, highlightId, currentUser);
   }
 
   @Get(':id/images')
@@ -118,21 +125,21 @@ export class ProductGroupController {
 
   @Put(':id/images')
   @RequirePermissions('product_group.update')
-  replaceProductImages(@Param('id') id: string, @Body() body: ReplaceProductGalleryDto) {
-    return this.productGroupService.replaceProductImages(id, body);
+  replaceProductImages(@Param('id') id: string, @Body() body: ReplaceProductGalleryDto, @CurrentUser() currentUser: CurrentUserContext | null) {
+    return this.productGroupService.replaceProductImages(id, body, currentUser);
   }
 
   @Post(':id/archive')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('product_group.archive')
-  archiveProductGroup(@Param('id') id: string) {
-    return this.productGroupService.archiveProductGroup(id);
+  archiveProductGroup(@Param('id') id: string, @Body() body: ProductGroupVersionDto) {
+    return this.productGroupService.archiveProductGroup(id, body);
   }
 
   @Post(':id/restore')
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('product_group.restore')
-  restoreProductGroup(@Param('id') id: string) {
-    return this.productGroupService.restoreProductGroup(id);
+  restoreProductGroup(@Param('id') id: string, @Body() body: ProductGroupVersionDto) {
+    return this.productGroupService.restoreProductGroup(id, body);
   }
 }
