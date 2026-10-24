@@ -546,9 +546,6 @@ export function AdminRolesPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-text">Vai trò & quyền</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Chọn vai trò để xem và quản lý quyền truy cập.
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {!detailLoading && selectedRole ? (
@@ -573,7 +570,7 @@ export function AdminRolesPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <div className="w-full sm:w-64">
                   <label className="relative block">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#626275]" />
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
                       aria-label="Tìm vai trò"
                       className={cn(filterControlClass, 'pl-9')}
@@ -606,7 +603,7 @@ export function AdminRolesPage() {
         </div>
 
               {selectedRole && !roles.some((role) => role.id === selectedRole.id) && !listLoading ? (
-                <div className="mt-3 rounded-[8px] bg-[#EEF2FF] px-3 py-2 text-[12px] text-[#0C447C]">
+                <div className="mt-3 rounded-md bg-primary/10 px-3 py-2 text-sm text-primary-hover">
                   Đang sửa {selectedRole.name}. Vai trò này nằm ngoài bộ lọc danh sách.
                 </div>
               ) : null}
@@ -667,7 +664,7 @@ export function AdminRolesPage() {
                         {selectedRole.name}
                       </h2>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <code className="font-mono text-[12px] text-[#626275]">
+                        <code className="font-mono text-xs text-muted-foreground">
                           {selectedRole.code}
                         </code>
                         <RoleTypeBadge isProtected={selectedRole.is_protected} />
@@ -675,7 +672,7 @@ export function AdminRolesPage() {
                         {selectedRole.is_super_admin ? <SuperAdminBadge /> : null}
                       </div>
                       {rolePurpose ? (
-                        <p className="mt-2 max-w-3xl text-[12px] leading-5 text-[#626275]">
+                        <p className="mt-2 max-w-3xl text-sm leading-5 text-muted-foreground">
                           {rolePurpose}
                         </p>
                       ) : null}
@@ -686,7 +683,7 @@ export function AdminRolesPage() {
                         type="button"
                         variant="secondary"
                         disabled={selectedRole.is_protected}
-                        className="h-[34px] rounded-[8px] border-[0.5px] border-[#E5E5EA] bg-white px-3 text-[12px] font-medium text-[#1A1A2E] hover:border-[#C8C8D4] hover:bg-[#F9F9FB] focus:ring-[#C5D0FA] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="min-h-11 rounded-md border border-border bg-white px-3 text-sm font-medium text-text hover:border-primary/35 hover:bg-surface focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
                         onClick={() => setArchiveTarget(selectedRole)}
                       >
                         Lưu trữ vai trò
@@ -702,7 +699,7 @@ export function AdminRolesPage() {
                   </div>
 
                   {selectedRole.is_protected ? (
-                    <div className="mt-3 flex items-start gap-2 rounded-[8px] border-[0.5px] border-[#C5D0FA] bg-[#EEF2FF] px-3 py-2.5 text-[12px] text-[#0C447C]">
+                    <div className="mt-3 flex items-start gap-2 rounded-md border border-primary/20 bg-primary/10 px-3 py-2.5 text-sm text-primary-hover">
                       <Info className="mt-0.5 h-4 w-4 shrink-0" />
                       <div>
                         {selectedRole.is_super_admin
@@ -713,7 +710,7 @@ export function AdminRolesPage() {
                   ) : null}
                 </div>
 
-                {!selectedRole.is_protected ? <div className="border-b-[0.5px] border-[#E5E5EA] px-6 py-4">
+                {!selectedRole.is_protected ? <div className="border-b border-border px-6 py-4">
                   {!isSuperAdmin ? (
                     <div className="rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900">
                       Chỉ Super Admin được chỉnh vai trò và cấp quyền. Bạn đang xem ở chế độ chỉ đọc.
@@ -748,18 +745,18 @@ export function AdminRolesPage() {
                     </LabeledField>
 
                     <div className="lg:col-span-2">
-                      <div className="overflow-hidden rounded-[10px] border-[0.5px] border-[#E5E5EA] bg-[#FAFAFA]">
+                      <div className="overflow-hidden rounded-lg border border-border bg-surface">
                         <button
                           type="button"
                           className="flex w-full items-center justify-between px-4 py-3 text-left"
                           onClick={() => setAdvancedOpen((current) => !current)}
                         >
                           <div>
-                            <div className="text-[12px] font-medium uppercase tracking-[0.06em] text-[#626275]">
+                            <div className="text-xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
                               Thông tin nâng cao
                             </div>
                           </div>
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#626275]">
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
                             {advancedOpen ? 'Thu gọn' : 'Mở'}
                             {advancedOpen ? (
                               <ChevronUp className="h-4 w-4" />
@@ -770,22 +767,21 @@ export function AdminRolesPage() {
                         </button>
 
                         {advancedOpen ? (
-                          <div className="border-t-[0.5px] border-[#E5E5EA] bg-white px-4 py-4">
+                          <div className="border-t border-border bg-white px-4 py-4">
                             <LabeledField
                               label="Mô tả"
-                                hint="Giúp quản trị viên nhận biết phạm vi vai trò."
                             >
                               <textarea
                                 rows={3}
                                 value={description}
                                 disabled={!canEditMetadata || savePending}
                                 onChange={(event) => setDescription(event.target.value)}
-                                className="w-full rounded-[8px] border-[0.5px] border-[#E5E5EA] bg-white px-3 py-2.5 text-[13px] text-[#1A1A2E] outline-none transition-colors placeholder:text-[#626275] focus:border-[#C8C8D4] focus:ring-2 focus:ring-[#EEF2FF] disabled:bg-[#F4F4F7] disabled:text-[#626275]"
+                                className="w-full rounded-md border border-border bg-white px-3 py-2.5 text-sm text-text outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-muted disabled:text-muted-foreground"
                               />
                             </LabeledField>
                           </div>
                         ) : description && description !== rolePurpose ? (
-                          <div className="border-t-[0.5px] border-[#E5E5EA] px-4 py-3 text-[11px] text-[#626275]">
+                          <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
                             Mô tả hiện tại: {description}
                           </div>
                         ) : null}
@@ -803,7 +799,7 @@ export function AdminRolesPage() {
 
                     <div className="flex flex-col gap-2 md:flex-row md:items-center">
                       <label className="relative block min-w-0 flex-1">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#626275]" />
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           aria-label="Tìm quyền"
                           value={permissionQuery}
@@ -832,10 +828,10 @@ export function AdminRolesPage() {
                             key={option.value}
                             type="button"
                             className={cn(
-                              'inline-flex min-h-9 items-center rounded-[99px] border-[0.5px] px-3 text-[11px] font-medium transition-colors',
+                              'inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-medium transition-colors',
                               permissionFilter === option.value
-                                ? 'border-[#C5D0FA] bg-[#EEF2FF] text-[#185FA5]'
-                                : 'border-[#E5E5EA] bg-white text-[#626275] hover:border-[#C8C8D4] hover:bg-[#F9F9FB]'
+                                ? 'border-primary/25 bg-primary/10 text-primary'
+                                : 'border-border bg-white text-muted-foreground hover:border-primary/35 hover:bg-surface'
                             )}
                             onClick={() => setPermissionFilter(option.value)}
                           >
@@ -856,7 +852,7 @@ export function AdminRolesPage() {
                   ) : null}
 
                   {visiblePermissionGroups.length === 0 ? (
-                    <div className="mt-4 rounded-[10px] border-[0.5px] border-dashed border-[#C8C8D4] bg-[#FAFAFA] px-4 py-6 text-[12px] text-[#626275]">
+                    <div className="mt-4 rounded-lg border border-dashed border-border bg-surface px-4 py-6 text-sm text-muted-foreground">
                       Không có quyền phù hợp với bộ lọc hiện tại.
                     </div>
                   ) : (
@@ -911,10 +907,10 @@ export function AdminRolesPage() {
                                     key={permission.code}
                                     className={cn(
                                       'flex min-h-12 gap-3 px-[14px] py-3 transition-colors',
-                                      index > 0 && 'border-t-[0.5px] border-[#E5E5EA]',
-                                      index >= 2 && 'lg:border-t-[0.5px]',
+                                      index > 0 && 'border-t border-border',
+                                      index >= 2 && 'lg:border-t',
                                       index < 2 && 'lg:border-t-0',
-                                      index % 2 === 0 && 'lg:border-r-[0.5px]',
+                                      index % 2 === 0 && 'lg:border-r',
                                       checked
                                         ? 'bg-primary/5'
                                         : 'bg-white hover:bg-surface'
@@ -941,7 +937,7 @@ export function AdminRolesPage() {
                                         </div>
                                       </div>
                                       {permission.description ? (
-                                        <div className="mt-1 text-[12px] text-[#626275]">
+                                        <div className="mt-1 text-xs text-muted-foreground">
                                           {permission.description}
                                         </div>
                                       ) : null}
@@ -966,21 +962,17 @@ export function AdminRolesPage() {
                 {canEditMetadata || canEditMatrix ? (
                   <div className="sticky bottom-0 z-10 border-t border-border bg-surface px-5 py-4 shadow-[0_-8px_20px_rgba(15,23,42,0.08)] sm:px-6">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div className="text-[11px] text-[#626275]">
-                        {hasChanges
-                          ? `Chưa lưu: thêm ${addedPermissionCodes.length}, gỡ ${removedPermissionCodes.length} quyền.`
-                          : selectedRole.is_super_admin
-                          ? 'Super Admin không cho chỉnh ma trận quyền.'
-                          : selectedRole.is_protected
-                            ? 'Có thể chỉnh ma trận quyền; tên và mô tả được hệ thống quản lý.'
-                            : 'Chưa có thay đổi.'}
-                      </div>
+                      {hasChanges ? (
+                        <p aria-live="polite" className="text-sm text-muted-foreground">
+                          Chưa lưu: thêm {addedPermissionCodes.length}, gỡ {removedPermissionCodes.length} quyền.
+                        </p>
+                      ) : null}
 
                       <div className="flex items-center justify-end gap-2">
                         <Button
                           type="button"
                           variant="secondary"
-                          className="h-[34px] rounded-[8px] border-[0.5px] border-[#E5E5EA] bg-white px-3 text-[12px] font-medium text-[#1A1A2E] hover:border-[#C8C8D4] hover:bg-[#F9F9FB] focus:ring-[#C5D0FA]"
+                          className="min-h-11 rounded-md border border-border bg-white px-3 text-sm font-medium text-text hover:border-primary/35 hover:bg-surface focus:ring-primary"
                           onClick={resetEditor}
                           disabled={savePending || !hasChanges}
                         >
@@ -988,7 +980,7 @@ export function AdminRolesPage() {
                         </Button>
                         <Button
                           type="button"
-                          className="h-[34px] rounded-[8px] bg-[#185FA5] px-4 text-[12px] font-medium text-white hover:bg-[#154f8a] focus:ring-[#C5D0FA]"
+                          className="min-h-11 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover focus:ring-primary"
                           disabled={
                             savePending ||
                             !hasChanges ||
@@ -1002,7 +994,7 @@ export function AdminRolesPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="border-t-[0.5px] border-[#E5E5EA] bg-[#FAFAFA] px-6 py-3 text-[11px] text-[#626275]">
+                  <div className="border-t border-border bg-surface px-6 py-3 text-xs text-muted-foreground">
                     Vai trò hiện tại chỉ có quyền xem.
                   </div>
                 )}
@@ -1066,7 +1058,7 @@ export function AdminRolesPage() {
                   description: event.target.value
                 }))
               }
-              className="w-full rounded-[8px] border-[0.5px] border-[#E5E5EA] bg-white px-3 py-2.5 text-[13px] text-[#1A1A2E] outline-none transition-colors placeholder:text-[#626275] focus:border-[#C8C8D4] focus:ring-2 focus:ring-[#EEF2FF]"
+              className="w-full rounded-md border border-border bg-white px-3 py-2.5 text-sm text-text outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
               placeholder="Ghi chú nội bộ nếu cần"
             />
           </Field>
@@ -1199,11 +1191,11 @@ function LabeledField({
 }) {
   return (
     <label className="block">
-      <span className="block text-[14px] font-medium text-[#1A1A2E]">
+      <span className="block text-sm font-medium text-text">
         {label}
       </span>
       <div className="mt-1.5">{children}</div>
-      {hint ? <div className="mt-1.5 text-[12px] text-[#626275]">{hint}</div> : null}
+      {hint ? <div className="mt-1.5 text-xs text-muted-foreground">{hint}</div> : null}
     </label>
   );
 }
@@ -1212,8 +1204,8 @@ function RoleTypeBadge({ isProtected }: { isProtected: boolean }) {
   return (
     <span
       className={cn(
-        'inline-flex min-h-5 items-center rounded-[99px] px-2 py-0.5 text-[10px] font-medium',
-        isProtected ? 'bg-[#185FA5] text-white' : 'bg-[#F1EFE8] text-[#444441]'
+        'inline-flex min-h-6 items-center rounded-full px-2 py-0.5 text-xs font-medium',
+        isProtected ? 'bg-primary text-primary-foreground' : 'bg-muted text-text'
       )}
     >
       {isProtected ? 'Hệ thống' : 'Tùy chỉnh'}
@@ -1223,7 +1215,7 @@ function RoleTypeBadge({ isProtected }: { isProtected: boolean }) {
 
 function SuperAdminBadge() {
   return (
-    <span className="inline-flex min-h-5 items-center rounded-[99px] bg-[#EEEDFE] px-2 py-0.5 text-[10px] font-medium text-[#3C3489]">
+    <span className="inline-flex min-h-6 items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary-hover">
       Super Admin
     </span>
   );
@@ -1233,16 +1225,16 @@ function RoleStatusChip({ status }: { status: RoleStatus }) {
   return (
     <span
       className={cn(
-        'inline-flex min-h-6 items-center gap-1.5 rounded-[99px] px-2.5 text-[11px] font-medium',
+        'inline-flex min-h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium',
         status === 'active'
-          ? 'bg-[#EAF3DE] text-[#27500A]'
-          : 'bg-[#FAEEDA] text-[#633806]'
+          ? 'bg-success/10 text-success'
+          : 'bg-warning/10 text-warning'
       )}
     >
       <span
         className={cn(
           'h-1.5 w-1.5 rounded-full',
-          status === 'active' ? 'bg-[#27500A]' : 'bg-[#633806]'
+          status === 'active' ? 'bg-success' : 'bg-warning'
         )}
       />
       {status === 'active' ? 'Hoạt động' : 'Tạm ngưng'}

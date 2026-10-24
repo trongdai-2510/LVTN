@@ -18,26 +18,6 @@ type Suggestion = {
 };
 
 const QUICK_DESTINATIONS = BANNER_POSITION_OPTIONS.map((item) => ({ title: item.label, href: item.value }));
-const FEATURED_PATHS = ['/', '/san-pham', '/san-pham/danh-sach', '/lien-he'];
-
-type PickerSection = 'suggested' | 'pages' | 'products' | 'brands' | 'content' | 'manual';
-
-const PICKER_SECTIONS: { id: PickerSection; label: string; shortLabel?: string }[] = [
-  { id: 'suggested', label: 'Gợi ý' },
-  { id: 'pages', label: 'Trang chính' },
-  { id: 'products', label: 'Sản phẩm' },
-  { id: 'brands', label: 'Thương hiệu' },
-  { id: 'content', label: 'Nội dung' },
-  { id: 'manual', label: 'Dùng đường dẫn khác', shortLabel: 'URL riêng' }
-];
-
-const SECTION_SEARCH_HINTS: Record<Exclude<PickerSection, 'manual'>, string> = {
-  suggested: 'Tìm theo tên trang hoặc nội dung',
-  pages: 'Tìm trang',
-  products: 'Tìm sản phẩm',
-  brands: 'Tìm thương hiệu',
-  content: 'Tìm bài viết hoặc dự án'
-};
 
 const TYPE_LABELS: Record<Suggestion['type'], string> = {
   product_group: 'Sản phẩm',
@@ -96,7 +76,7 @@ export function BannerDestinationPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [manualTarget, setManualTarget] = useState('');
-  const [section, setSection] = useState<PickerSection>('suggested');
+  const [manualOpen, setManualOpen] = useState(false);
   const [chosen, setChosen] = useState<{ href: string; title: string } | null>(null);
   const [resolved, setResolved] = useState<{ href: string; title: string } | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -108,17 +88,10 @@ export function BannerDestinationPicker({
   const manualValid = (manualValue.startsWith('/') && isSafeNavigationTarget(manualValue)) || (allowExternal && isValidHttpUrl(manualValue));
   const searching = trimmedQuery.length > 0;
   const normalizedQuery = normalizeSearch(trimmedQuery);
-  const quickMatches = QUICK_DESTINATIONS.filter((item) => normalizeSearch(item.title).includes(normalizedQuery));
-  const staticResults = !searching
-    ? section === 'pages' ? QUICK_DESTINATIONS : section === 'suggested' ? QUICK_DESTINATIONS.filter((item) => FEATURED_PATHS.includes(item.href)) : []
-    : section === 'suggested' || section === 'pages' ? quickMatches : [];
-  const dynamicResults = suggestions.filter((item) => {
-    if (section === 'pages' || section === 'manual') return false;
-    if (section === 'products') return ['product_group', 'variant', 'category'].includes(item.type);
-    if (section === 'brands') return item.type === 'brand';
-    if (section === 'content') return ['service', 'project', 'news', 'page'].includes(item.type);
-    return true;
-  }).filter((item) => !staticResults.some((page) => page.href === item.href));
+  const staticResults = QUICK_DESTINATIONS.filter((item) => normalizeSearch(`${item.title} ${item.href}`).includes(normalizedQuery));
+  const dynamicResults = suggestions.filter((item) => !staticResults.some((page) => page.href === item.href));
+  const directTarget = trimmedQuery;
+  const canUseDirectTarget = directTarget.startsWith('/') && isSafeNavigationTarget(directTarget);
 
   useEffect(() => {
     if (!value.startsWith('/') || QUICK_DESTINATIONS.some((item) => item.href === value) || chosen?.href === value) return;
@@ -135,7 +108,7 @@ export function BannerDestinationPicker({
   }, [chosen?.href, value]);
 
   useEffect(() => {
-    if (!open || section === 'manual' || trimmedQuery.length < 2) {
+    if (!open || manualOpen || trimmedQuery.length < 2 || trimmedQuery.startsWith('/')) {
       setSuggestions([]);
       setLoading(false);
       setSearchError(false);
@@ -166,13 +139,13 @@ export function BannerDestinationPicker({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, section === 'manual', trimmedQuery]);
+  }, [manualOpen, open, trimmedQuery]);
 
   useEffect(() => {
-    if (open && section === 'manual') {
+    if (open && manualOpen) {
       document.getElementById(`${inputId}-manual`)?.focus();
     }
-  }, [inputId, open, section]);
+  }, [inputId, manualOpen, open]);
 
   function choose(href: string, title?: string) {
     onChange(href);
@@ -184,7 +157,7 @@ export function BannerDestinationPicker({
     setOpen(false);
     setQuery('');
     setManualTarget('');
-    setSection('suggested');
+    setManualOpen(false);
   }
 
   return (
@@ -218,91 +191,68 @@ export function BannerDestinationPicker({
           Mở thử trang đích <ArrowRight className="h-3.5 w-3.5" />
         </a>
       ) : null}
-      <Modal open={open} title="Chọn trang đích" onClose={closePicker} panelClassName="sm:max-w-[760px]" bodyClassName="overflow-hidden p-0">
+      <Modal open={open} title="Chọn trang đích" onClose={closePicker} panelClassName="sm:max-w-[640px]" bodyClassName="overflow-hidden p-0">
         <div className="flex min-h-0 flex-col" data-banner-destination-panel="true">
-          {section !== 'manual' ? (
-            <div className="shrink-0 border-b border-border px-4 py-3 sm:px-5">
-              <label className="sr-only" htmlFor={`${inputId}-search`}>Tìm trang, sản phẩm hoặc thương hiệu</label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id={`${inputId}-search`}
-                  aria-label="Tìm trang, sản phẩm hoặc thương hiệu"
-                  autoComplete="off"
-                  data-modal-autofocus="true"
-                  className="h-11 pl-9"
-                  placeholder={SECTION_SEARCH_HINTS[section]}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </div>
+          <div className="shrink-0 border-b border-border px-4 py-3 sm:px-5">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id={`${inputId}-search`}
+                aria-label="Tìm trang, sản phẩm hoặc thương hiệu"
+                autoComplete="off"
+                data-modal-autofocus="true"
+                className="h-11 pl-9"
+                placeholder="Tìm trang, sản phẩm, thương hiệu..."
+                value={query}
+                onChange={(event) => { setQuery(event.target.value); setManualOpen(false); }}
+              />
             </div>
-          ) : null}
-          <div className="flex min-h-0 flex-col sm:flex-row">
-            <nav aria-label="Loại trang đích" className="grid shrink-0 grid-cols-3 gap-1 border-b border-border bg-slate-50 p-2 sm:w-[170px] sm:grid-cols-1 sm:content-start sm:border-b-0 sm:border-r sm:p-3">
-              {PICKER_SECTIONS.map((item) => (
-                <button
-                  key={item.id}
-                  aria-label={item.label}
-                  aria-pressed={section === item.id}
-                  className={cn('min-h-11 rounded-lg px-2 py-2 text-center text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:px-3 sm:text-left sm:text-sm', section === item.id ? 'bg-primary text-white shadow-sm' : 'text-text hover:bg-blue-100')}
-                  onClick={() => setSection(item.id)}
-                  type="button"
-                >{item.shortLabel ? <><span className="sm:hidden">{item.shortLabel}</span><span className="hidden sm:inline">{item.label}</span></> : item.label}</button>
-              ))}
-            </nav>
-            <div className="min-h-0 max-h-[min(360px,calc(100dvh-260px))] flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:max-h-[min(360px,calc(100dvh-190px))] sm:px-5" data-banner-destination-results="true">
-              {section === 'manual' ? (
-                <div className="max-w-lg space-y-4">
-                  <div>
-                    <h3 className="text-lg font-semibold text-text">Nhập đường dẫn riêng</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Dùng khi trang cần mở chưa có trong kết quả tìm kiếm.</p>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-text" htmlFor={`${inputId}-manual`}>Đường dẫn trang{allowExternal ? ' hoặc website khác' : ''}</label>
-                    <Input id={`${inputId}-manual`} inputMode="url" placeholder={allowExternal ? '/san-pham/... hoặc https://...' : '/san-pham/...'} value={manualTarget} onChange={(event) => setManualTarget(event.target.value)} />
-                    {manualValue && !manualValid ? <p className="text-xs text-red-700">Nhập đường dẫn bắt đầu bằng /{allowExternal ? ' hoặc địa chỉ http/https hợp lệ' : ''}.</p> : null}
-                  </div>
-                  <button className="min-h-11 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50" disabled={!manualValid} onClick={() => choose(manualValue, manualValue)} type="button">Dùng đường dẫn này</button>
+          </div>
+          <div className="min-h-0 max-h-[min(440px,calc(100dvh-190px))] overflow-y-auto overscroll-contain px-4 py-3 sm:px-5" data-banner-destination-results="true">
+            {canUseDirectTarget && !QUICK_DESTINATIONS.some((item) => item.href === directTarget) ? (
+              <button className="mb-3 flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-primary/40 bg-blue-50 px-3 text-left text-sm font-medium text-primary hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => choose(directTarget)} type="button">
+                <span className="min-w-0 break-all">Dùng đường dẫn {directTarget}</span><ArrowRight className="h-4 w-4 shrink-0" />
+              </button>
+            ) : null}
+            {staticResults.length > 0 || dynamicResults.length > 0 ? (
+              <ul className="space-y-1" aria-label="Kết quả tìm đích">
+                {staticResults.length > 0 ? <li className="px-3 py-1 text-xs font-semibold text-muted-foreground">Trang chính</li> : null}
+                {staticResults.map((item) => (
+                  <li key={item.href}>
+                    <button className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm text-text hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => choose(item.href, item.title)} type="button">
+                      <span className="min-w-0 truncate font-medium">{item.title}</span>
+                      {value === item.href ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ArrowRight className="h-4 w-4 shrink-0 text-primary" />}
+                    </button>
+                  </li>
+                ))}
+                {dynamicResults.length > 0 ? <li className="px-3 pb-1 pt-3 text-xs font-semibold text-muted-foreground">Trang chi tiết</li> : null}
+                {dynamicResults.map((item) => (
+                  <li key={`${item.type}:${item.href}`}>
+                    <button className="flex min-h-14 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => choose(item.href, item.title)} type="button">
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold text-primary">{TYPE_LABELS[item.type]}</span>
+                        <span className="block text-sm font-medium text-text">{item.title}</span>
+                        <span className="block truncate text-xs text-muted-foreground">{item.href}</span>
+                      </span>
+                      {value === item.href ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ArrowRight className="h-4 w-4 shrink-0 text-primary" />}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {loading ? <p className="py-3 text-sm text-muted-foreground" role="status">Đang tìm đích đến...</p> : null}
+            {searchError ? <p className="py-3 text-sm text-red-700" role="alert">Chưa tải được kết quả. Thử lại hoặc dùng đường dẫn riêng.</p> : null}
+            {searching && !loading && !searchError && !canUseDirectTarget && staticResults.length === 0 && dynamicResults.length === 0 ? <p className="py-3 text-sm text-muted-foreground">{trimmedQuery.length < 2 ? 'Nhập ít nhất 2 ký tự để tìm nội dung.' : 'Không tìm thấy trang đang công khai phù hợp.'}</p> : null}
+            <div className="mt-3 border-t border-border pt-3">
+              <button aria-expanded={manualOpen} className="min-h-11 text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => setManualOpen((current) => !current)} type="button">{manualOpen ? 'Ẩn nhập đường dẫn' : 'Nhập đường dẫn riêng'}</button>
+              {manualOpen ? <div className="space-y-2 pb-2 pt-2">
+                <label className="block text-sm font-medium text-text" htmlFor={`${inputId}-manual`}>Đường dẫn trang{allowExternal ? ' hoặc website khác' : ''}</label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input id={`${inputId}-manual`} inputMode="url" placeholder={allowExternal ? '/san-pham/... hoặc https://...' : '/san-pham/...'} value={manualTarget} onChange={(event) => setManualTarget(event.target.value)} />
+                  <button className="min-h-11 shrink-0 rounded-lg bg-primary px-4 text-sm font-semibold text-white disabled:opacity-50" disabled={!manualValid} onClick={() => choose(manualValue)} type="button">Dùng đường dẫn này</button>
                 </div>
-              ) : (
-                <>
-                  <div className="mb-3 flex items-baseline justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-text">{searching ? 'Kết quả phù hợp' : section === 'suggested' ? 'Chọn nhanh' : section === 'pages' ? 'Các trang chính' : 'Tìm theo tên'}</h3>
-                    {!searching && section === 'suggested' ? <span className="text-xs text-muted-foreground">4 trang thường dùng</span> : null}
-                  </div>
-                  {!searching && !['suggested', 'pages'].includes(section) ? (
-                    <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/60 px-4 py-5 text-sm text-text">Nhập tên {section === 'products' ? 'sản phẩm hoặc danh mục' : section === 'brands' ? 'thương hiệu' : 'dịch vụ, dự án hoặc bài viết'} ở ô tìm kiếm để chọn đúng trang.</div>
-                  ) : null}
-                  {(staticResults.length > 0 || dynamicResults.length > 0) ? (
-                    <ul className="space-y-1" aria-label="Kết quả tìm đích">
-                      {staticResults.map((item) => (
-                        <li key={item.href}>
-                          <button className="flex min-h-12 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm text-text hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => choose(item.href, item.title)} type="button">
-                            <span className="min-w-0 truncate font-medium">{item.title}</span>
-                            {value === item.href ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ArrowRight className="h-4 w-4 shrink-0 text-primary" />}
-                          </button>
-                        </li>
-                      ))}
-                      {dynamicResults.map((item) => (
-                        <li key={`${item.type}:${item.href}`}>
-                          <button className="flex min-h-14 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" onClick={() => choose(item.href, item.title)} type="button">
-                            <span className="min-w-0">
-                              <span className="block text-xs font-semibold text-primary">{TYPE_LABELS[item.type]}</span>
-                              <span className="block text-sm font-medium text-text">{item.title}</span>
-                              {item.subtitle ? <span className="block truncate text-xs text-muted-foreground">{item.subtitle}</span> : null}
-                            </span>
-                            <ArrowRight className="h-4 w-4 shrink-0 text-primary" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {loading ? <p className="py-3 text-sm text-muted-foreground" role="status">Đang tìm đích đến...</p> : null}
-                  {searchError ? <p className="py-3 text-sm text-red-700" role="alert">Chưa tải được kết quả. Thử lại hoặc dùng đường dẫn riêng.</p> : null}
-                  {searching && !loading && !searchError && staticResults.length === 0 && dynamicResults.length === 0 ? <p className="py-3 text-sm text-muted-foreground">{trimmedQuery.length < 2 && section !== 'pages' ? 'Nhập ít nhất 2 ký tự để tìm nội dung.' : 'Không tìm thấy trang đang công khai phù hợp.'}</p> : null}
-                </>
-              )}
+                {manualValue && !manualValid ? <p className="text-xs text-red-700">Nhập đường dẫn bắt đầu bằng /{allowExternal ? ' hoặc địa chỉ http/https hợp lệ' : ''}.</p> : null}
+              </div> : null}
             </div>
           </div>
         </div>

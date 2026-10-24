@@ -2789,8 +2789,8 @@ function BannerRows({ items }: { items: RecordMap[] }) {
       {duplicateBannerCount > 0 ? (
         <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
           <span className="font-semibold">Thứ tự banner đang bị trùng.</span>{' '}
-          Có {duplicateBannerCount} banner dùng cùng một số trong cùng vị trí. Website sẽ dùng thời
-          điểm cập nhật làm điều kiện phụ; nên đặt số riêng để thứ tự luôn rõ ràng.
+          Có {duplicateBannerCount} banner dùng cùng một số trên cùng trang trong danh sách này.
+          Khi hiển thị tự động, banner mới cập nhật sẽ đứng trước; trang chủ chọn thủ công thì dùng thứ tự danh sách đã chọn.
         </div>
       ) : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -2833,7 +2833,7 @@ function BannerRows({ items }: { items: RecordMap[] }) {
                   </Badge>
                 </div>
                 {item.position ? (
-                  <div className="text-xs text-muted-foreground">Vị trí: {bannerPositionLabel(String(item.position))}</div>
+                  <div className="text-xs text-muted-foreground">Trang: {bannerPositionLabel(String(item.position))}</div>
                 ) : null}
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                   <span
@@ -2845,7 +2845,7 @@ function BannerRows({ items }: { items: RecordMap[] }) {
                     )}
                     title={hasDuplicateSortOrder ? 'Thứ tự này đang trùng với banner khác trong cùng vị trí.' : undefined}
                   >
-                    Thứ tự {Number(item.sort_order ?? 0)}{hasDuplicateSortOrder ? ' · Trùng' : ''}
+                    Thứ tự trên trang {Number(item.sort_order ?? 0)}{hasDuplicateSortOrder ? ' · Trùng' : ''}
                   </span>
                   <span className="rounded-sm bg-muted px-2 py-1">
                     Máy tính {previewFile ? 'đã có ảnh' : 'thiếu ảnh'}

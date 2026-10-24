@@ -801,6 +801,7 @@ export class PublicRepository {
     return query;
   }
   async listPublicServices(params: {
+    ids: string[] | null;
     q: string | null;
     page: number;
     page_size: number;
@@ -811,6 +812,9 @@ export class PublicRepository {
       .whereNull(`${alias}.deleted_at`)
       .where(`${alias}.review_status`, "approved")
       .where(`${alias}.publish_status`, "published");
+    if (params.ids !== null) {
+      baseQuery.whereIn(`${alias}.id`, params.ids);
+    }
     if (params.q) {
       const { textPattern, slugPattern } = publicSearchPatterns(params.q);
       baseQuery.andWhere((builder) => {
@@ -876,6 +880,7 @@ export class PublicRepository {
     return row ?? null;
   }
   async listPublicProjects(params: {
+    ids: string[] | null;
     q: string | null;
     page: number;
     page_size: number;
@@ -886,6 +891,9 @@ export class PublicRepository {
       .whereNull(`${alias}.deleted_at`)
       .where(`${alias}.review_status`, "approved")
       .where(`${alias}.publish_status`, "published");
+    if (params.ids !== null) {
+      baseQuery.whereIn(`${alias}.id`, params.ids);
+    }
     if (params.q) {
       const { textPattern, slugPattern } = publicSearchPatterns(params.q);
       baseQuery.andWhere((builder) => {
@@ -1421,6 +1429,7 @@ export class PublicRepository {
     return rows;
   }
   async listPublicProductGroups(params: {
+    ids: string[] | null;
     q: string | null;
     category_id: string | null;
     brand_ids: string[] | null;
@@ -1446,6 +1455,9 @@ export class PublicRepository {
       brand_ids: params.brand_ids,
       status_filters: params.status_filters,
     });
+    if (params.ids !== null) {
+      baseQuery.whereIn(`${groupAlias}.id`, params.ids);
+    }
     if (params.spec_filters.length > 0) {
       this.applyPublicProductSpecFilters(
         baseQuery,

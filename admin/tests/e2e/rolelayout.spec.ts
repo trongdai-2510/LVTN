@@ -84,7 +84,14 @@ test('role workspace fits a phone without horizontal overflow', async ({ page },
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${adminUrl}/admin/roles`);
   await expect(page.getByRole('heading', { name: 'Ma trận quyền' })).toBeVisible();
+  expect(await page.locator('body').evaluate((element) => getComputedStyle(element).fontFamily)).toContain('Be Vietnam Pro');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  for (const name of ['Hủy', 'Lưu thay đổi']) {
+    const action = page.getByRole('button', { name, exact: true });
+    const box = await action.boundingBox();
+    expect(box?.height, `${name} needs a 44px mobile touch target`).toBeGreaterThanOrEqual(44);
+  }
+  await expect(page.getByText('Có thể chỉnh ma trận quyền; tên và mô tả được hệ thống quản lý.')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('roles-phone.png'), fullPage: true });
 });
 

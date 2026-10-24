@@ -93,7 +93,7 @@ export class AuditLogRepository {
     if (filters.q) {
       const searchPattern = `%${filters.q}%`;
       query.andWhere((builder) => {
-        builder.whereRaw('?? ILIKE ?', [`${alias}.entity_type`, searchPattern]).orWhereRaw('?? ILIKE ?', [`${alias}.entity_id`, searchPattern]).orWhereRaw('?? ILIKE ?', [`${alias}.action`, searchPattern]);
+        builder.whereRaw('?? ILIKE ?', [`${alias}.entity_type`, searchPattern]).orWhereRaw('??::text ILIKE ?', [`${alias}.entity_id`, searchPattern]).orWhereRaw('?? ILIKE ?', [`${alias}.action`, searchPattern]);
       });
     }
     return query;

@@ -47,7 +47,7 @@ export function Modal({
         return;
       }
       const focusable = getFocusableElements(panel);
-      (panel.querySelector<HTMLElement>('[data-modal-autofocus="true"]') ?? focusable[0] ?? panel).focus();
+      (panel.querySelector<HTMLElement>('[data-modal-autofocus="true"]') ?? focusable[0] ?? panel).focus({ preventScroll: true });
     });
 
     return () => {
@@ -116,7 +116,7 @@ export function Modal({
         tabIndex={-1}
         onKeyDown={handleKeyDown}
         className={cn(
-          'm-auto flex max-h-[calc(100dvh-24px)] w-full max-w-lg flex-col overflow-hidden rounded-[10px] border border-slate-200 bg-panel shadow-[0_28px_80px_rgba(15,23,42,0.22)] sm:max-h-[calc(100dvh-48px)]',
+          'm-auto flex max-h-[calc(100dvh-24px)] w-full max-w-lg flex-col overflow-hidden rounded-[10px] border border-slate-200 bg-panel shadow-[0_28px_80px_rgba(15,23,42,0.22)] focus:outline-none sm:max-h-[calc(100dvh-48px)]',
           panelClassName
         )}
       >

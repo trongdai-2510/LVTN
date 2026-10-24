@@ -248,9 +248,16 @@ export class AdminUserService {
     if (!existing) {
       throw this.notFound('Tài khoản quản trị không tồn tại.');
     }
+    if (input.new_password !== undefined && !input.new_password.trim()) {
+      throw new AppError({
+        code: ErrorCodes.VALIDATION_ERROR,
+        message: 'Mật khẩu mới không được chỉ chứa khoảng trắng.',
+        statusCode: HttpStatus.BAD_REQUEST
+      });
+    }
 
     const currentRoles = await this.adminUserRepository.listRolesForUsers([userId]);
-    const nextPassword = input.new_password?.trim() || this.generateTemporaryPassword();
+    const nextPassword = input.new_password ?? this.generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(nextPassword, PASSWORD_HASH_ROUNDS);
 
     await this.knexService.db.transaction(async (trx) => {

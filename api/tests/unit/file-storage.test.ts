@@ -8,8 +8,10 @@ import {
 } from '@aws-sdk/client-s3';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
+import type { Response } from 'express';
 
 import { AppError } from '../../src/common/errors/app-error';
+import { FileService } from '../../src/modules/file/file.service';
 import {
   MAX_FILE_UPLOAD_BYTES,
   prepareUploadedFileLibraryAsset,
@@ -108,6 +110,29 @@ test('prepared image metadata follows the processed WebP bytes', () => {
   assert.equal(result.originalFilename, 'Ảnh sản phẩm.webp');
   assert.match(result.storageFilename, /\.webp$/);
   assert.deepEqual(result.buffer, processed);
+});
+
+test('admin SVG preview sanitizes legacy file bytes and isolates the document', async () => {
+  const service = new FileService({} as never);
+  Object.defineProperty(service, 'resolveReadableFile', {
+    value: async () => ({
+      file: { mime_type: 'image/svg+xml', original_filename: 'logo.svg' },
+      buffer: Buffer.from('<svg onload="alert(1)"><script>alert(2)</script><path d="M0 0h1"/></svg>')
+    })
+  });
+  const headers = new Map<string, string>();
+  let body: Buffer | undefined;
+  const response = {
+    setHeader: (name: string, value: string) => { headers.set(name, value); },
+    send: (value: Buffer) => { body = value; }
+  } as unknown as Response;
+
+  await service.sendFilePreview('123e4567-e89b-42d3-a456-426614174000', response);
+
+  assert.match(headers.get('Content-Security-Policy') ?? '', /sandbox/);
+  assert.equal(headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.match(body?.toString('utf8') ?? '', /<svg/);
+  assert.doesNotMatch(body?.toString('utf8') ?? '', /<script|onload=/i);
 });
 
 test('storage driver and R2 configuration fail closed', () => {

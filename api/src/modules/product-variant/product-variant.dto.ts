@@ -67,6 +67,10 @@ export class ProductVariantListQueryDto {
   deleted_scope?: 'active' | 'deleted' | 'all';
 
   @IsOptional()
+  @IsIn(['true', 'false'])
+  include_attributes?: 'true' | 'false';
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

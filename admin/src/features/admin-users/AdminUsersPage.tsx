@@ -19,11 +19,14 @@ import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useAuthState } from '@/features/auth/useAuthState';
+import { authStore } from '@/features/auth/auth.store';
 import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
+import { adminPath } from '@/lib/admin-navigation';
 import { cn } from '@/lib/cn';
 import { formatDate } from '@/lib/formatters';
 import { PERMISSIONS, hasPermission } from '@/lib/permissions';
+import { ChangePasswordModal } from './ChangePasswordModal';
 
 type UserStatus = 'active' | 'inactive' | 'locked';
 
@@ -146,6 +149,12 @@ export function AdminUsersPage() {
     nextStatus: UserStatus;
   } | null>(null);
   const [resetTarget, setResetTarget] = useState<UserRecord | null>(null);
+  const [ownPasswordOpen, setOwnPasswordOpen] = useState(false);
+  const [resetPasswordMode, setResetPasswordMode] = useState<'temporary' | 'custom'>('temporary');
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetPasswordConfirmation, setResetPasswordConfirmation] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetError, setResetError] = useState<unknown>(null);
   const [actionPending, setActionPending] = useState(false);
   const [actionTarget, setActionTarget] = useState<UserRecord | null>(null);
 
@@ -226,6 +235,12 @@ export function AdminUsersPage() {
     (!selectedSuperAdmin || isSuperAdmin) &&
     !privilegedTargetBlocked &&
     !outOfScopeTarget;
+  const resetPasswordValid = resetPasswordMode === 'temporary' || (
+    resetPassword.length >= 8 &&
+    resetPassword.trim().length > 0 &&
+    resetPassword.length <= 128 &&
+    resetPasswordConfirmation === resetPassword
+  );
 
   async function reloadList() {
     const list = await fetchUsers({
@@ -419,28 +434,57 @@ export function AdminUsersPage() {
 
   async function handleResetPassword() {
     if (!resetTarget) return;
+    if (!resetPasswordValid) {
+      setResetError(new Error('Mật khẩu mới cần từ 8 đến 128 ký tự và hai ô phải trùng nhau.'));
+      return;
+    }
     setActionPending(true);
+    setResetError(null);
 
     try {
       const result = await apiClient.post<UserDetailResponse>(
-        `${endpoints.songThanh.adminUsers}/${encodeURIComponent(resetTarget.id)}/reset-password`
+        `${endpoints.songThanh.adminUsers}/${encodeURIComponent(resetTarget.id)}/reset-password`,
+        resetPasswordMode === 'custom' ? { new_password: resetPassword } : {}
       );
       const targetName = resetTarget.display_name;
+      const needsActivation = resetTarget.status !== 'active';
       setResetTarget(null);
+      setResetPassword('');
+      setResetPasswordConfirmation('');
+      setShowResetPassword(false);
       setResultDialog({
         tone: 'success',
-        title: 'Đã đặt lại mật khẩu',
-        description: `Mật khẩu tạm của ${targetName} chỉ hiển thị lần này. Hãy sao chép trước khi đóng thông báo.`,
-        details: result.temporary_password
+        title: resetPasswordMode === 'custom' ? 'Đã đổi mật khẩu' : 'Đã đặt lại mật khẩu',
+        description: resetPasswordMode === 'custom'
+          ? `Mật khẩu của ${targetName} đã được đổi. Các phiên đăng nhập cũ đã bị thu hồi.${needsActivation ? ' Tài khoản vẫn chưa hoạt động; hãy kích hoạt để người dùng đăng nhập.' : ''}`
+          : `Mật khẩu tạm của ${targetName} chỉ hiển thị lần này. Hãy sao chép trước khi đóng thông báo.${needsActivation ? ' Tài khoản vẫn chưa hoạt động; hãy kích hoạt để người dùng đăng nhập.' : ''}`,
+        details: resetPasswordMode === 'temporary' && result.temporary_password
           ? [`Mật khẩu tạm: ${result.temporary_password}`]
           : undefined
       });
     } catch (nextError) {
-      setResetTarget(null);
-      setResultDialog({ tone: 'error', title: 'Không đặt lại được mật khẩu', error: nextError });
+      setResetError(nextError);
     } finally {
       setActionPending(false);
     }
+  }
+
+  function openResetPasswordModal(user: UserRecord) {
+    setResetPasswordMode('temporary');
+    setResetPassword('');
+    setResetPasswordConfirmation('');
+    setShowResetPassword(false);
+    setResetError(null);
+    setResetTarget(user);
+  }
+
+  function closeResetPasswordModal() {
+    if (actionPending) return;
+    setResetTarget(null);
+    setResetPassword('');
+    setResetPasswordConfirmation('');
+    setShowResetPassword(false);
+    setResetError(null);
   }
 
   return (
@@ -449,7 +493,6 @@ export function AdminUsersPage() {
         <div className="min-w-0">
           <p className="mb-1 text-xs font-bold uppercase tracking-[0.12em] text-primary">Hệ thống</p>
           <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-text">Tài khoản quản trị</h1>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">Tạo tài khoản, gán một vai trò và quản lý quyền truy cập của người dùng.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {canCreate ? (
@@ -609,17 +652,23 @@ export function AdminUsersPage() {
         title={modal.open && modal.mode === 'create' ? 'Tạo người dùng' : 'Chỉnh sửa người dùng'}
         onClose={requestCloseModal}
         panelClassName="max-w-2xl"
-        bodyClassName="p-5 sm:p-6"
+        bodyClassName="p-5"
         closeDisabled={savePending}
         footer={
           modalLoading ? null : (
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                {editTarget && editActions?.canResetPassword ? (
+                {editTarget?.is_current_user ? (
+                  <Button type="button" variant="secondary" disabled={savePending || userFormChanged}
+                    title={userFormChanged ? 'Lưu hoặc bỏ thay đổi trước khi đổi mật khẩu.' : undefined}
+                    onClick={() => { closeModal(); setOwnPasswordOpen(true); }}>
+                    Đổi mật khẩu của tôi
+                  </Button>
+                ) : editTarget && editActions?.canResetPassword ? (
                   <Button type="button" variant="secondary" disabled={savePending || userFormChanged}
                     title={userFormChanged ? 'Lưu hoặc bỏ thay đổi trước khi đặt lại mật khẩu.' : undefined}
-                    onClick={() => { closeModal(); setResetTarget(editTarget); }}>
-                    Tạo mật khẩu tạm
+                    onClick={() => { closeModal(); openResetPasswordModal(editTarget); }}>
+                    Đặt lại mật khẩu
                   </Button>
                 ) : null}
               </div>
@@ -640,18 +689,13 @@ export function AdminUsersPage() {
             <Skeleton className="h-28 w-full" />
           </div>
         ) : (
-          <form id="admin-user-form" className="space-y-5" onSubmit={handleSubmit}>
+          <form id="admin-user-form" className="space-y-4" onSubmit={handleSubmit}>
             <FormFeedback error={saveError} context="save" />
-
-            <div>
-              <h2 className="text-sm font-semibold text-text">Thông tin đăng nhập</h2>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">Dùng email để đăng nhập trang quản trị.</p>
-            </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Họ tên" required>
                 <Input
-                  autoFocus required disabled={savePending}
+                  required disabled={savePending}
                   value={form.display_name}
                   onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
                   placeholder="Tên hiển thị"
@@ -667,7 +711,13 @@ export function AdminUsersPage() {
               </Field>
             </div>
 
-            <div className="border-t border-border pt-5">
+            {editTarget?.is_current_user ? (
+              <div className="grid gap-3 border-y border-border py-3 text-sm sm:grid-cols-2">
+                <div><span className="text-muted-foreground">Vai trò</span><p className="font-medium text-text">{selectedRole?.name ?? 'Super Admin'} · Toàn quyền</p></div>
+                <div><span className="text-muted-foreground">Trạng thái</span><p className="font-medium text-text">Hoạt động</p></div>
+              </div>
+            ) : (
+            <div className="border-t border-border pt-4">
               <h2 className="mb-3 text-sm font-semibold text-text">Quyền truy cập</h2>
             <Field label="Vai trò" required>
               <Select
@@ -686,7 +736,7 @@ export function AdminUsersPage() {
             </Field>
             {selectedRole ? (
               <div className={cn(
-                'mt-3 rounded-md border px-3 py-2.5 text-sm',
+                'mt-3 rounded-md border px-3 py-2 text-sm',
                 selectedRole.is_super_admin
                   ? 'border-amber-200 bg-amber-50 text-amber-950'
                   : 'border-border bg-surface text-text'
@@ -704,6 +754,7 @@ export function AdminUsersPage() {
               </div>
             ) : null}
             </div>
+            )}
 
             {privilegedTargetBlocked || outOfScopeTarget ? (
               <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950">
@@ -713,7 +764,17 @@ export function AdminUsersPage() {
               </p>
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            {!editTarget?.is_current_user ? <div className="grid gap-4 sm:grid-cols-2">
+              {modal.open && modal.mode === 'create' ? (
+                <Field label="Mật khẩu tạm" hint="Để trống, hệ thống sẽ tạo và chỉ hiển thị một lần sau khi lưu.">
+                  <Input
+                    type="password" minLength={8} autoComplete="new-password" disabled={savePending}
+                    value={form.temporary_password}
+                    onChange={(event) => setForm((current) => ({ ...current, temporary_password: event.target.value }))}
+                    placeholder="Tự tạo nếu để trống"
+                  />
+                </Field>
+              ) : null}
               <Field label="Trạng thái">
                 <Select
                   disabled={savePending || (modal.open && modal.mode === 'edit' &&
@@ -726,20 +787,38 @@ export function AdminUsersPage() {
                   ))}
                 </Select>
               </Field>
-              {modal.open && modal.mode === 'create' ? (
-                <Field label="Mật khẩu tạm" hint="Để trống để hệ thống tạo và hiển thị một lần sau khi lưu.">
-                  <Input
-                    type="password" minLength={8} autoComplete="new-password" disabled={savePending}
-                    value={form.temporary_password}
-                    onChange={(event) => setForm((current) => ({ ...current, temporary_password: event.target.value }))}
-                    placeholder="Tự tạo nếu để trống"
-                  />
-                </Field>
-              ) : null}
-            </div>
+            </div> : null}
+
+            {modal.open && modal.mode === 'edit' ? (
+              <p className="text-xs leading-5 text-muted-foreground">
+                Không thể xem lại mật khẩu hiện tại vì hệ thống chỉ lưu mã băm.{' '}
+                {editTarget?.is_current_user
+                  ? 'Muốn đổi mật khẩu, chọn nút bên dưới và nhập mật khẩu hiện tại.'
+                  : 'Có thể đặt mật khẩu mới cho tài khoản này bằng nút bên dưới.'}
+              </p>
+            ) : null}
           </form>
         )}
       </Modal>
+
+      <ChangePasswordModal
+        open={ownPasswordOpen}
+        onClose={() => setOwnPasswordOpen(false)}
+        onChanged={() => {
+          setOwnPasswordOpen(false);
+          setResultDialog({
+            tone: 'success',
+            title: 'Đã đổi mật khẩu',
+            description: 'Mật khẩu đã được cập nhật. Đăng nhập lại bằng mật khẩu mới để tiếp tục.',
+            closeLabel: 'Đăng nhập lại',
+            restoreFocusOnClose: false,
+            afterClose: () => {
+              authStore.clear();
+              window.location.assign(adminPath('/login'));
+            }
+          });
+        }}
+      />
 
       <Modal open={Boolean(actionTarget)} title="Quản lý tài khoản" onClose={() => setActionTarget(null)}>
         {actionTarget && limitedActions ? (
@@ -758,8 +837,8 @@ export function AdminUsersPage() {
               {limitedActions.canResetPassword ? (
                 <Button type="button" variant="secondary" className="justify-start" onClick={() => {
                   setActionTarget(null);
-                  setResetTarget(actionTarget);
-                }}>Tạo mật khẩu tạm</Button>
+                  openResetPasswordModal(actionTarget);
+                }}>Đặt lại mật khẩu</Button>
               ) : null}
             </div>
           </div>
@@ -793,19 +872,103 @@ export function AdminUsersPage() {
         onConfirm={handleStatusChange}
       />
 
-      <ConfirmDialog
+      <Modal
         open={Boolean(resetTarget)}
-        title="Tạo mật khẩu tạm"
-        description={
-          resetTarget
-            ? `Hệ thống sẽ tạo một mật khẩu tạm mới cho ${resetTarget.display_name} và thu hồi các phiên làm việc cũ.`
-            : ''
-        }
-        confirmLabel={actionPending ? 'Đang xử lý...' : 'Tạo mật khẩu tạm'}
-        pending={actionPending}
-        onClose={() => setResetTarget(null)}
-        onConfirm={handleResetPassword}
-      />
+        title="Đặt lại mật khẩu"
+        onClose={closeResetPasswordModal}
+        closeDisabled={actionPending}
+        panelClassName="max-w-xl"
+        bodyClassName="p-5 sm:p-6"
+        footer={(
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="secondary" disabled={actionPending} onClick={closeResetPasswordModal}>Hủy</Button>
+            <Button
+              type="button"
+              disabled={actionPending || !resetPasswordValid}
+              onClick={handleResetPassword}
+            >
+              {actionPending ? 'Đang cập nhật...' : 'Đặt lại mật khẩu'}
+            </Button>
+          </div>
+        )}
+      >
+        {resetTarget ? (
+          <div className="space-y-4">
+            <div>
+              <p className="font-semibold text-text">{resetTarget.display_name}</p>
+              <p className="break-all text-sm text-muted-foreground">{resetTarget.email}</p>
+            </div>
+            <p role="note" className="text-sm leading-5 text-muted-foreground">
+              {resetPasswordMode === 'temporary'
+                ? 'Mật khẩu tự tạo chỉ hiện một lần. Đặt lại sẽ đăng xuất các phiên cũ.'
+                : 'Đặt lại sẽ đăng xuất các phiên cũ.'}
+            </p>
+            {resetTarget.status !== 'active' ? (
+              <p role="note" className="text-sm leading-5 text-muted-foreground">
+                Tài khoản {resetTarget.status === 'locked' ? 'tạm khóa' : 'tạm ngưng'}. Hãy kích hoạt để người dùng đăng nhập.
+              </p>
+            ) : null}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button
+                type="button"
+                variant={resetPasswordMode === 'temporary' ? 'primary' : 'secondary'}
+                aria-pressed={resetPasswordMode === 'temporary'}
+                disabled={actionPending}
+                onClick={() => {
+                  setResetPasswordMode('temporary');
+                  setResetPassword('');
+                  setResetPasswordConfirmation('');
+                  setResetError(null);
+                }}
+              >Tự tạo</Button>
+              <Button
+                type="button"
+                variant={resetPasswordMode === 'custom' ? 'primary' : 'secondary'}
+                aria-pressed={resetPasswordMode === 'custom'}
+                disabled={actionPending}
+                onClick={() => {
+                  setResetPasswordMode('custom');
+                  setResetError(null);
+                }}
+              >Tự nhập</Button>
+            </div>
+            {resetPasswordMode === 'custom' ? (
+              <div className="space-y-4">
+                <Field label="Mật khẩu mới" required hint="Từ 8 đến 128 ký tự.">
+                  <Input
+                    type={showResetPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    minLength={8}
+                    maxLength={128}
+                    value={resetPassword}
+                    disabled={actionPending}
+                    onChange={(event) => setResetPassword(event.target.value)}
+                  />
+                </Field>
+                <Field label="Xác nhận mật khẩu mới" required>
+                  <Input
+                    type={showResetPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    minLength={8}
+                    maxLength={128}
+                    value={resetPasswordConfirmation}
+                    disabled={actionPending}
+                    onChange={(event) => setResetPasswordConfirmation(event.target.value)}
+                  />
+                </Field>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={actionPending}
+                  aria-pressed={showResetPassword}
+                  onClick={() => setShowResetPassword((visible) => !visible)}
+                >{showResetPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu đang nhập'}</Button>
+              </div>
+            ) : null}
+            <FormFeedback error={resetError} context="save" />
+          </div>
+        ) : null}
+      </Modal>
 
       <ConfirmDialog
         open={discardModalOpen}

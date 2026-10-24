@@ -127,6 +127,12 @@ export function SystemPagesOverview({
   const library = usePageContentLibrary({ query: debouncedQuery, refreshKey, reviewOnly });
   const refreshLibrary = () => setRefreshKey((v) => v + 1);
   const systemRows = useMemo(() => buildSystemRows(systemData), [systemData]);
+  const newsLandingRow = systemRows.find((row) => row.template.mode === 'news_index');
+  const newsLandingHref = systemData.loading || systemData.error
+    ? '/page-contents?view=system'
+    : newsLandingRow?.contentRecord?.id
+      ? `/page-contents/${String(newsLandingRow.contentRecord.id)}`
+      : '/page-contents/new?template=news-index';
 
   const libraryRecords = useMemo(() => extractItems(library.data), [library.data]);
   const workspaceRecords = useMemo(
@@ -255,6 +261,7 @@ export function SystemPagesOverview({
 
       <ContentWorkspaceTabs
         value={workspaceView}
+        newsLandingHref={newsLandingHref}
         onChange={(nextView) => {
           const next = new URLSearchParams(searchParams.toString());
           if (nextView === 'workflow') next.delete('view');
@@ -415,9 +422,11 @@ export function SystemPagesOverview({
 
 function ContentWorkspaceTabs({
   value,
+  newsLandingHref,
   onChange
 }: {
   value: ContentWorkspaceView;
+  newsLandingHref: string;
   onChange: (value: ContentWorkspaceView) => void;
 }) {
   const items: Array<{
@@ -488,13 +497,29 @@ function ContentWorkspaceTabs({
           );
         })}
       </div>
-      <Link
-        className="inline-flex min-h-11 items-center justify-start gap-2 rounded-md px-3 py-2 text-[13px] font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 lg:ml-auto"
-        href="/page-contents/brand-pages"
-      >
-        <Handshake className="h-4 w-4" />
-        Hồ sơ thương hiệu
-      </Link>
+      <div className="flex flex-wrap gap-1">
+        <Link
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-800 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+          href="/page-contents/brand-pages"
+        >
+          <Handshake className="h-4 w-4" aria-hidden="true" />
+          Hồ sơ thương hiệu
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-800 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+          href={newsLandingHref}
+        >
+          <Newspaper className="h-4 w-4" aria-hidden="true" />
+          Trang Tin tức
+        </Link>
+        <Link
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-800 transition-colors hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+          href="/page-contents?view=library&lane=all&kind=news"
+        >
+          <FileText className="h-4 w-4" aria-hidden="true" />
+          Bài tin tức
+        </Link>
+      </div>
     </nav>
   );
 }

@@ -61,6 +61,7 @@ export interface ProductVariantListItem extends ProductVariantAdminRecord {
   active_quote_item_count: number;
   attribute_count: number;
   highlight_spec_count: number;
+  attributes?: Array<Pick<VariantAttributeRecord, 'product_variant_id' | 'attribute_name' | 'attribute_value' | 'display_order'>>;
 }
 
 export interface ProductVariantDependencyCounts {

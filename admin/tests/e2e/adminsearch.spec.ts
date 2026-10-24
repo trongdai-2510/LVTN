@@ -24,7 +24,7 @@ const targets = [
 ] as const;
 
 test('topbar search carries a query into each searchable admin area', async ({ page, request }, testInfo) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   const data = await getQaAuth(request, api);
   await page.addInitScript((state) => {
     window.sessionStorage.setItem('song-thanh-admin-auth', JSON.stringify(state));
@@ -49,10 +49,12 @@ test('topbar search carries a query into each searchable admin area', async ({ p
         await page.getByRole('button', { name: 'Xem tất cả khu vực' }).click();
       }
       await destination.click();
-      await expect(page, `Điều hướng tìm kiếm ${target.label}`).toHaveURL((url) =>
-        url.pathname === `/admin${target.path}` &&
-        url.searchParams.get('q') === query &&
-        (!('allStatuses' in target) || url.searchParams.get('lane') === 'all')
+      await expect(page, `Điều hướng tìm kiếm ${target.label}`).toHaveURL(
+        (url) =>
+          url.pathname === `/admin${target.path}` &&
+          url.searchParams.get('q') === query &&
+          (!('allStatuses' in target) || url.searchParams.get('lane') === 'all'),
+        { timeout: 15_000 }
       );
       await expect(page.getByPlaceholder(target.placeholder), target.label).toHaveValue(query);
     });

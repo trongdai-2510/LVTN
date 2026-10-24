@@ -70,6 +70,9 @@ async function openWorkspace(page: Page, roleCode = 'super_admin') {
     if (url.pathname === '/song-thanh/admin-users/qa-editor') {
       return route.fulfill({ json: { ok: true, data: { user: accounts[1], available_roles: roles } } });
     }
+    if (url.pathname === '/song-thanh/admin-users/qa-admin') {
+      return route.fulfill({ json: { ok: true, data: { user: accounts[0], available_roles: roles } } });
+    }
     return route.fulfill({ status: 404, json: { ok: false, error: { message: 'Not mocked' } } });
   });
   await page.goto(`${adminUrl}/admin/users`);
@@ -107,6 +110,7 @@ test('accounts use one readable card layout on desktop and phone', async ({ page
 });
 
 test('the account form chooses one role without a long card list', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1920, height: 760 });
   await openWorkspace(page);
   await page.getByRole('button', { name: 'Tạo người dùng' }).click();
   const editor = page.getByRole('dialog', { name: 'Tạo người dùng' });
@@ -115,6 +119,79 @@ test('the account form chooses one role without a long card list', async ({ page
   await role.selectOption('viewer-role');
   await expect(role).toHaveValue('viewer-role');
   await expect(editor.getByText('16 quyền')).toBeVisible();
+  await editor.getByRole('textbox', { name: 'Họ tên' }).fill('Người kiểm thử');
+  await editor.getByRole('textbox', { name: 'Email' }).fill('qa-editor@example.test');
+  await page.screenshot({ path: testInfo.outputPath('accountFormReady.png'), fullPage: true });
+  const passwordField = await editor.getByLabel('Mật khẩu tạm').boundingBox();
+  const createButton = editor.getByRole('button', { name: 'Tạo người dùng' });
+  const createButtonBox = await createButton.boundingBox();
+  expect(passwordField).not.toBeNull();
+  expect(createButtonBox).not.toBeNull();
+  expect(passwordField!.x + passwordField!.width).toBeLessThan(createButtonBox!.x);
+  await expect(createButton).toBeEnabled();
+});
+
+test('Super Admin can confirm and create an account with a generated password', async ({ page }) => {
+  await openWorkspace(page);
+  let submitted: Record<string, unknown> | undefined;
+  await page.route(`${apiUrl}/song-thanh/admin-users`, async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    submitted = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({ json: { ok: true, data: {
+      user: { id: 'qa-new-admin', email: 'second@example.test', display_name: 'Quản trị thứ hai',
+        status: 'active', roles: [roles[0]], is_current_user: false },
+      available_roles: roles, temporary_password: 'GeneratedPassword123'
+    } } });
+  });
+  await page.getByRole('button', { name: 'Tạo người dùng' }).click();
+  const editor = page.getByRole('dialog', { name: 'Tạo người dùng' });
+  await editor.getByRole('textbox', { name: 'Họ tên' }).fill('Quản trị thứ hai');
+  await editor.getByRole('textbox', { name: 'Email' }).fill('second@example.test');
+  await editor.getByRole('combobox', { name: 'Vai trò' }).selectOption('super-role');
+  await editor.getByRole('button', { name: 'Tạo người dùng' }).click();
+  await page.getByRole('button', { name: 'Xác nhận gán toàn quyền' }).click();
+  await expect(page.getByRole('dialog', { name: 'Đã tạo người dùng' })).toBeVisible();
+  expect(submitted).toMatchObject({
+    display_name: 'Quản trị thứ hai', email: 'second@example.test', role_ids: ['super-role']
+  });
+});
+
+test('the signed-in Super Admin can change their own password with the current password', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1920, height: 760 });
+  await openWorkspace(page);
+  const self = page.locator('[data-user-account-card]').filter({ hasText: 'admin@songthanh.local' });
+  await self.getByRole('button', { name: 'Sửa' }).click();
+  const editor = page.getByRole('dialog', { name: 'Chỉnh sửa người dùng' });
+  await page.screenshot({ path: testInfo.outputPath('selfAccountForm.png'), fullPage: true });
+  await expect(editor.getByRole('textbox', { name: 'Họ tên' })).toBeVisible();
+  await expect.poll(() => editor.locator('form').evaluate((form) => form.parentElement?.scrollTop ?? -1)).toBe(0);
+  const formOverflow = await editor.locator('form').evaluate((form) => {
+    const body = form.parentElement;
+    return body ? body.scrollHeight - body.clientHeight : -1;
+  });
+  expect(formOverflow).toBeLessThanOrEqual(0);
+  await expect(editor.getByText(/không thể xem lại mật khẩu hiện tại/i)).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Đặt lại mật khẩu' })).toHaveCount(0);
+  await expect(editor.locator('input[type="password"]')).toHaveCount(0);
+
+  let submitted: Record<string, unknown> | undefined;
+  await page.route(`${apiUrl}/auth/change-password`, async (route) => {
+    submitted = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({ json: { ok: true, data: { changed: true, refresh_sessions_revoked: true } } });
+  });
+  await editor.getByRole('button', { name: 'Đổi mật khẩu của tôi' }).click();
+  const change = page.getByRole('dialog', { name: 'Đổi mật khẩu của tôi' });
+  await change.getByLabel('Mật khẩu hiện tại').fill('CurrentPassword123');
+  await change.getByLabel('Mật khẩu mới', { exact: true }).fill('        ');
+  await change.getByLabel('Xác nhận mật khẩu mới').fill('        ');
+  await expect(change.getByRole('button', { name: 'Đổi mật khẩu', exact: true })).toBeDisabled();
+  await change.getByLabel('Mật khẩu mới', { exact: true }).fill('NewPassword123');
+  await change.getByLabel('Xác nhận mật khẩu mới').fill('NewPassword123');
+  await change.getByRole('button', { name: 'Đổi mật khẩu', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Đã đổi mật khẩu' })).toBeVisible();
+  expect(submitted).toEqual({ current_password: 'CurrentPassword123', new_password: 'NewPassword123' });
+  await page.getByRole('button', { name: 'Đăng nhập lại' }).click();
+  await expect(page).toHaveURL(/\/admin\/login$/);
 });
 
 test('accounts remain readable and actionable at phone width', async ({ page }, testInfo) => {
@@ -134,11 +211,40 @@ test('one card action opens account management without a clipped menu', async ({
   await expect(editorRow.getByRole('button', { name: /Thao tác cho/ })).toHaveCount(0);
   await editorRow.getByRole('button', { name: 'Sửa' }).click();
   const dialog = page.getByRole('dialog', { name: 'Chỉnh sửa người dùng' });
-  await expect(dialog.getByRole('button', { name: 'Tạo mật khẩu tạm' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Đặt lại mật khẩu' })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('accountActions.png'), fullPage: true });
-  await dialog.getByRole('button', { name: 'Tạo mật khẩu tạm' }).click();
-  await expect(page.getByRole('dialog', { name: 'Tạo mật khẩu tạm' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Đặt lại mật khẩu' }).click();
+  await expect(page.getByRole('dialog', { name: 'Đặt lại mật khẩu' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Chỉnh sửa người dùng' })).toHaveCount(0);
+});
+
+test('Super Admin can set a new password for another account without viewing its current password', async ({ page }, testInfo) => {
+  await openWorkspace(page);
+  const editorRow = page.locator('[data-user-account-card]').filter({ hasText: 'content@songthanh.local' });
+  await editorRow.getByRole('button', { name: 'Sửa' }).click();
+  const editor = page.getByRole('dialog', { name: 'Chỉnh sửa người dùng' });
+  await expect(editor.getByText(/không thể xem lại mật khẩu hiện tại/i)).toBeVisible();
+
+  let submitted: Record<string, unknown> | undefined;
+  await page.route(`${apiUrl}/song-thanh/admin-users/qa-editor/reset-password`, async (route) => {
+    submitted = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({ json: { ok: true, data: { user: accounts[1], available_roles: roles } } });
+  });
+  await editor.getByRole('button', { name: 'Đặt lại mật khẩu' }).click();
+
+  const reset = page.getByRole('dialog', { name: 'Đặt lại mật khẩu' });
+  await page.screenshot({ path: testInfo.outputPath('resetPasswordForm.png'), fullPage: true });
+  await expect(reset.getByText(/tạm khóa.*kích hoạt/i)).toBeVisible();
+  await expect(reset.getByText('Mật khẩu tự tạo chỉ hiện một lần. Đặt lại sẽ đăng xuất các phiên cũ.')).toBeVisible();
+  await expect(reset.getByText(/không thể xem mật khẩu hiện tại vì hệ thống chỉ lưu mã băm/i)).toHaveCount(0);
+  await reset.getByRole('button', { name: 'Tự nhập' }).click();
+  await reset.getByLabel('Mật khẩu mới', { exact: true }).fill('FreshPassword123');
+  await reset.getByLabel('Xác nhận mật khẩu mới', { exact: true }).fill('FreshPassword123');
+  await reset.getByRole('button', { name: 'Đặt lại mật khẩu', exact: true }).click();
+
+  await expect(page.getByRole('dialog', { name: 'Đã đổi mật khẩu' })).toBeVisible();
+  expect(submitted).toEqual({ new_password: 'FreshPassword123' });
+  await expect(page.getByText('FreshPassword123')).toHaveCount(0);
 });
 
 test('search narrows accounts and clearing filters restores the list', async ({ page }) => {

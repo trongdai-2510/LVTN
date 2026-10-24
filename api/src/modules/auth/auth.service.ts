@@ -41,11 +41,7 @@ export class AuthService {
     }
 
     if (user.status !== 'active') {
-      throw new AppError({
-        code: ErrorCodes.AUTH_USER_DISABLED,
-        message: 'Tài khoản không hoạt động.',
-        statusCode: HttpStatus.FORBIDDEN
-      });
+      throw this.invalidCredentialsError();
     }
 
     const passwordMatches = await bcrypt.compare(dto.password, user.password_hash);
@@ -66,11 +62,7 @@ export class AuthService {
       throw this.invalidCredentialsError();
     }
     if (loginResult.status === 'disabled') {
-      throw new AppError({
-        code: ErrorCodes.AUTH_USER_DISABLED,
-        message: 'Tài khoản không hoạt động.',
-        statusCode: HttpStatus.FORBIDDEN
-      });
+      throw this.invalidCredentialsError();
     }
 
     const access = await this.repository.getUserAccess(user.id);
@@ -177,10 +169,10 @@ export class AuthService {
     userId: string,
     dto: ChangePasswordDto
   ): Promise<{ changed: true; refresh_sessions_revoked: true }> {
-    if (dto.new_password.length < 8) {
+    if (dto.new_password.length < 8 || !dto.new_password.trim()) {
       throw new AppError({
         code: ErrorCodes.AUTH_PASSWORD_TOO_WEAK,
-        message: 'Mật khẩu mới phải có ít nhất 8 ký tự.',
+        message: 'Mật khẩu mới cần ít nhất 8 ký tự và không được chỉ chứa khoảng trắng.',
         statusCode: HttpStatus.BAD_REQUEST
       });
     }

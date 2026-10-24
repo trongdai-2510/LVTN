@@ -41,6 +41,7 @@ import { formatDate, formatValue } from '@/lib/formatters';
 import { PERMISSIONS } from '@/lib/permissions';
 import {
   downloadExportFile,
+  filenameWithExtension,
   type ExportCell,
   type ExportTable
 } from '@/lib/exportFile';
@@ -51,6 +52,7 @@ import {
   type ExportDateField
 } from './exportDateRange';
 import { collectExportPages } from './exportPagination';
+import { indexProductDocuments, pairProductVariants } from './productExport';
 
 type ImportRow = Record<string, unknown>;
 
@@ -114,28 +116,28 @@ const exportPurposes: Array<{
   {
     key: 'roundtrip',
     title: 'Xuất để nhập lại',
-    description: 'Dành cho file Excel chuẩn, giữ mã định danh để cập nhật lại dữ liệu cũ.',
+    description: 'Giữ tên và mã sản phẩm đã nhập để hỗ trợ đối chiếu dữ liệu.',
     recommendedFormat: 'xlsx',
     badge: 'Khuyên dùng'
   },
   {
     key: 'internal_review',
     title: 'Kiểm tra nội bộ',
-    description: 'Xuất dữ liệu kèm trạng thái duyệt, publish và dấu vết kỹ thuật cần rà soát.',
+    description: 'Xuất dữ liệu kèm trạng thái duyệt, hiển thị và thông tin cần rà soát.',
     recommendedFormat: 'xlsx',
     badge: 'Đầy đủ cột'
   },
   {
     key: 'public_share',
     title: 'Gửi đối tác',
-    description: 'Chỉ lấy dữ liệu public-safe, tránh lộ trạng thái nội bộ hoặc ghi chú vận hành.',
+    description: 'Chỉ lấy bản ghi đang hoạt động, đã duyệt và đã xuất bản.',
     recommendedFormat: 'xlsx',
-    badge: 'Public-safe'
+    badge: 'Công khai'
   },
   {
     key: 'catalog_pdf',
-    title: 'Làm catalog',
-    description: 'Dành cho file trình bày, ưu tiên ảnh, thông số và cấu trúc danh mục.',
+    title: 'Làm danh mục giới thiệu',
+    description: 'Dành cho tệp trình bày, ưu tiên ảnh, thông số và cấu trúc danh mục.',
     recommendedFormat: 'pdf',
     badge: 'Không nhập lại'
   }
@@ -382,7 +384,7 @@ async function fetchProductGroupsForExport({
   return uniqueRecordsById(groups);
 }
 
-async function fetchVariantsForGroups(productGroups: ImportRow[], publicSafeOnly: boolean) {
+async function fetchVariantsForGroups(productGroups: ImportRow[], publicSafeOnly: boolean, includeSpecs = false) {
   const groupIds = new Set(productGroups.map((group) => recordId(group)).filter(Boolean));
   if (groupIds.size === 0) {
     return [] as ImportRow[];
@@ -392,6 +394,7 @@ async function fetchVariantsForGroups(productGroups: ImportRow[], publicSafeOnly
   // Giờ: quét toàn bộ variants 1 lần (phân trang) rồi lọc theo group ở client.
   const params = new URLSearchParams();
   params.set('deleted_scope', 'active');
+  if (includeSpecs) params.set('include_attributes', 'true');
   if (publicSafeOnly) {
     params.set('status', 'active');
     params.set('review_status', 'approved');
@@ -424,7 +427,7 @@ async function fetchTechnicalDocumentsForExport({
   categoryLimitIds?: string[];
   productGroups?: ImportRow[];
 }) {
-  const hasProductFilter = Boolean(filters.brandId || filters.categoryId);
+  const hasProductFilter = Boolean(productGroups || filters.brandId || filters.categoryId);
   const documents = await fetchAllListItems(
     endpoints.songThanh.technicalDocuments,
     buildTechnicalDocumentParams(filters, publicSafeOnly)
@@ -452,15 +455,26 @@ async function fetchTechnicalDocumentsForExport({
   );
 }
 
-function productGroupRows(items: ImportRow[]) {
+function productGroupRows(items: ImportRow[], documents: ImportRow[] = [], includeDocuments = false) {
+  const documentsByGroup = new Map<string, ImportRow[]>();
+  for (const document of documents) {
+    const groupId = recordText(document, 'product_group_id');
+    if (!groupId) continue;
+    const entries = documentsByGroup.get(groupId) ?? [];
+    entries.push(document);
+    documentsByGroup.set(groupId, entries);
+  }
   return items.map((item) => ({
-    ID: recordText(item, 'id'),
     'Tên sản phẩm': recordText(item, 'name'),
-    Slug: recordText(item, 'slug'),
     'Thương hiệu': recordText(item, 'brand_name'),
     'Danh mục chính': recordText(item, 'category_level_1_name'),
     'Danh mục con': recordText(item, 'category_level_2_name') || recordText(item, 'category_name'),
     'Mô tả ngắn': recordText(item, 'short_description'),
+    ...(includeDocuments ? {
+      'Tài liệu kỹ thuật': (documentsByGroup.get(recordId(item)) ?? [])
+        .map((document) => [recordText(document, 'product_variant_name'), documentSummary(document)].filter(Boolean).join(' — '))
+        .join('\n')
+    } : {}),
     'Trạng thái sử dụng': formatValue(item.status),
     'Trạng thái duyệt': formatValue(item.review_status),
     'Trạng thái hiển thị': formatValue(item.publish_status),
@@ -470,29 +484,71 @@ function productGroupRows(items: ImportRow[]) {
   }));
 }
 
-function productVariantRows(items: ImportRow[]) {
-  return items.map((item) => ({
-    ID: recordText(item, 'id'),
-    'Nhóm sản phẩm': recordText(item, 'product_group_name'),
-    SKU: recordText(item, 'sku'),
-    'Mã ngoài': recordText(item, 'external_code'),
-    'Mã sản phẩm': recordText(item, 'model_code'),
-    'Tên biến thể': recordText(item, 'variant_name'),
-    'Mô tả': recordText(item, 'detailed_description'),
-    'Giá hiển thị': formatValue(item.public_price_mode),
-    'Số tiền': item.public_price_amount == null ? '' : recordNumber(item, 'public_price_amount'),
-    'Trạng thái sử dụng': formatValue(item.status),
-    'Trạng thái duyệt': formatValue(item.review_status),
-    'Trạng thái hiển thị': formatValue(item.publish_status),
-    'Cập nhật lúc': formatDate(item.updated_at)
+function variantSpecificationText(variant: ImportRow | null) {
+  if (!variant || !Array.isArray(variant.attributes)) return '';
+  return variant.attributes
+    .filter((attribute): attribute is ImportRow => Boolean(attribute) && typeof attribute === 'object')
+    .map((attribute) => {
+      const name = recordText(attribute, 'attribute_name');
+      const value = recordText(attribute, 'attribute_value');
+      return name && value ? `${name}: ${value}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function documentSummary(document: ImportRow) {
+  const typeLabels: Record<string, string> = {
+    datasheet: 'Bảng thông số',
+    manual: 'Hướng dẫn sử dụng',
+    catalogue: 'Danh mục sản phẩm',
+    certificate: 'Chứng nhận',
+    other: 'Khác'
+  };
+  const type = typeLabels[recordText(document, 'document_type')] ?? '';
+  const detail = [type, recordText(document, 'version') && `phiên bản ${recordText(document, 'version')}`]
+    .filter(Boolean)
+    .join(', ');
+  return [
+    recordText(document, 'document_name') + (detail ? ` (${detail})` : ''),
+    recordText(document, 'file_original_filename')
+  ].filter(Boolean).join(' — ');
+}
+
+function productCatalogRows(
+  groups: ImportRow[], variants: ImportRow[], documents: ImportRow[],
+  includeSpecs: boolean, includeDocuments: boolean
+) {
+  const documentsForRow = indexProductDocuments(documents);
+  return pairProductVariants(groups, variants).map(({ group, variant }) => ({
+    'Tên sản phẩm': recordText(group, 'name'),
+    'Mã sản phẩm': variant ? recordText(variant, 'model_code') : '',
+    'Tên biến thể': variant ? recordText(variant, 'variant_name') : '',
+    'Thương hiệu': recordText(group, 'brand_name'),
+    'Danh mục chính': recordText(group, 'category_level_1_name'),
+    'Danh mục con': recordText(group, 'category_level_2_name') || recordText(group, 'category_name'),
+    'Mô tả ngắn': recordText(group, 'short_description'),
+    'Mô tả biến thể': variant ? recordText(variant, 'detailed_description') : '',
+    ...(includeSpecs ? { 'Thông số kỹ thuật': variantSpecificationText(variant) } : {}),
+    ...(includeDocuments ? {
+      'Tài liệu kỹ thuật': documentsForRow(group.id, variant?.id).map(documentSummary).join('\n')
+    } : {}),
+    'Giá hiển thị': variant ? formatValue(variant.public_price_mode) : '',
+    'Số tiền': variant?.public_price_amount == null ? '' : recordNumber(variant, 'public_price_amount'),
+    'Sử dụng (sản phẩm)': formatValue(group.status),
+    'Duyệt (sản phẩm)': formatValue(group.review_status),
+    'Hiển thị (sản phẩm)': formatValue(group.publish_status),
+    'Sử dụng (biến thể)': variant ? formatValue(variant.status) : '',
+    'Duyệt (biến thể)': variant ? formatValue(variant.review_status) : '',
+    'Hiển thị (biến thể)': variant ? formatValue(variant.publish_status) : '',
+    'Cập nhật sản phẩm': formatDate(group.updated_at),
+    'Cập nhật biến thể': variant ? formatDate(variant.updated_at) : ''
   }));
 }
 
 function categoryRows(items: ImportRow[]) {
   return items.map((item) => ({
-    ID: recordText(item, 'id'),
     'Tên danh mục': recordText(item, 'name'),
-    Slug: recordText(item, 'slug'),
     'Danh mục cha': recordText(item, 'parent_name'),
     'Mô tả': recordText(item, 'description'),
     'Trạng thái': formatValue(item.status),
@@ -503,11 +559,9 @@ function categoryRows(items: ImportRow[]) {
 
 function brandRows(items: ImportRow[]) {
   return items.map((item) => ({
-    ID: recordText(item, 'id'),
     'Tên thương hiệu': recordText(item, 'name'),
-    Slug: recordText(item, 'slug'),
     'Danh mục gợi ý': recordText(item, 'primary_category_name'),
-    Website: recordText(item, 'website_url'),
+    'Trang web': recordText(item, 'website_url'),
     'Mô tả': recordText(item, 'description'),
     'Trạng thái': formatValue(item.status),
     'Số nhóm sản phẩm': recordNumber(item, 'active_product_group_count'),
@@ -519,14 +573,10 @@ function customerRows(items: ImportRow[], options: CustomerExportColumnOptions) 
   return items.map((item) => {
     const row: Record<string, ExportCell> = {};
 
-    if (options.includeSystemInfo) {
-      row.ID = recordText(item, 'id');
-    }
-
     row['Khách hàng'] = recordText(item, 'full_name');
     row['Công ty'] = recordText(item, 'company_name');
     row['Số điện thoại'] = recordText(item, 'phone');
-    row.Email = recordText(item, 'email');
+    row['Thư điện tử'] = recordText(item, 'email');
 
     if (options.includeContacts) {
       row['Số liên hệ'] = recordNumber(item, 'contact_count');
@@ -551,14 +601,13 @@ function customerRows(items: ImportRow[], options: CustomerExportColumnOptions) 
 
 function technicalDocumentRows(items: ImportRow[]) {
   return items.map((item) => ({
-    ID: recordText(item, 'id'),
     'Tên tài liệu': recordText(item, 'document_name'),
     Loại: formatValue(item.document_type),
     'Nhóm sản phẩm': recordText(item, 'product_group_name'),
     'Biến thể': recordText(item, 'product_variant_name'),
-    File: recordText(item, 'file_original_filename'),
+    'Tên tệp': recordText(item, 'file_original_filename'),
     'Phiên bản': recordText(item, 'version'),
-    Public: item.is_public ? 'Có' : 'Không',
+    'Công khai': item.is_public ? 'Có' : 'Không',
     'Trạng thái': formatValue(item.status),
     'Cập nhật lúc': formatDate(item.updated_at)
   }));
@@ -605,20 +654,17 @@ function localIsoDate(daysAgo = 0) {
   return localDateStamp(date);
 }
 
-function filenameToken(value: string) {
-  return (
-    value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/gi, '-')
-      .replace(/^-+|-+$/g, '')
-      .toLowerCase() || 'tat-ca'
-  );
-}
-
 function exportDateFilenameToken(filters: ExportFilterState) {
   if (!filters.dateFrom && !filters.dateTo) return '';
-  return `tu-${filters.dateFrom || 'dau'}-den-${filters.dateTo || 'nay'}`;
+  if (filters.dateFrom && filters.dateTo) return `${filters.dateFrom} đến ${filters.dateTo}`;
+  return filters.dateFrom ? `Từ ${filters.dateFrom}` : `Đến ${filters.dateTo}`;
+}
+
+function datedExportFilename(parts: string[]) {
+  const date = localDateStamp();
+  const context = parts.filter(Boolean).join(' - ');
+  const room = 120 - date.length - 3;
+  return `${context.slice(0, room).replace(/[. -]+$/g, '')} - ${date}`;
 }
 
 export function ImportWorkspacePage() {
@@ -639,11 +685,12 @@ export function ImportWorkspacePage() {
   const [processingBatchId, setProcessingBatchId] = useState('');
   const [exportPurpose, setExportPurpose] = useState<ExportPurpose>('roundtrip');
   const [exportTemplate, setExportTemplate] = useState<ExportTemplateKey>('product_catalog');
-  const [exportScope, setExportScope] = useState<ExportScope>('condition');
+  const [exportScope, setExportScope] = useState<ExportScope>('all');
   const [exportFormat, setExportFormat] = useState<ExportFormat>('xlsx');
+  const [customExportFilename, setCustomExportFilename] = useState<string | null>(null);
   const [includeVariants, setIncludeVariants] = useState(true);
-  const [includeSpecs, setIncludeSpecs] = useState(false);
-  const [includeDocuments, setIncludeDocuments] = useState(false);
+  const [includeSpecs, setIncludeSpecs] = useState(true);
+  const [includeDocuments, setIncludeDocuments] = useState(true);
   const [publicSafeOnly, setPublicSafeOnly] = useState(false);
   const [exportFilters, setExportFilters] = useState<ExportFilterState>({
     brandId: '',
@@ -839,43 +886,54 @@ export function ImportWorkspacePage() {
     return toExportQueryFilters(exportFilters);
   }
 
-  function exportFilenameBase(prefix: string) {
+  function exportFilenameBase(label: string) {
     const filters = selectedExportFilters();
-    const brandLabel = getSelectedRecordLabel(exportBrands, filters.brandId, 'tat-ca-thuong-hieu');
-    const categoryLabel = getSelectedRecordLabel(exportCategories, filters.categoryId, 'tat-ca-danh-muc');
-    const scopeToken =
-      exportScope === 'all'
-        ? 'tat-ca'
-        : [brandLabel, categoryLabel, filters.status]
-            .filter((item) => item && item !== 'all')
-            .map(filenameToken)
-            .join('-') || 'co-loc';
-
-    return [
-      'song-thanh',
-      prefix,
-      scopeToken,
-      exportDateFilenameToken(exportFilters),
-      localDateStamp()
-    ].filter(Boolean).join('-');
+    const scopeParts = exportScope === 'all'
+      ? ['Tất cả']
+      : [
+          filters.brandId ? getSelectedRecordLabel(exportBrands, filters.brandId, '') : '',
+          filters.categoryId ? getSelectedRecordLabel(exportCategories, filters.categoryId, '') : '',
+          filters.status === 'active' ? 'Đang hoạt động' : filters.status === 'inactive' ? 'Tạm ngưng' : ''
+        ].filter(Boolean);
+    return datedExportFilename([
+      'Song Thanh',
+      label,
+      ...(scopeParts.length > 0 ? scopeParts : ['Theo điều kiện']),
+      exportDateFilenameToken(exportFilters)
+    ]);
   }
 
   function exportCustomerFilenameBase() {
-    const filterToken = [
-      exportFilters.customerSourceKind,
-      exportFilters.customerDeletedScope,
-      exportFilters.customerQuery.trim()
-    ]
-      .filter((item) => item && item !== 'all')
-      .map(filenameToken)
-      .join('-') || 'tat-ca';
+    const sourceLabels: Record<CustomerExportSourceKind, string> = {
+      all: '', contact: 'Liên hệ', quote: 'Báo giá', both: 'Liên hệ và báo giá'
+    };
+    const filterParts = [
+      sourceLabels[exportFilters.customerSourceKind],
+      exportFilters.customerDeletedScope === 'deleted' ? 'Đã lưu trữ' :
+        exportFilters.customerDeletedScope === 'all' ? 'Gồm lưu trữ' : '',
+      exportFilters.customerQuery.trim() ? 'Theo tìm kiếm' : ''
+    ].filter(Boolean);
 
-    return [
-      'song-thanh-khach-hang',
-      filterToken,
-      exportDateFilenameToken(exportFilters),
-      localDateStamp()
-    ].filter(Boolean).join('-');
+    return datedExportFilename([
+      'Song Thanh',
+      'Khách hàng',
+      ...(filterParts.length > 0 ? filterParts : ['Tất cả']),
+      exportDateFilenameToken(exportFilters)
+    ]);
+  }
+
+  function defaultExportFilename() {
+    switch (exportTemplate) {
+      case 'product_catalog': return exportFilenameBase('Sản phẩm');
+      case 'taxonomy_brand': return exportFilenameBase('Danh mục và thương hiệu');
+      case 'technical_documents': return exportFilenameBase('Tài liệu kỹ thuật');
+      case 'customers': return exportCustomerFilenameBase();
+      default: return exportFilenameBase('Dữ liệu');
+    }
+  }
+
+  function chosenExportFilename() {
+    return customExportFilename === null ? defaultExportFilename() : customExportFilename.trim();
   }
 
   async function downloadCurrentExport() {
@@ -927,7 +985,7 @@ export function ImportWorkspacePage() {
           throw new Error('Không có khách hàng nào để xuất.');
         }
         await downloadExportFile({
-          filename: exportCustomerFilenameBase(),
+          filename: chosenExportFilename(),
           title: 'Xuất danh sách khách hàng Song Thanh',
           format: 'xlsx',
           tables: [
@@ -961,33 +1019,39 @@ export function ImportWorkspacePage() {
           throw new Error('Không có nhóm sản phẩm phù hợp với điều kiện đã chọn.');
         }
 
-        const tables: ExportTable[] = [
-          { title: 'Nhóm sản phẩm', rows: productGroupRows(groups) }
-        ];
-
-        if (includeVariants) {
-          const variants = await fetchVariantsForGroups(groups, publicSafeOnly);
-          tables.push({ title: 'Biến thể', rows: productVariantRows(variants) });
-        }
-
-        if (includeDocuments) {
-          const documents = await fetchTechnicalDocumentsForExport({
-            categories: exportCategories,
-            filters,
-            publicSafeOnly,
-            categoryLimitIds,
-            productGroups: groups
-          });
-          tables.push({ title: 'Tài liệu kỹ thuật', rows: technicalDocumentRows(documents) });
-        }
+        const variants = includeVariants
+          ? await fetchVariantsForGroups(groups, publicSafeOnly, includeSpecs)
+          : [];
+        const documents = includeDocuments
+          ? await fetchTechnicalDocumentsForExport({
+              categories: exportCategories,
+              filters,
+              publicSafeOnly,
+              categoryLimitIds,
+              productGroups: groups
+            })
+          : [];
+        const tables: ExportTable[] = [{
+          title: 'Sản phẩm',
+          rows: includeVariants
+            ? productCatalogRows(groups, variants, documents, includeSpecs, includeDocuments)
+            : productGroupRows(groups, documents, includeDocuments)
+        }];
 
         await downloadExportFile({
-          filename: exportFilenameBase('san-pham'),
+          filename: chosenExportFilename(),
           title: 'Xuất dữ liệu sản phẩm Song Thanh',
           format: 'xlsx',
           tables
         });
-        setExportActionMessage(`Đã tải file Excel với ${groups.length} nhóm sản phẩm.`);
+        setExportActionMessage(
+          `Đã tải file Excel với ${groups.length} sản phẩm và ${variants.length} biến thể.` +
+          (includeDocuments
+            ? documents.length > 0
+              ? ` Đã kèm ${documents.length} tài liệu kỹ thuật.`
+              : ' Không có tài liệu kỹ thuật chưa lưu trữ trong phạm vi xuất.'
+            : '')
+        );
         return;
       }
 
@@ -1015,7 +1079,7 @@ export function ImportWorkspacePage() {
         }
 
         await downloadExportFile({
-          filename: exportFilenameBase('danh-muc-thuong-hieu'),
+          filename: chosenExportFilename(),
           title: 'Xuất danh mục và thương hiệu Song Thanh',
           format: 'xlsx',
           tables: [
@@ -1045,7 +1109,7 @@ export function ImportWorkspacePage() {
         }
 
         await downloadExportFile({
-          filename: exportFilenameBase('tai-lieu-ky-thuat'),
+          filename: chosenExportFilename(),
           title: 'Xuất tài liệu kỹ thuật Song Thanh',
           format: exportFormat === 'csv' ? 'csv' : 'xlsx',
           tables: [{ title: 'Tài liệu kỹ thuật', rows: technicalDocumentRows(documents) }]
@@ -1161,10 +1225,12 @@ export function ImportWorkspacePage() {
             Không gian dữ liệu
           </p>
           <h1 className="mt-1 text-[22px] font-semibold leading-7 tracking-tight text-text">
-            Nhập dữ liệu
+            {activeTab === 'export' ? 'Xuất dữ liệu' : 'Nhập dữ liệu'}
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Đưa dữ liệu vào hệ thống, xử lý các dòng cần kiểm tra và xuất file theo nhu cầu.
+            {activeTab === 'export'
+              ? 'Tạo file Excel từ dữ liệu hiện có, với phạm vi và thời gian theo nhu cầu.'
+              : 'Đưa dữ liệu vào hệ thống và xử lý các dòng cần kiểm tra.'}
           </p>
         </div>
 
@@ -1351,6 +1417,7 @@ export function ImportWorkspacePage() {
           template={exportTemplate}
           scope={exportScope}
           format={exportFormat}
+          filename={customExportFilename ?? defaultExportFilename()}
           includeVariants={includeVariants}
           includeSpecs={includeSpecs}
           includeDocuments={includeDocuments}
@@ -1371,7 +1438,12 @@ export function ImportWorkspacePage() {
             setExportFormat('xlsx');
             setPublicSafeOnly(nextPurpose === 'public_share');
           }}
-          onTemplateChange={setExportTemplate}
+          onTemplateChange={(nextTemplate) => {
+            setExportTemplate(nextTemplate);
+            setCustomExportFilename(null);
+          }}
+          onFilenameChange={setCustomExportFilename}
+          onFilenameReset={() => setCustomExportFilename(null)}
           onScopeChange={setExportScope}
           onFormatChange={setExportFormat}
           onIncludeVariantsChange={setIncludeVariants}
@@ -1409,7 +1481,7 @@ function WorkspaceTabs({
       <WorkspaceTabButton
         active={active === 'export'}
         icon={<FileDown className="h-4 w-4" />}
-        label="Lô xuất"
+        label="Xuất dữ liệu"
         onClick={() => onChange('export')}
       />
     </div>
@@ -1449,7 +1521,9 @@ function SimpleExportWorkspacePanel({
   template,
   scope,
   format,
+  filename,
   includeVariants,
+  includeSpecs,
   includeDocuments,
   publicSafeOnly,
   filters,
@@ -1465,6 +1539,8 @@ function SimpleExportWorkspacePanel({
   actionMessage,
   onPurposeChange,
   onTemplateChange,
+  onFilenameChange,
+  onFilenameReset,
   onScopeChange,
   onFormatChange,
   onIncludeVariantsChange,
@@ -1478,6 +1554,7 @@ function SimpleExportWorkspacePanel({
   template: ExportTemplateKey;
   scope: ExportScope;
   format: ExportFormat;
+  filename: string;
   includeVariants: boolean;
   includeSpecs: boolean;
   includeDocuments: boolean;
@@ -1495,6 +1572,8 @@ function SimpleExportWorkspacePanel({
   actionMessage: string;
   onPurposeChange: (purpose: ExportPurpose) => void;
   onTemplateChange: (template: ExportTemplateKey) => void;
+  onFilenameChange: (filename: string) => void;
+  onFilenameReset: () => void;
   onScopeChange: (scope: ExportScope) => void;
   onFormatChange: (format: ExportFormat) => void;
   onIncludeVariantsChange: (checked: boolean) => void;
@@ -1507,6 +1586,14 @@ function SimpleExportWorkspacePanel({
   const selectedFormat = exportFormats.find((item) => item.key === format) ?? exportFormats[0];
   const isCustomerTemplate = template === 'customers';
   const supportsCsv = template === 'technical_documents';
+  const templateLabel = {
+    product_catalog: 'Sản phẩm',
+    taxonomy_brand: 'Danh mục và thương hiệu',
+    technical_documents: 'Tài liệu kỹ thuật',
+    customers: 'Khách hàng',
+    future_data: 'Dữ liệu'
+  }[template];
+  const sheetCount = template === 'taxonomy_brand' ? 2 : 1;
   const hasCondition = exportFilterHasCondition(filters);
   const dateRangeError = validateExportDateRange({
     from: filters.dateFrom,
@@ -1514,6 +1601,7 @@ function SimpleExportWorkspacePanel({
   });
   const downloadDisabled =
     exporting ||
+    !filename.trim() ||
     Boolean(dateRangeError) ||
     (!isCustomerTemplate && referencesLoading) ||
     (!isCustomerTemplate && brandCategoriesLoading) ||
@@ -1542,13 +1630,14 @@ function SimpleExportWorkspacePanel({
     : [];
   const categoryControlsDisabled = referencesLoading || brandCategoriesLoading || Boolean(brandCategoriesError);
   const variantOptionDisabled = template !== 'product_catalog';
+  const specsOptionDisabled = variantOptionDisabled || !includeVariants;
   const documentOptionDisabled = template !== 'product_catalog';
   const documentOptionDescription =
     template === 'technical_documents'
       ? 'Mẫu tài liệu kỹ thuật luôn xuất sheet tài liệu, không cần chọn thêm.'
       : template === 'taxonomy_brand'
         ? 'Không áp dụng cho mẫu danh mục, thương hiệu.'
-        : 'Bao gồm metadata tài liệu kỹ thuật và file liên kết.';
+        : 'Ghi tên, loại, phiên bản và tên tệp tài liệu ngay trên dòng sản phẩm.';
 
   function selectPreset(nextTemplate: ExportTemplateKey) {
     onTemplateChange(nextTemplate);
@@ -1557,8 +1646,8 @@ function SimpleExportWorkspacePanel({
       onPurposeChange('roundtrip');
       onFormatChange('xlsx');
       onIncludeVariantsChange(true);
-      onIncludeSpecsChange(false);
-      onIncludeDocumentsChange(false);
+      onIncludeSpecsChange(true);
+      onIncludeDocumentsChange(true);
       onPublicSafeOnlyChange(false);
       return;
     }
@@ -1597,28 +1686,19 @@ function SimpleExportWorkspacePanel({
   return (
     <div className="space-y-4" data-import-export-panel="true">
       <Card className="overflow-hidden">
-        <div className="border-b border-border bg-panel px-4 py-4">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="bg-[#153957] px-5 py-5 text-white lg:px-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm font-semibold text-text">Xuất dữ liệu</h2>
-                <Badge tone="active">Tạo file chuẩn</Badge>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {isCustomerTemplate
-                  ? 'Chọn nhóm khách cần xuất, lọc nếu cần, rồi tải file Excel.'
-                  : 'Chọn dữ liệu cần xuất, lọc theo thương hiệu hoặc danh mục nếu cần, rồi tải file Excel.'}
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#a8d6ef]">Không gian dữ liệu / Xuất dữ liệu</p>
+              <h2 className="mt-1 text-xl font-semibold tracking-tight">Tạo file xuất</h2>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-[#d6e5ef]">
+                Chọn loại dữ liệu, xác định phạm vi, sau đó tải file để xem hoặc xử lý tiếp.
               </p>
             </div>
-            <Button
-              type="button"
-              disabled={downloadDisabled}
-              onClick={onDownload}
-              data-import-export-submit="true"
-            >
-              <Download className="h-4 w-4" />
-              {exporting ? 'Đang tạo file' : `Tải ${selectedFormat.title}`}
-            </Button>
+            <span className="inline-flex w-fit items-center gap-2 rounded-md border border-white/25 bg-white/10 px-3 py-2 text-xs font-medium text-white">
+              <FileSpreadsheet className="h-4 w-4" />
+              {format === 'csv' ? 'CSV cho dữ liệu một sheet' : 'Excel có bộ lọc và cố định tiêu đề'}
+            </span>
           </div>
         </div>
 
@@ -1642,18 +1722,19 @@ function SimpleExportWorkspacePanel({
           </div>
         ) : null}
 
-        <div className="space-y-4 p-4 lg:p-5">
+        <div className="flex flex-col gap-5 p-4 lg:p-6">
           <section>
             <SectionTitle
               icon={<PackageSearch className="h-4 w-4" />}
-              title="Chọn nhanh"
+              title="1. Loại dữ liệu"
+              helper="Mỗi lựa chọn tạo một hoặc nhiều sheet phù hợp với dữ liệu hiện có."
             />
-            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <QuickPresetButton
                 active={template === 'product_catalog'}
                 icon={<FileSpreadsheet className="h-4 w-4" />}
                 title="Sản phẩm Excel"
-                description="Nhóm sản phẩm, có thể kèm biến thể."
+                description="Một sheet với mã đã nhập, thông số và tài liệu theo từng biến thể."
                 onClick={() => selectPreset('product_catalog')}
               />
               <QuickPresetButton
@@ -1680,89 +1761,11 @@ function SimpleExportWorkspacePanel({
             </div>
           </section>
 
-          <section data-export-date-range="true" className="rounded-sm border border-border bg-muted/20 p-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-3">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold text-text">Mốc thời gian</span>
-                  <Select
-                    aria-label="Mốc thời gian"
-                    value={filters.dateField}
-                    onChange={(event) =>
-                      onFilterChange({ dateField: event.target.value as ExportDateField })
-                    }
-                  >
-                    <option value="updated_at">Ngày cập nhật</option>
-                    <option value="created_at">Ngày tạo</option>
-                  </Select>
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold text-text">Từ ngày</span>
-                  <Input
-                    type="date"
-                    value={filters.dateFrom}
-                    max={filters.dateTo || undefined}
-                    data-export-date-start="true"
-                    onChange={(event) => onFilterChange({ dateFrom: event.target.value })}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold text-text">Đến ngày</span>
-                  <Input
-                    type="date"
-                    value={filters.dateTo}
-                    min={filters.dateFrom || undefined}
-                    data-export-date-end="true"
-                    onChange={(event) => onFilterChange({ dateTo: event.target.value })}
-                  />
-                </label>
-              </div>
-              <div className="flex flex-wrap gap-2" aria-label="Chọn nhanh khoảng thời gian">
-                {[7, 30, 90].map((days) => (
-                  <button
-                    key={days}
-                    type="button"
-                    className="min-h-10 rounded-md border border-border bg-panel px-3 text-sm font-medium text-slate-700 hover:bg-muted"
-                    onClick={() => {
-                      const today = localIsoDate();
-                      onFilterChange({ dateFrom: localIsoDate(days - 1), dateTo: today });
-                    }}
-                  >
-                    {days} ngày
-                  </button>
-                ))}
-                {(filters.dateFrom || filters.dateTo) ? (
-                  <button
-                    type="button"
-                    className="min-h-10 rounded-md px-3 text-sm font-medium text-primary hover:bg-blue-50"
-                    onClick={() => onFilterChange({ dateFrom: '', dateTo: '' })}
-                  >
-                    Xóa ngày
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="font-medium text-muted-foreground">
-                {exportDateRangeLabel({
-                  field: filters.dateField,
-                  from: filters.dateFrom,
-                  to: filters.dateTo
-                })}
-              </span>
-              {dateRangeError ? (
-                <span role="alert" className="font-medium text-red-700">
-                  {dateRangeError}
-                </span>
-              ) : null}
-            </div>
-          </section>
-
           {isCustomerTemplate ? (
             <section>
               <SectionTitle
                 icon={<Filter className="h-4 w-4" />}
-                title="Lọc khách hàng"
+                title="2. Lọc khách hàng"
               />
               <div className="mt-3 grid gap-3 rounded-sm border border-border bg-panel p-3 md:grid-cols-2">
                 <label className="block md:col-span-2">
@@ -1840,7 +1843,7 @@ function SimpleExportWorkspacePanel({
                     />
                     <CompactCheckOption
                       checked={filters.customerIncludeSystemInfo}
-                      label="Mã/ngày hệ thống"
+                      label="Ngày tạo, cập nhật"
                       onChange={(checked) =>
                         onFilterChange({ customerIncludeSystemInfo: checked })
                       }
@@ -1854,7 +1857,8 @@ function SimpleExportWorkspacePanel({
             <section>
               <SectionTitle
                 icon={<Filter className="h-4 w-4" />}
-                title="Phạm vi"
+                title="2. Phạm vi"
+                helper="Xuất tất cả để tải nhanh, hoặc chọn điều kiện để thu hẹp dữ liệu."
               />
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <ChoiceButton
@@ -1991,7 +1995,7 @@ function SimpleExportWorkspacePanel({
 
                 {filters.categoryParentId && !brandCategoriesLoading && childCategoryOptions.length === 0 ? (
                   <p className="mt-3 rounded-sm border border-blue-200 bg-panel px-3 py-2 text-xs leading-5 text-blue-700">
-                    Danh mục cha này không có danh mục con phù hợp với bộ lọc hiện tại. File sẽ lấy theo danh mục cha.
+                    Danh mục cha này không có danh mục con phù hợp với bộ lọc hiện tại. Tệp sẽ lấy theo danh mục cha.
                   </p>
                 ) : null}
 
@@ -2004,6 +2008,89 @@ function SimpleExportWorkspacePanel({
               ) : null}
             </section>
           )}
+
+          <section data-export-date-range="true" className="rounded-md border border-border bg-[#f8fafc] p-4">
+            <SectionTitle
+              icon={<Filter className="h-4 w-4" />}
+              title="3. Khoảng thời gian"
+              helper="Để trống ngày nếu cần toàn bộ dữ liệu trong phạm vi đã chọn."
+            />
+            <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-text">Mốc thời gian</span>
+                  <Select
+                    aria-label="Mốc thời gian"
+                    value={filters.dateField}
+                    onChange={(event) =>
+                      onFilterChange({ dateField: event.target.value as ExportDateField })
+                    }
+                  >
+                    <option value="updated_at">Ngày cập nhật</option>
+                    <option value="created_at">Ngày tạo</option>
+                  </Select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-text">Từ ngày</span>
+                  <Input
+                    type="date"
+                    value={filters.dateFrom}
+                    max={filters.dateTo || undefined}
+                    data-export-date-start="true"
+                    onChange={(event) => onFilterChange({ dateFrom: event.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-text">Đến ngày</span>
+                  <Input
+                    type="date"
+                    value={filters.dateTo}
+                    min={filters.dateFrom || undefined}
+                    data-export-date-end="true"
+                    onChange={(event) => onFilterChange({ dateTo: event.target.value })}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2" aria-label="Chọn nhanh khoảng thời gian">
+                {[7, 30, 90].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    className="min-h-10 rounded-md border border-border bg-panel px-3 text-sm font-medium text-slate-700 hover:bg-muted"
+                    onClick={() => {
+                      const today = localIsoDate();
+                      onFilterChange({ dateFrom: localIsoDate(days - 1), dateTo: today });
+                    }}
+                  >
+                    {days} ngày
+                  </button>
+                ))}
+                {(filters.dateFrom || filters.dateTo) ? (
+                  <button
+                    type="button"
+                    className="min-h-10 rounded-md px-3 text-sm font-medium text-primary hover:bg-blue-50"
+                    onClick={() => onFilterChange({ dateFrom: '', dateTo: '' })}
+                  >
+                    Xóa ngày
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="font-medium text-muted-foreground">
+                {exportDateRangeLabel({
+                  field: filters.dateField,
+                  from: filters.dateFrom,
+                  to: filters.dateTo
+                })}
+              </span>
+              {dateRangeError ? (
+                <span role="alert" className="font-medium text-red-700">
+                  {dateRangeError}
+                </span>
+              ) : null}
+            </div>
+          </section>
 
           {!isCustomerTemplate ? (
             <details className="rounded-sm border border-border bg-panel">
@@ -2029,7 +2116,7 @@ function SimpleExportWorkspacePanel({
                   </label>
                   <label className="block">
                     <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                      File
+                      Định dạng tệp
                     </span>
                     <Select
                       value={format}
@@ -2053,14 +2140,25 @@ function SimpleExportWorkspacePanel({
                 <div className="grid gap-2 sm:grid-cols-2">
                   <CheckOption
                     checked={includeVariants}
-                    label="Kèm biến thể"
+                    label="Kèm biến thể và mã sản phẩm"
                     description={
                       variantOptionDisabled
                         ? 'Chỉ áp dụng cho mẫu Sản phẩm Excel.'
-                        : 'Phù hợp cho catalog sản phẩm và file nhập lại.'
+                        : 'Mỗi biến thể nằm cùng dòng với thông tin sản phẩm; tắt mục này sẽ không có mã sản phẩm.'
                     }
                     disabled={variantOptionDisabled}
                     onChange={onIncludeVariantsChange}
+                  />
+                  <CheckOption
+                    checked={includeVariants && includeSpecs}
+                    label="Kèm thông số kỹ thuật"
+                    description={
+                      specsOptionDisabled
+                        ? 'Cần kèm biến thể để hiện thông số của từng mã sản phẩm.'
+                        : 'Ghi tên và giá trị thông số ngay trên dòng biến thể.'
+                    }
+                    disabled={specsOptionDisabled}
+                    onChange={onIncludeSpecsChange}
                   />
                   <CheckOption
                     checked={includeDocuments}
@@ -2071,14 +2169,61 @@ function SimpleExportWorkspacePanel({
                   />
                   <CheckOption
                     checked={publicSafeOnly}
-                    label="Chỉ dữ liệu public-safe"
-                    description="Loại dữ liệu nháp, chưa duyệt hoặc trạng thái nội bộ."
+                    label="Chỉ dữ liệu đã công khai"
+                    description="Chỉ lấy bản ghi đang hoạt động, đã duyệt và đã xuất bản."
                     onChange={onPublicSafeOnlyChange}
                   />
                 </div>
               </div>
             </details>
           ) : null}
+
+          <div className="rounded-md border border-border bg-panel p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="export-filename" className="text-sm font-semibold text-text">Tên tệp khi tải</label>
+              <button
+                type="button"
+                className="text-xs font-semibold text-primary hover:underline"
+                onClick={onFilenameReset}
+              >
+                Dùng tên gợi ý
+              </button>
+            </div>
+            <Input
+              id="export-filename"
+              className="mt-2 w-full"
+              value={filename}
+              maxLength={120}
+              onChange={(event) => onFilenameChange(event.target.value)}
+            />
+            <p className="mt-2 break-all text-xs text-muted-foreground">
+              Tệp tải về: <span className="font-medium text-text">{filenameWithExtension(filename, format === 'csv' ? 'csv' : 'xlsx')}</span>
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-4 rounded-md border border-[#bed4e4] bg-[#eff6fb] p-4 sm:flex-row sm:items-center sm:justify-between lg:px-5">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#396b91]">Tệp sẽ tạo</p>
+              <p className="mt-1 text-sm font-semibold text-text">
+                {templateLabel}
+                <span className="font-normal text-muted-foreground"> · {isCustomerTemplate ? 'Theo bộ lọc khách hàng' : scope === 'all' ? 'Tất cả dữ liệu' : 'Theo điều kiện'} · {selectedFormat.title}</span>
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {exportDateRangeLabel({ field: filters.dateField, from: filters.dateFrom, to: filters.dateTo })}
+                {` · ${sheetCount} sheet`}
+              </p>
+            </div>
+            <Button
+              type="button"
+              disabled={downloadDisabled}
+              onClick={onDownload}
+              data-import-export-submit="true"
+              className="w-full sm:w-auto"
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? 'Đang tạo file...' : `Tải ${selectedFormat.title}`}
+            </Button>
+          </div>
         </div>
       </Card>
 
@@ -2104,15 +2249,17 @@ function QuickPresetButton({
       type="button"
       onClick={onClick}
       aria-description={description}
+      aria-pressed={active}
       className={cn(
-        'min-h-12 rounded-sm border px-3 py-2.5 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1',
-        active ? 'border-primary bg-blue-50' : 'border-border bg-panel hover:bg-muted'
+        'min-h-24 rounded-md border px-4 py-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1',
+        active ? 'border-primary bg-[#eff6fb] ring-1 ring-primary/20' : 'border-border bg-panel hover:border-[#9fc4de] hover:bg-[#f8fafc]'
       )}
     >
       <div className="flex items-center gap-2 text-sm font-semibold text-text">
         <span className="text-primary">{icon}</span>
         {title}
       </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
     </button>
   );
 }
@@ -2158,15 +2305,17 @@ function ChoiceButton({
       disabled={disabled}
       onClick={onClick}
       aria-description={description}
+      aria-pressed={active}
       className={cn(
-        'min-h-12 rounded-sm border p-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60',
-        active ? 'border-primary bg-blue-50' : 'border-border bg-panel hover:bg-muted'
+        'min-h-20 rounded-md border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60',
+        active ? 'border-primary bg-[#eff6fb] ring-1 ring-primary/20' : 'border-border bg-panel hover:border-[#9fc4de] hover:bg-[#f8fafc]'
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <span className="text-sm font-semibold text-text">{title}</span>
         <Badge tone={active ? 'active' : 'default'}>{badge}</Badge>
       </div>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
     </button>
   );
 }

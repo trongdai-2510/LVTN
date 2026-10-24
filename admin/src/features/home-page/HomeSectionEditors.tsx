@@ -313,7 +313,7 @@ export function HeroEditor({
   const previewItems = config.mode === 'manual' ? manualItems : undefined;
   const summary =
     config.mode === 'auto'
-      ? `Tất cả banner ở vị trí "${config.position}" (${context.availabilityCount ?? 0} banner)`
+      ? `Banner tự động thuộc nhóm "${config.position}"`
       : `${manualItems.length} banner đã chọn thủ công (theo thứ tự)`;
 
   return (
@@ -328,14 +328,14 @@ export function HeroEditor({
       <ModeSelector
         mode={config.mode}
         readOnly={readOnly}
-        autoLabel={`Tự động (${context.availabilityCount ?? 0})`}
+        autoLabel="Tự động"
         manualLabel="Chọn thủ công"
         onChange={(mode) => onChange({ ...config, mode })}
       />
       {config.mode === 'auto' ? (
         <label className="block max-w-xs">
           <span className="mb-1 block text-[12px] font-medium text-text">
-            Lọc banner theo "vị trí"
+            Nhóm banner tự động
           </span>
           <Input
             value={config.position}
@@ -344,7 +344,7 @@ export function HeroEditor({
             onChange={(event) => onChange({ ...config, position: event.target.value })}
           />
           <span className="mt-1 block text-[11px] text-muted-foreground">
-            Khớp với trường "Vị trí" của banner trong module Banner. Mặc định: <code>hero</code>.
+            Khớp với trang đặt banner trong module Banner. Nhóm mặc định <code>hero</code> gồm banner trang chủ; website sẽ xếp theo thứ tự của từng banner. Chọn thủ công sẽ dùng đúng thứ tự danh sách bên dưới.
           </span>
         </label>
       ) : (

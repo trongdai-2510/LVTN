@@ -80,7 +80,8 @@ export class ProductVariantService {
         deleted_scope: deletedScope
       },
       limit: pagination.limit,
-      offset: pagination.offset
+      offset: pagination.offset,
+      includeAttributes: query.include_attributes === 'true'
     });
     return {
       items: result.items,

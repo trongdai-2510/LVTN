@@ -38,6 +38,7 @@ import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
 import { cn } from '@/lib/cn';
 import { formatValue } from '@/lib/formatters';
+import { previewOrigin } from '@/lib/previewOrigin';
 
 import {
   buildPublicPath,
@@ -826,22 +827,14 @@ function PublicPreviewDialog({
 }) {
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const targetOrigin = useMemo(() => {
-    try {
-      return new URL(PUBLIC_SITE_BASE_URL).origin;
-    } catch {
-      return '*';
-    }
-  }, []);
+  const targetOrigin = useMemo(() => previewOrigin(PUBLIC_SITE_BASE_URL), []);
   const postPreviewDraft = useCallback(() => {
     const targetWindow = iframeRef.current?.contentWindow;
-    if (!targetWindow) return;
-    if (targetOrigin !== '*') {
-      try {
-        if (targetWindow.location.origin !== targetOrigin) return;
-      } catch {
-        // Cross-origin access is expected after the public preview loads.
-      }
+    if (!targetWindow || !targetOrigin) return;
+    try {
+      if (targetWindow.location.origin !== targetOrigin) return;
+    } catch {
+      // Cross-origin access is expected after the public preview loads.
     }
     targetWindow.postMessage(
       {
@@ -864,7 +857,7 @@ function PublicPreviewDialog({
     };
 
     function handleMessage(event: MessageEvent<unknown>) {
-      if (targetOrigin !== '*' && event.origin !== targetOrigin) return;
+      if (!targetOrigin || event.origin !== targetOrigin) return;
       if (event.source !== iframeRef.current?.contentWindow) return;
       if (
         typeof event.data === 'object' &&

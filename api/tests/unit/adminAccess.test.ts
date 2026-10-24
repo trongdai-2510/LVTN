@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 import {
   ResetAdminUserPasswordDto,
   UpdateAdminUserDto
@@ -191,4 +192,18 @@ test('password reset rejects null instead of silently generating a new secret', 
   const dto = Object.assign(new ResetAdminUserPasswordDto(), { new_password: null });
   const errors = await validate(dto);
   assert.ok(errors.some((error) => error.property === 'new_password'));
+});
+
+test('password reset rejects a custom password that becomes blank after trimming', async () => {
+  const dto = plainToInstance(ResetAdminUserPasswordDto, { new_password: '        ' });
+  const errors = await validate(dto);
+  assert.ok(errors.some((error) => error.property === 'new_password'));
+});
+
+test('password reset validates a custom password without normalizing it', async () => {
+  const password = ' SecurePass123 ';
+  const dto = plainToInstance(ResetAdminUserPasswordDto, { new_password: password });
+  const errors = await validate(dto);
+  assert.equal(dto.new_password, password);
+  assert.deepEqual(errors, []);
 });

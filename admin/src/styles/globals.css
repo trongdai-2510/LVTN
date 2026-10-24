@@ -3,7 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --font-admin-sans: "Segoe UI Variable Text";
+  --font-admin-sans: var(--font-be-vietnam-pro), "Be Vietnam Pro";
+  --font-admin-display: var(--font-archivo), Archivo;
   --font-admin-mono: "SFMono-Regular";
   --background: #f3f6f9;
   --surface: #f8fafc;

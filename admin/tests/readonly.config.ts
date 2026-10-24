@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: ['adminsearch.spec.ts', 'auditWorkspace.spec.ts', 'auditlayout.spec.ts', 'authBoundary.spec.ts', 'contentWorkflow.spec.ts', 'contentownership.spec.ts', 'contentreadiness.spec.ts', 'contentsave.spec.ts', 'dashboard.spec.ts', 'menusave.spec.ts', 'productdetail.spec.ts', 'productreadiness.spec.ts', 'productworkspace.spec.ts', 'publiccatalog.spec.ts', 'rolelayout.spec.ts', 'rolesWorkspace.spec.ts', 'usersWorkspace.spec.ts'],
+  testMatch: ['adminsearch.spec.ts', 'auditWorkspace.spec.ts', 'auditlayout.spec.ts', 'authBoundary.spec.ts', 'bannerpicker.spec.ts', 'contentWorkflow.spec.ts', 'contentownership.spec.ts', 'contentreadiness.spec.ts', 'contentsave.spec.ts', 'dashboard.spec.ts', 'menusave.spec.ts', 'productdetail.spec.ts', 'productreadiness.spec.ts', 'productworkspace.spec.ts', 'publicCopy.spec.ts', 'publiccatalog.spec.ts', 'recordSearch.spec.ts', 'rolelayout.spec.ts', 'rolesWorkspace.spec.ts', 'servicedetail.spec.ts', 'usersWorkspace.spec.ts'],
   outputDir: '../tmp/qa-artifacts/contentownership',
   timeout: 60_000,
   fullyParallel: false,

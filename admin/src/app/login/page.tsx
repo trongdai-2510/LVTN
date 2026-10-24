@@ -29,7 +29,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <section aria-label="Biểu mẫu đăng nhập" className="w-full border border-[var(--login-border)] border-l-4 border-l-[var(--login-brand)] bg-white px-6 py-8 sm:px-10 sm:py-10 xl:px-12 xl:py-12">
+          <section aria-label="Biểu mẫu đăng nhập" className="w-full border border-[var(--login-border)] bg-white px-6 py-8 sm:px-10 sm:py-10 xl:px-12 xl:py-12">
             <p className="mb-6 text-sm font-semibold uppercase tracking-[0.12em] text-[var(--login-brand)] lg:mb-7">
               Tài khoản của bạn
             </p>

@@ -1288,6 +1288,7 @@ export class PublicService {
     );
 
     const result = await this.publicRepository.listPublicProductGroups({
+      ids: query.ids ? parseCommaSeparatedUuids(query.ids) : null,
       q: query.q?.trim() ? query.q.trim() : null,
       category_id: normalizedCategoryFilter,
       brand_ids: normalizedBrandIds.length > 0 ? normalizedBrandIds : null,
@@ -1778,6 +1779,7 @@ export class PublicService {
   ): Promise<PublicServiceListResponse> {
     const pagination = getPaginationParams(query, { maxPageSize: 40 });
     const result = await this.publicRepository.listPublicServices({
+      ids: query.ids ? parseCommaSeparatedUuids(query.ids) : null,
       q: query.q?.trim() ? query.q.trim() : null,
       page: pagination.page,
       page_size: pagination.pageSize,
@@ -1861,6 +1863,7 @@ export class PublicService {
   ): Promise<PublicProjectListResponse> {
     const pagination = getPaginationParams(query, { maxPageSize: 40 });
     const result = await this.publicRepository.listPublicProjects({
+      ids: query.ids ? parseCommaSeparatedUuids(query.ids) : null,
       q: query.q?.trim() ? query.q.trim() : null,
       page: pagination.page,
       page_size: pagination.pageSize,

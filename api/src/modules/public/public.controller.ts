@@ -10,7 +10,7 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
-import { SkipThrottle, Throttle } from "@nestjs/throttler";
+import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 
 import {
@@ -101,6 +101,7 @@ export class PublicController {
 
   @Post("product-groups/:slug/view")
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 120, ttl: 60000 } })
   recordPublicProductGroupView(
     @Param("slug") slug: string,
   ): Promise<PublicProductGroupViewResponse> {
@@ -181,7 +182,7 @@ export class PublicController {
   }
 
   @Get("files/:id/download-watermarked")
-  @SkipThrottle()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   downloadPublicWatermarkedProductImage(
     @Param("id") id: string,
     @Res() response: Response,
@@ -193,7 +194,7 @@ export class PublicController {
   }
 
   @Get("files/:id")
-  @SkipThrottle()
+  @Throttle({ default: { limit: 300, ttl: 60000 } })
   getPublicFile(
     @Param("id") id: string,
     @Res() response: Response,

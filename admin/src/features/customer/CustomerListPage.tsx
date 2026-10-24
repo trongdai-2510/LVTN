@@ -151,8 +151,17 @@ export function CustomerListPage({
         throw new Error('Không có hồ sơ khách hàng phù hợp để xuất.');
       }
 
+      const filenameScope = [
+        sourceKind === 'contact' ? 'Liên hệ' :
+          sourceKind === 'quote' ? 'Báo giá' :
+          sourceKind === 'both' ? 'Liên hệ và báo giá' : '',
+        deletedScope === 'deleted' ? 'Đã lưu trữ' :
+          deletedScope === 'all' ? 'Gồm lưu trữ' : '',
+        query.trim() ? 'Theo tìm kiếm' : ''
+      ].filter(Boolean).join(' - ') || 'Tất cả';
+
       await downloadExportFile({
-        filename: `song-thanh-khach-hang-${localDateStamp()}.xlsx`,
+        filename: `Song Thanh - Khách hàng - ${filenameScope} - ${localDateStamp()}`,
         title: 'Xuất danh sách khách hàng Song Thanh',
         format: 'xlsx',
         tables: [

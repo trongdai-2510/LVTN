@@ -53,8 +53,6 @@ const config = {
     endpoint: endpoints.songThanh.services,
     listPath: '/services',
     createPath: '/services/new',
-    intro:
-      'Mỗi dịch vụ hiển thị trên /dich-vu như một nhu cầu khách có thể gửi yêu cầu. Tên, mô tả và ảnh nên giúp khách hiểu ngay khi nào cần liên hệ.',
     Icon: Briefcase
   },
   project: {
@@ -63,7 +61,6 @@ const config = {
     endpoint: endpoints.songThanh.projects,
     listPath: '/projects',
     createPath: '/projects/new',
-    intro: 'Quản lý dự án, hình ảnh thực tế và thông tin công trình hiển thị trên website.',
     Icon: Building2
   }
 } as const;
@@ -234,7 +231,6 @@ export function ServiceProjectListPage({ kind }: { kind: DomainKind }) {
         <div className="min-w-0 space-y-3">
           <div>
             <h1 className="text-xl font-semibold text-text">{cfg.label}</h1>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{cfg.intro}</p>
           </div>
 
           <div className="flex w-fit rounded-lg bg-muted p-1">

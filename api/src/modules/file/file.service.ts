@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { constants as fsConstants } from 'node:fs';
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import type { Response } from 'express';
 
 import {
@@ -141,6 +141,25 @@ export class FileService {
 
     if (!file.mime_type.startsWith('image/')) {
       throw this.notFound('Image preview was not found.');
+    }
+
+    if (file.mime_type === 'image/svg+xml') {
+      const original = 'buffer' in readableFile
+        ? readableFile.buffer
+        : await readFile(readableFile.resolvedPath);
+      const cleaned = sanitizeSvgMarkup(original.toString('utf8'));
+      if (!cleaned.includes('<svg')) {
+        throw this.notFound('Image preview was not found.');
+      }
+      const safeBuffer = Buffer.from(cleaned, 'utf8');
+      response.setHeader('Content-Type', 'image/svg+xml');
+      response.setHeader('Cache-Control', 'private, no-store');
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      response.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+      response.setHeader('Content-Disposition', buildContentDisposition('inline', file.original_filename));
+      response.setHeader('Content-Length', String(safeBuffer.length));
+      response.send(safeBuffer);
+      return;
     }
 
     response.setHeader('Content-Type', file.mime_type);

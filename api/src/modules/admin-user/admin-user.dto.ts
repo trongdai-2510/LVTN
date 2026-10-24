@@ -12,6 +12,7 @@ import {
   ValidateIf,
   Max,
   MaxLength,
+  Matches,
   Min,
   MinLength
 } from 'class-validator';
@@ -108,5 +109,6 @@ export class ResetAdminUserPasswordDto {
   @IsString()
   @MinLength(8)
   @MaxLength(128)
+  @Matches(/\S/, { message: 'new_password must contain a non-whitespace character' })
   new_password?: string;
 }

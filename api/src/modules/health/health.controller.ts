@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 
 import { HealthService } from './health.service';
 
@@ -12,6 +13,7 @@ export class HealthController {
   }
 
   @Get('db')
+  @Throttle({ default: { limit: 120, ttl: 60000 } })
   getDatabaseHealth(): Promise<{ status: 'ok'; database: 'reachable' }> {
     return this.healthService.getDatabaseHealth();
   }

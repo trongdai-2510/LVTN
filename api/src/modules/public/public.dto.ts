@@ -48,6 +48,12 @@ export class PublicProductGroupListQueryDto {
   @IsOptional()
   @Transform(({ value }) => trimOptionalString(value))
   @IsString()
+  @MaxLength(2048)
+  ids?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => trimOptionalString(value))
+  @IsString()
   @MaxLength(255)
   q?: string;
 
@@ -104,6 +110,12 @@ export class PublicServiceListQueryDto {
   @IsOptional()
   @Transform(({ value }) => trimOptionalString(value))
   @IsString()
+  @MaxLength(2048)
+  ids?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => trimOptionalString(value))
+  @IsString()
   @MaxLength(255)
   q?: string;
 
@@ -123,6 +135,12 @@ export class PublicServiceListQueryDto {
 }
 
 export class PublicProjectListQueryDto {
+  @IsOptional()
+  @Transform(({ value }) => trimOptionalString(value))
+  @IsString()
+  @MaxLength(2048)
+  ids?: string;
+
   @IsOptional()
   @Transform(({ value }) => trimOptionalString(value))
   @IsString()

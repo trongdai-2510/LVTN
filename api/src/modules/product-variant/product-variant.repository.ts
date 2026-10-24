@@ -64,6 +64,7 @@ export class ProductVariantRepository {
     filters: ListFilters;
     limit: number;
     offset: number;
+    includeAttributes?: boolean;
   }): Promise<{ items: ProductVariantListItem[]; total: number }> {
     const variantAlias = 'product_variant_record';
     const groupAlias = 'product_group_record';
@@ -120,18 +121,33 @@ export class ProductVariantRepository {
       .limit(params.limit);
     const typedRows = rows as ProductVariantAdminRecord[];
     const ids = typedRows.map((row) => row.id);
-    const [quoteCounts, attributeCounts, highlightSpecCounts] = await Promise.all([
+    const [quoteCounts, attributeCounts, highlightSpecCounts, attributes] = await Promise.all([
       this.countMap(QUOTE_ITEM_TABLE, 'product_variant_id', ids),
       this.countMap(VARIANT_ATTRIBUTE_TABLE, 'product_variant_id', ids),
-      this.countMap(PRODUCT_HIGHLIGHT_SPEC_TABLE, 'product_variant_id', ids)
+      this.countMap(PRODUCT_HIGHLIGHT_SPEC_TABLE, 'product_variant_id', ids),
+      params.includeAttributes && ids.length > 0
+        ? this.knexService.db<VariantAttributeRecord>(VARIANT_ATTRIBUTE_TABLE)
+            .select('product_variant_id', 'attribute_name', 'attribute_value', 'display_order')
+            .whereIn('product_variant_id', ids)
+            .whereNull('deleted_at')
+            .orderBy('display_order', 'asc')
+            .orderBy('updated_at', 'desc')
+        : Promise.resolve([] as VariantAttributeRecord[])
     ]);
+    const attributesByVariant = new Map<string, Array<Pick<VariantAttributeRecord, 'product_variant_id' | 'attribute_name' | 'attribute_value' | 'display_order'>>>();
+    for (const attribute of attributes) {
+      const values = attributesByVariant.get(attribute.product_variant_id) ?? [];
+      values.push(attribute);
+      attributesByVariant.set(attribute.product_variant_id, values);
+    }
 
     return {
       items: typedRows.map((row) => ({
         ...row,
         active_quote_item_count: quoteCounts.get(row.id) ?? 0,
         attribute_count: attributeCounts.get(row.id) ?? 0,
-        highlight_spec_count: highlightSpecCounts.get(row.id) ?? 0
+        highlight_spec_count: highlightSpecCounts.get(row.id) ?? 0,
+        ...(params.includeAttributes ? { attributes: attributesByVariant.get(row.id) ?? [] } : {})
       })),
       total
     };

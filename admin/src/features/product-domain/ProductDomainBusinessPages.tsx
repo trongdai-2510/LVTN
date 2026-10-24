@@ -2251,7 +2251,7 @@ function renderProductGroupSections({
               onChange={(value) => setForm({ ...form, thumbnail_file_id: value })}
             />
           </Field>
-          <Field label="Thứ tự" readOnly={!canSave}>
+          <Field label="Ưu tiên mặc định" hint="Số nhỏ hơn đứng trước khi website chọn sắp xếp Ưu tiên; không thay thế các chế độ Mới nhất hoặc theo tên." readOnly={!canSave}>
             <Input
               type="number"
               min="0"
@@ -2580,31 +2580,20 @@ function DisplayStatusSection({
 
   const content = (
     <div className="space-y-3" data-display-status-card="true">
-        <div className="flex flex-wrap gap-2" data-display-status-badge="true">
-          {inline ? (
-            <>
-              <Badge tone={status.tone} className="h-7 px-3 text-xs">
-                Website: {status.label}
-              </Badge>
-              <p className="self-center text-xs leading-5 text-muted-foreground">
-                Sử dụng: {formatStatusLabel(form.status)} · Duyệt: {formatStatusLabel(form.review_status)}
-              </p>
-            </>
-          ) : (
-            <>
-              <Badge tone={statusTone(form.status)} className="h-7 px-3 text-xs">
-                Sử dụng: {formatStatusLabel(form.status)}
-              </Badge>
-              <Badge tone={statusTone(form.review_status)} className="h-7 px-3 text-xs">
-                Duyệt: {formatStatusLabel(form.review_status)}
-              </Badge>
-              <Badge tone={status.tone} className="h-7 px-3 text-xs">
-                Website: {status.label}
-              </Badge>
-            </>
-          )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-display-status-badge="true">
+          <Badge tone={status.tone} className="h-7 px-3 text-xs">
+            Website: {status.label}
+          </Badge>
+          <details className="group text-sm text-muted-foreground">
+            <summary className="flex min-h-11 cursor-pointer items-center rounded-sm px-1 font-medium text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary md:min-h-10">
+              Chi tiết trạng thái
+            </summary>
+            <p className="pb-1 pl-1 text-sm leading-5">
+              Sử dụng: {formatStatusLabel(form.status)} · Duyệt: {formatStatusLabel(form.review_status)}
+            </p>
+          </details>
         </div>
-        <p className="text-sm text-muted-foreground">{status.description}</p>
+        {form.publish_status === 'published' ? null : <p className="text-sm text-muted-foreground">{status.description}</p>}
 
         {hasUnsavedChanges ? (
           <p className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">

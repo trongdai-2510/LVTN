@@ -344,12 +344,15 @@ test('mobile product campaign controls sit below the artwork', async ({ page }) 
   await expect(image).toHaveJSProperty('complete', true);
   const controls = page.getByRole('button', { name: 'Chuyển tới banner 2' });
   await expect(controls).toBeVisible();
+  const indicatorWidth = await controls.locator('span').evaluate((element) => getComputedStyle(element).width);
+  expect(await controls.locator('span').evaluate((element) => getComputedStyle(element).transitionProperty)).not.toBe('all');
   const initialAlt = await image.getAttribute('alt');
   const imageBox = await image.boundingBox();
   const controlBox = await controls.boundingBox();
   expect(controlBox!.y).toBeGreaterThanOrEqual(imageBox!.y + imageBox!.height);
   await controls.click();
   await expect(controls).toHaveAttribute('aria-current', 'true');
+  expect(await controls.locator('span').evaluate((element) => getComputedStyle(element).width)).toBe(indicatorWidth);
   expect(await campaign.locator('[aria-hidden="false"] img').getAttribute('alt')).not.toBe(initialAlt);
   await expectNoOverflow(page);
 });

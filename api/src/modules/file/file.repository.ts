@@ -585,7 +585,7 @@ export class FileRepository {
       query.andWhere((builder) => {
         builder
           .whereRaw('?? ILIKE ?', ['entity_label', searchPattern])
-          .orWhereRaw('?? ILIKE ?', ['entity_id', searchPattern]);
+          .orWhereRaw('??::text ILIKE ?', ['entity_id', searchPattern]);
       });
     }
 

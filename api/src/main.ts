@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 
+import type { Server } from 'node:http';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
@@ -11,6 +12,7 @@ import { KnexService } from './db/knex.service';
 import { ApiErrorFilter } from './common/errors/error.filter';
 import { ApiResponseInterceptor } from './common/response/response.interceptor';
 import { createValidationPipe } from './common/validation/validation';
+import { configureHttpLimits } from './common/security/httpLimits';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -45,6 +47,8 @@ async function bootstrap(): Promise<void> {
   app.useGlobalPipes(createValidationPipe());
   app.useGlobalFilters(new ApiErrorFilter(env.nodeEnv));
   app.useGlobalInterceptors(new ApiResponseInterceptor());
+
+  configureHttpLimits(app.getHttpServer() as Server);
 
   if (process.argv.includes('--db-check')) {
     const knexService = app.get(KnexService);

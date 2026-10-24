@@ -871,9 +871,6 @@ export function ServiceProjectDetailPage({ kind, id }: { kind: DomainKind; id: s
               Tổng quan / {cfg.label} / {isNew(id) ? 'Tạo mới' : pageTitle}
             </p>
             <h1 className="text-xl font-semibold text-text">{pageTitle}</h1>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Hiển thị tại {cfg.publicPrefix} trên website.
-            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <LinkButton href={cfg.listPath} variant="ghost" size="sm">

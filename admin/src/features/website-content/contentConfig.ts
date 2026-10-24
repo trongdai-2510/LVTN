@@ -5,7 +5,7 @@ export type ContentKind = 'page-content' | 'banner' | 'redirect';
 
 export type ContentConfig = {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   endpoint: string;
   detailPath: string;
   read: string;
@@ -18,7 +18,6 @@ export type ContentConfig = {
 export const CONTENT_CONFIGS: Record<ContentKind, ContentConfig> = {
   'page-content': {
     title: 'Trang nội dung',
-    subtitle: 'Bài viết, trang giới thiệu, dịch vụ — toàn bộ nội dung tĩnh của website.',
     endpoint: endpoints.songThanh.pageContents,
     detailPath: '/page-contents',
     read: PERMISSIONS.pageContentRead,
@@ -29,7 +28,6 @@ export const CONTENT_CONFIGS: Record<ContentKind, ContentConfig> = {
   },
   banner: {
     title: 'Banner',
-    subtitle: 'Ảnh quảng cáo và banner trên website — tiêu đề, hình ảnh, liên kết, lịch đăng.',
     endpoint: endpoints.songThanh.banners,
     detailPath: '/banners',
     read: PERMISSIONS.bannerRead,

@@ -83,6 +83,7 @@ test('EXP-01, EXP-03, EXP-04, EXP-05: export tab renders in import workspace and
   await page.locator('[data-import-export-tab-entry="true"]').click();
   await expect(page.locator(EXPORT_PANEL)).toBeVisible();
   await expect(page.locator('[data-file-zone-nav="true"]')).toHaveCount(0);
+  await expect(page.locator(EXPORT_SUBMIT)).toBeEnabled();
   await waitForExportReferences(page);
 
   const submit = page.locator(EXPORT_SUBMIT);
@@ -131,12 +132,14 @@ test('EXP-CUSTOMER: customer workspace downloads a real readable .xlsx workbook'
   ]);
   const workbook = await readWorkbook(download);
 
-  expect(download.suggestedFilename()).toMatch(/^song-thanh-khach-hang-\d{4}-\d{2}-\d{2}\.xlsx$/);
+  expect(download.suggestedFilename()).toMatch(/^Song Thanh - Khách hàng - Tất cả - \d{4}-\d{2}-\d{2}\.xlsx$/);
   expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Khách hàng']);
   expect(workbook.getWorksheet('Khách hàng')?.rowCount).toBeGreaterThan(1);
+  expect(sheetHeaders(workbook.getWorksheet('Khách hàng')!)).toContain('Thư điện tử');
+  expect(sheetHeaders(workbook.getWorksheet('Khách hàng')!)).not.toContain('ID');
 });
 
-test('EXP-06, EXP-08, EXP-20: product catalog export downloads a real multi-sheet .xlsx workbook', async ({
+test('EXP-06, EXP-08, EXP-20: product catalog keeps entered codes beside each variant in one sheet', async ({
   page
 }) => {
   await openExportWorkspace(page);
@@ -147,18 +150,27 @@ test('EXP-06, EXP-08, EXP-20: product catalog export downloads a real multi-shee
   const workbook = await readWorkbook(download);
 
   expect(download.suggestedFilename()).toMatch(/\.xlsx$/);
-  expect(download.suggestedFilename()).toContain(filenameToken(recordName(fixture.brandWithData)));
-  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
-    'Nhóm sản phẩm',
-    'Biến thể'
-  ]);
-  expect(workbook.getWorksheet('Nhóm sản phẩm')?.rowCount).toBeGreaterThan(1);
-  expect(workbook.getWorksheet('Biến thể')?.rowCount).toBeGreaterThan(1);
+  expect(download.suggestedFilename()).toContain(recordName(fixture.brandWithData));
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Sản phẩm']);
+  const sheet = workbook.getWorksheet('Sản phẩm')!;
+  expect(sheet.rowCount).toBeGreaterThan(1);
+  const headers = sheetHeaders(sheet);
+  expect(headers).toContain('Tên sản phẩm');
+  expect(headers).toContain('Tên biến thể');
+  expect(headers).toContain('Mã sản phẩm');
+  expect(headers).toContain('Thông số kỹ thuật');
+  expect(headers).toContain('Tài liệu kỹ thuật');
+  expect(headers).not.toContain('ID');
+  expect(headers).not.toContain('Slug');
+  expect(headers).not.toContain('Mã SKU');
+  expect(headers).not.toContain('Mã ngoài');
+  expect(sheetValues(sheet, 'Mã sản phẩm').some(Boolean)).toBe(true);
 
   const groupCalls = calls.filter((call) => call.pathname === '/song-thanh/product-groups');
   const variantCalls = calls.filter((call) => call.pathname === '/song-thanh/product-variants');
   expect(groupCalls.length).toBeGreaterThan(0);
   expect(variantCalls.length).toBeGreaterThan(0);
+  expect(variantCalls.every((call) => call.searchParams.get('include_attributes') === 'true')).toBe(true);
   expect(groupCalls.some((call) => call.searchParams.get('brand_id') === recordId(fixture.brandWithData))).toBe(
     true
   );
@@ -200,7 +212,7 @@ test('EXP-07: product catalog can export without variant requests', async ({ pag
   const download = await clickAndWaitForDownload(page);
   const workbook = await readWorkbook(download);
 
-  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Nhóm sản phẩm']);
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Sản phẩm']);
   expect(calls.some((call) => call.pathname === '/song-thanh/product-variants')).toBe(false);
   assertNoForbiddenExportCalls(calls);
 });
@@ -212,17 +224,21 @@ test('EXP-09, EXP-11, EXP-12: parent category public-safe export includes child 
   await selectCategoryFilter(page, recordId(fixture.parentCategoryWithData));
   await openAdvancedOptions(page);
   await page.getByLabel(/Kèm tài liệu/).check();
-  await page.getByLabel(/Chỉ dữ liệu public-safe/).check();
+  await page.getByLabel(/Chỉ dữ liệu đã công khai/).check();
 
   const calls = recordSongThanhRequests(page);
   const download = await clickAndWaitForDownload(page);
   const workbook = await readWorkbook(download);
 
-  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
-    'Nhóm sản phẩm',
-    'Biến thể',
-    'Tài liệu kỹ thuật'
-  ]);
+  expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Sản phẩm']);
+  const sheet = workbook.getWorksheet('Sản phẩm')!;
+  expect(sheetHeaders(sheet)).toContain('Tài liệu kỹ thuật');
+  const nameColumn = sheetValues(sheet, 'Tên sản phẩm');
+  const documentColumn = sheetValues(sheet, 'Tài liệu kỹ thuật');
+  expect(documentColumn.some((value, index) =>
+    nameColumn[index] === recordName(fixture.productGroupForDocument) &&
+    value.includes(fixture.seededDocumentName)
+  )).toBe(true);
 
   const groupCalls = calls.filter((call) => call.pathname === '/song-thanh/product-groups');
   expect(groupCalls.some((call) => fixture.childIdsForParent.includes(call.searchParams.get('category_id') || ''))).toBe(
@@ -266,8 +282,10 @@ test('EXP-10, EXP-14, EXP-18: taxonomy export uses loaded references and creates
   const download = await clickAndWaitForDownload(page);
   const workbook = await readWorkbook(download);
 
-  expect(download.suggestedFilename()).toMatch(/danh-muc-thuong-hieu.*\.xlsx$/);
+  expect(download.suggestedFilename()).toMatch(/Danh mục và thương hiệu.*\.xlsx$/);
   expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(['Danh mục', 'Thương hiệu']);
+  expect(sheetHeaders(workbook.getWorksheet('Danh mục')!)).not.toContain('Slug');
+  expect(sheetHeaders(workbook.getWorksheet('Thương hiệu')!)).toContain('Trang web');
   expect(calls.some((call) => call.pathname === '/song-thanh/product-groups')).toBe(false);
   expect(calls.some((call) => call.pathname === '/song-thanh/product-variants')).toBe(false);
   assertNoForbiddenExportCalls(calls);
@@ -285,9 +303,12 @@ test('EXP-15, EXP-19: technical document export keeps special text as a string i
   const workbook = await readWorkbook(download);
   const sheet = workbook.getWorksheet('Tài liệu kỹ thuật');
 
-  expect(download.suggestedFilename()).toMatch(/tai-lieu-ky-thuat.*\.xlsx$/);
+  expect(download.suggestedFilename()).toMatch(/Tài liệu kỹ thuật.*\.xlsx$/);
   expect(sheet).toBeTruthy();
   expect(sheetValues(sheet!, 'Tên tài liệu')).toContain(fixture.seededDocumentName);
+  expect(sheetHeaders(sheet!)).toContain('Tên tệp');
+  expect(sheetHeaders(sheet!)).toContain('Công khai');
+  expect(sheetHeaders(sheet!)).not.toContain('ID');
 
   const documentCalls = calls.filter((call) => call.pathname === '/song-thanh/technical-documents');
   expect(documentCalls.length).toBeGreaterThan(0);
@@ -311,7 +332,7 @@ test('EXP-21: one-table technical document export supports formula-safe CSV', as
   const download = await clickAndWaitForDownload(page);
   const csv = await readDownload(download);
 
-  expect(download.suggestedFilename()).toMatch(/tai-lieu-ky-thuat.*\.csv$/);
+  expect(download.suggestedFilename()).toMatch(/Tài liệu kỹ thuật.*\.csv$/);
   expect(csv).toContain('Tên tài liệu');
   expect(csv).toContain(`'${fixture.seededDocumentName}`);
 });
@@ -367,6 +388,7 @@ async function openExportWorkspace(page: Page) {
 
 async function waitForExportReferences(page: Page) {
   const panel = page.locator(EXPORT_PANEL);
+  await panel.getByRole('button', { name: /Chọn điều kiện/ }).click();
   await expect.poll(async () => panel.getByLabel('Thương hiệu', { exact: true }).locator('option').count()).toBeGreaterThan(1);
   await expect.poll(async () => panel.getByLabel('Danh mục cha', { exact: true }).locator('option').count()).toBeGreaterThan(1);
   await expect(panel.getByLabel('Thương hiệu', { exact: true })).toBeEnabled();
@@ -444,6 +466,12 @@ function sheetValues(sheet: ExcelJS.Worksheet, header: string) {
     values.push(sheet.getRow(rowNumber).getCell(column).text);
   }
   return values;
+}
+
+function sheetHeaders(sheet: ExcelJS.Worksheet) {
+  const headers: string[] = [];
+  sheet.getRow(1).eachCell((cell) => headers.push(cell.text));
+  return headers;
 }
 
 function recordSongThanhRequests(page: Page) {
@@ -811,15 +839,4 @@ function recordNumber(row: RecordMap, key: string) {
   const value = row[key];
   const numberValue = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numberValue) ? numberValue : 0;
-}
-
-function filenameToken(value: string) {
-  return (
-    value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/gi, '-')
-      .replace(/^-+|-+$/g, '')
-      .toLowerCase() || 'tat-ca'
-  );
 }

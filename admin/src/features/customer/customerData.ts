@@ -76,11 +76,10 @@ export async function fetchCustomersForExport(
 
 export function customerExportRows(items: CustomerRecord[]) {
   return items.map((item) => ({
-    ID: recordText(item, 'id'),
     'Họ và tên': recordText(item, 'full_name'),
     'Công ty': recordText(item, 'company_name'),
     'Số điện thoại': recordText(item, 'phone'),
-    Email: recordText(item, 'email'),
+    'Thư điện tử': recordText(item, 'email'),
     'Số liên hệ': recordNumber(item, 'contact_count'),
     'Số báo giá': recordNumber(item, 'quote_count'),
     'Nguồn gần nhất': formatValue(item.last_interaction_kind),

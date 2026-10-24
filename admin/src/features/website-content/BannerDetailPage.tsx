@@ -113,15 +113,11 @@ const BANNER_STATUS_OPTIONS: Array<{ value: BannerStatus; label: string }> = [
   { value: 'active', label: 'Xuất bản' }
 ];
 
-const BANNER_LINK_TYPE_OPTIONS: Array<{
-  value: BannerLinkType;
-  label: string;
-  description: string;
-}> = [
-  { value: 'none', label: 'Không mở trang nào', description: 'Chỉ hiển thị banner' },
-  { value: 'internal', label: 'Mở trang trong website', description: 'Tìm và chọn theo tên trang' },
-  { value: 'external', label: 'Mở website khác', description: 'Nhập địa chỉ website' },
-  { value: 'anchor', label: 'Cuộn đến mục trên trang', description: 'Dùng khi trang có mục cụ thể' }
+const BANNER_LINK_TYPE_OPTIONS: Array<{ value: BannerLinkType; label: string }> = [
+  { value: 'none', label: 'Không mở trang nào' },
+  { value: 'internal', label: 'Mở trang trong website' },
+  { value: 'external', label: 'Mở website khác' },
+  { value: 'anchor', label: 'Cuộn đến mục trên trang' }
 ];
 
 const BANNER_DISPLAY_MODES: Array<{ value: BannerDisplayMode; label: string; description: string; icon: typeof ImageIcon }> = [
@@ -657,7 +653,7 @@ export function BannerDetailPage({ id }: { id: string }) {
                   />
                 </BannerField>
 
-                <BannerField fieldKey="content_position" label="Vị trí nội dung" error={fieldErrors.content_position}>
+                <BannerField fieldKey="content_position" label="Vị trí chữ trên ảnh" error={fieldErrors.content_position}>
                   <div className="grid grid-cols-3 gap-1">
                     {CONTENT_POSITION_GRID.map(({ value, icon: Icon }) => {
                       const selected = form.content_position === value;
@@ -688,7 +684,7 @@ export function BannerDetailPage({ id }: { id: string }) {
             {/* Nút bấm CTA */}
             <Card className="overflow-hidden">
               <div className="admin-card-header flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-text">Nút bấm (CTA)</h2>
+                <h2 className="text-sm font-semibold text-text">Nút trên banner</h2>
                 {!readOnly && form.cta_buttons.length < 2 ? (
                   <button
                     type="button"
@@ -722,73 +718,78 @@ export function BannerDetailPage({ id }: { id: string }) {
               </div>
             </Card>
 
-            {/* Liên kết */}
-            <Card className={cn('overflow-hidden transition-opacity', imageLinkDisabled && 'bg-muted/30')}>
-              <div className="admin-card-header">
-                <h2 className="text-sm font-semibold text-text">Khi khách click vào banner</h2>
-                {imageLinkDisabled ? (
-                  <p className="mt-1 text-xs font-medium text-amber-700">Banner đã có nút bấm riêng, nên ảnh không cần liên kết.</p>
-                ) : null}
-              </div>
-              <div className="admin-card-body admin-form-stack">
-                <BannerField fieldKey="link_type" label="Click vào ảnh sẽ" required error={fieldErrors.link_type}>
-                  <div aria-label="Click vào ảnh sẽ" className="grid gap-3 sm:grid-cols-2" role="group">
-                    {BANNER_LINK_TYPE_OPTIONS.map((option) => {
-                      const selected = form.link_type === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          aria-pressed={selected}
-                          disabled={readOnly || imageLinkDisabled}
-                          className={cn(
-                            'group min-h-[56px] rounded-sm border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-                            selected ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-panel text-text hover:border-primary/50'
-                          )}
-                          onClick={() => updateLinkType(option.value)}
-                        >
-                          <span className="flex items-center gap-2 text-sm font-semibold">
-                            <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border', selected ? 'border-primary' : 'border-slate-300 group-hover:border-primary')}>
-                              <span className={cn('h-2 w-2 rounded-full', selected ? 'bg-primary' : 'bg-transparent')} />
-                            </span>
-                            {option.label}
-                          </span>
-                          <span className="mt-1 block text-[12px] leading-4 text-muted-foreground">{option.description}</span>
-                        </button>
-                      );
-                    })}
+            {/* Liên kết ảnh chỉ có hiệu lực khi banner không có CTA. */}
+            <Card className="overflow-hidden">
+              {imageLinkDisabled ? (
+                <div className="admin-card-body flex items-center gap-3 text-sm text-muted-foreground">
+                  <Link2 aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  <span><strong className="font-medium text-text">Ảnh banner không mở trang khác.</strong> Khách dùng nút phía trên để truy cập đích đến.</span>
+                </div>
+              ) : (
+                <>
+                  <div className="admin-card-header">
+                    <h2 className="text-sm font-semibold text-text">Khi khách bấm vào ảnh</h2>
                   </div>
-                </BannerField>
-
-                {form.link_type !== 'none' ? (
-                  <BannerField fieldKey="link_target" label={linkTargetLabel(form.link_type)} required error={fieldErrors.link_target} htmlFor="banner-link-target">
-                    {form.link_type === 'internal' ? (
-                      <BannerDestinationPicker
-                        inputId="banner-link-target"
-                        value={form.link_target}
-                        onChange={(value) => updateField('link_target', value)}
-                        readOnly={readOnly || imageLinkDisabled}
-                        error={fieldErrors.link_target}
-                        placeholder="Chọn trang hoặc sản phẩm"
-                        allowExternal={false}
-                      />
-                    ) : (
-                      <div className="relative">
-                        <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          id="banner-link-target"
-                          className={cn('pl-9', fieldErrors.link_target ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
-                          placeholder={linkTargetPlaceholder(form.link_type)}
-                          value={form.link_target}
-                          readOnly={readOnly || imageLinkDisabled}
-                          inputMode={form.link_type === 'external' ? 'url' : 'text'}
-                          onChange={(e) => updateField('link_target', e.target.value)}
-                        />
+                  <div className="admin-card-body admin-form-stack">
+                    <BannerField fieldKey="link_type" label="Click vào ảnh sẽ" required error={fieldErrors.link_type}>
+                      <div aria-label="Click vào ảnh sẽ" className="grid gap-3 sm:grid-cols-2" role="group">
+                        {BANNER_LINK_TYPE_OPTIONS.map((option) => {
+                          const selected = form.link_type === option.value;
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              aria-pressed={selected}
+                              disabled={readOnly}
+                              className={cn(
+                                'group min-h-11 rounded-sm border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                                selected ? 'border-primary bg-blue-50 text-primary' : 'border-border bg-panel text-text hover:border-primary/50'
+                              )}
+                              onClick={() => updateLinkType(option.value)}
+                            >
+                              <span className="flex items-center gap-2 text-sm font-semibold">
+                                <span className={cn('flex h-4 w-4 items-center justify-center rounded-full border', selected ? 'border-primary' : 'border-slate-300 group-hover:border-primary')}>
+                                  <span className={cn('h-2 w-2 rounded-full', selected ? 'bg-primary' : 'bg-transparent')} />
+                                </span>
+                                {option.label}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
-                  </BannerField>
-                ) : null}
-              </div>
+                    </BannerField>
+
+                    {form.link_type !== 'none' ? (
+                      <BannerField fieldKey="link_target" label={linkTargetLabel(form.link_type)} required error={fieldErrors.link_target} htmlFor="banner-link-target">
+                        {form.link_type === 'internal' ? (
+                          <BannerDestinationPicker
+                            inputId="banner-link-target"
+                            value={form.link_target}
+                            onChange={(value) => updateField('link_target', value)}
+                            readOnly={readOnly}
+                            error={fieldErrors.link_target}
+                            placeholder="Chọn trang hoặc sản phẩm"
+                            allowExternal={false}
+                          />
+                        ) : (
+                          <div className="relative">
+                            <Link2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                              id="banner-link-target"
+                              className={cn('pl-9', fieldErrors.link_target ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
+                              placeholder={linkTargetPlaceholder(form.link_type)}
+                              value={form.link_target}
+                              readOnly={readOnly}
+                              inputMode={form.link_type === 'external' ? 'url' : 'text'}
+                              onChange={(e) => updateField('link_target', e.target.value)}
+                            />
+                          </div>
+                        )}
+                      </BannerField>
+                    ) : null}
+                  </div>
+                </>
+              )}
             </Card>
           </div>
 
@@ -833,7 +834,7 @@ export function BannerDetailPage({ id }: { id: string }) {
                   />
                 </BannerField>
 
-                <BannerField fieldKey="position" label="Hiển thị tại trang" required error={fieldErrors.position} htmlFor="banner-position">
+                <BannerField fieldKey="position" label="Trang đặt banner" required error={fieldErrors.position} htmlFor="banner-position">
                   <BannerPagePicker inputId="banner-position" value={form.position} readOnly={readOnly} error={fieldErrors.position} onChange={(value) => updateField('position', value)} />
                 </BannerField>
 
@@ -856,10 +857,10 @@ export function BannerDetailPage({ id }: { id: string }) {
 
                 <BannerField
                   fieldKey="sort_order"
-                  label="Thứ tự hiển thị"
+                  label="Thứ tự trên trang đã chọn"
                   error={fieldErrors.sort_order}
                   htmlFor="banner-sort-order"
-                  hint="Số nhỏ hơn sẽ được hiển thị trước trong cùng một vị trí."
+                  hint="Chỉ dùng khi trang có nhiều banner. Số nhỏ hơn hiện trước; nếu trang chủ chọn banner thủ công, thứ tự danh sách đã chọn sẽ được ưu tiên."
                 >
                   <Input
                     id="banner-sort-order"
@@ -1144,7 +1145,7 @@ function BannerScaledPreview({
                         )}
                         style={{
                           color: titleColor,
-                          fontFamily: 'Manrope, var(--font-sans), Inter, system-ui, sans-serif'
+                          fontFamily: 'var(--font-admin-display), var(--font-admin-sans), system-ui, sans-serif'
                         }}
                       >
                         {title}
@@ -1257,15 +1258,16 @@ function CtaButtonEditor({
   onRemove: () => void;
   errors?: CtaErrors[number];
 }) {
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const ctaTextInputId = `banner-cta-text-${index}`;
   const ctaUrlInputId = `banner-cta-url-${index}`;
   const ctaTextKey = `cta_buttons[${index}].text`;
   const ctaUrlKey = `cta_buttons[${index}].url`;
 
   return (
-    <div className="rounded-sm border border-border bg-muted/30 p-3" data-field={`cta_buttons[${index}]`}>
+    <div className="rounded-lg border border-border bg-panel p-4" data-field={`cta_buttons[${index}]`}>
       <div className="mb-2.5 flex items-center justify-between">
-        <span className="text-xs font-semibold text-text">Nút {index + 1}</span>
+        <span className="text-sm font-semibold text-text">Nút {index + 1}</span>
         {!readOnly ? (
           <button
             aria-label={`Xóa nút ${index + 1}`}
@@ -1277,10 +1279,10 @@ function CtaButtonEditor({
           </button>
         ) : null}
       </div>
-      <div className="space-y-2.5">
+      <div className="space-y-4">
         <div className="grid gap-2 sm:grid-cols-2">
           <div data-field={ctaTextKey}>
-            <label className="mb-1 block text-[11px] font-medium text-slate-600" htmlFor={ctaTextInputId}>Nhãn nút <span className="text-red-600">*</span></label>
+            <label className="mb-1 block text-sm font-medium text-text" htmlFor={ctaTextInputId}>Nhãn nút <span className="text-red-600">*</span></label>
             <Input
               id={ctaTextInputId}
               aria-invalid={errors?.text ? true : undefined}
@@ -1288,13 +1290,13 @@ function CtaButtonEditor({
               value={button.text}
               readOnly={readOnly}
               maxLength={80}
-              className={cn('h-11 text-xs md:h-8', errors?.text ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
+              className={cn('h-11 text-sm', errors?.text ? 'border-red-300 focus:border-red-400 focus:ring-red-100' : '')}
               onChange={(e) => onChange({ text: e.target.value })}
             />
             {errors?.text ? <p className="mt-1 text-xs text-red-600">{errors.text}</p> : null}
           </div>
           <div data-field={ctaUrlKey}>
-            <label className="mb-1 block text-xs font-medium text-slate-600" htmlFor={ctaUrlInputId}>Đích đến của nút <span className="text-red-600">*</span></label>
+            <label className="mb-1 block text-sm font-medium text-text" htmlFor={ctaUrlInputId}>Đích đến của nút <span className="text-red-600">*</span></label>
             <BannerDestinationPicker
               inputId={ctaUrlInputId}
               value={button.url}
@@ -1307,48 +1309,61 @@ function CtaButtonEditor({
           </div>
         </div>
 
-        <div>
-          <label className="mb-1.5 block text-[11px] font-medium text-slate-600">Màu nền nút</label>
-          <ColorSwatchPicker value={button.color} readOnly={readOnly} onChange={(color) => onChange({ color })} />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <button
+            aria-expanded={appearanceOpen}
+            className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={() => setAppearanceOpen((current) => !current)}
+            type="button"
+          >
+            Tùy chỉnh giao diện nút <ChevronDown aria-hidden="true" className={cn('h-4 w-4 transition-transform', appearanceOpen && 'rotate-180')} />
+          </button>
+          <span aria-label={`Xem trước nút ${index + 1}`} className="inline-flex min-h-9 items-center px-3 text-sm font-medium" style={previewCtaStyle(button)}>{button.text.trim() || 'Nút bấm'}</span>
         </div>
-
-        <div>
-          <label className="mb-1.5 block text-[11px] font-medium text-slate-600">Màu chữ</label>
-          <ColorSwatchPicker
-            value={button.text_color}
-            readOnly={readOnly}
-            presets={['#ffffff', '#000000', '#1e40af', '#dc2626', '#374151']}
-            onChange={(text_color) => onChange({ text_color })}
-          />
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-[11px] font-medium text-slate-600">Kiểu nút</label>
-          <div className="grid grid-cols-3 gap-1">
-            {(
-              [
-                { value: 'solid' as CtaButtonStyle, label: 'Đặc' },
-                { value: 'outline' as CtaButtonStyle, label: 'Viền' },
-                { value: 'ghost' as CtaButtonStyle, label: 'Trong suốt' }
-              ] as const
-            ).map(({ value: styleVal, label }) => (
-              <button
-                key={styleVal}
-                type="button"
-                disabled={readOnly}
-                onClick={() => onChange({ style: styleVal })}
-                className={cn(
-                  'min-h-11 rounded px-2 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed md:min-h-8',
-                  button.style === styleVal
-                    ? 'border border-blue-300 bg-blue-50 text-blue-700'
-                    : 'border border-border bg-panel text-muted-foreground hover:border-primary/50 hover:text-text'
-                )}
-              >
-                {label}
-              </button>
-            ))}
+        {appearanceOpen ? (
+          <div className="space-y-4 rounded-lg bg-muted/30 p-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-text">Màu nền nút</label>
+              <ColorSwatchPicker value={button.color} readOnly={readOnly} onChange={(color) => onChange({ color })} />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-text">Màu chữ</label>
+              <ColorSwatchPicker
+                value={button.text_color}
+                readOnly={readOnly}
+                presets={['#ffffff', '#000000', '#1e40af', '#dc2626', '#374151']}
+                onChange={(text_color) => onChange({ text_color })}
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-text">Kiểu nút</label>
+              <div className="grid grid-cols-3 gap-1">
+                {(
+                  [
+                    { value: 'solid' as CtaButtonStyle, label: 'Đặc' },
+                    { value: 'outline' as CtaButtonStyle, label: 'Viền' },
+                    { value: 'ghost' as CtaButtonStyle, label: 'Trong suốt' }
+                  ] as const
+                ).map(({ value: styleVal, label }) => (
+                  <button
+                    key={styleVal}
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => onChange({ style: styleVal })}
+                    className={cn(
+                      'min-h-11 rounded px-2 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed',
+                      button.style === styleVal
+                        ? 'border border-blue-300 bg-blue-50 text-blue-700'
+                        : 'border border-border bg-panel text-muted-foreground hover:border-primary/50 hover:text-text'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </div>
   );

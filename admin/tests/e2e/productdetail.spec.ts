@@ -66,8 +66,10 @@ test('switching a product attribute keeps specs and gallery on the same variant'
   await page.goto(`${frontend}/san-pham/${slug}`);
   const currentImage = page.locator('[data-product-gallery-image="true"]');
   const originalSource = await currentImage.getAttribute('src');
-  await page.getByRole('button', { name: '15W', exact: true }).click();
-  await expect(page.getByRole('button', { name: '15W', exact: true })).toHaveClass(/bg-\[#EEF5FF\]/);
+  const powerOption = page.getByRole('button', { name: '15W', exact: true });
+  await expect(powerOption).toBeEnabled();
+  await powerOption.click();
+  await expect(powerOption).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText(/OBR-15SS/).first()).toBeVisible();
   await expect.poll(() => currentImage.getAttribute('src')).not.toBe(originalSource);
   await expect(page.getByRole('group', { name: 'Ảnh sản phẩm' })).toHaveCount(0);

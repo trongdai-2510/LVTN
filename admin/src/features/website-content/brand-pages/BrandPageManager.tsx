@@ -51,6 +51,7 @@ import { byId, endpoints } from '@/lib/api-endpoints';
 import { cn } from '@/lib/cn';
 import { formatDate } from '@/lib/formatters';
 import { PERMISSIONS } from '@/lib/permissions';
+import { previewOrigin } from '@/lib/previewOrigin';
 
 type RecordMap = Record<string, unknown>;
 type BrandPageListItem = {
@@ -1023,6 +1024,11 @@ export function BrandPageDetailPage({ id, initialBrandId }: { id: string; initia
                       <ColorField label="Màu nhãn nhỏ" value={form.hero_eyebrow_color} readOnly={readOnly} onChange={(value) => updateForm({ hero_eyebrow_color: value })} />
                       <ColorField label="Màu tiêu đề" value={form.hero_title_color} readOnly={readOnly} onChange={(value) => updateForm({ hero_title_color: value })} />
                       <ColorField label="Màu mô tả" value={form.hero_excerpt_color} readOnly={readOnly} onChange={(value) => updateForm({ hero_excerpt_color: value })} />
+                      {[form.hero_eyebrow_color, form.hero_title_color, form.hero_excerpt_color].some(needsDarkerHeroColor) ? (
+                        <p className="text-xs text-muted-foreground sm:col-span-2" role="status">
+                          Màu sáng sẽ được làm đậm vừa đủ trên website để chữ dễ đọc.
+                        </p>
+                      ) : null}
                     </div>
                   </details>
                 </>
@@ -1576,6 +1582,18 @@ function buildProductSuggestions(products: RecordMap[]) {
   return suggestions;
 }
 
+function needsDarkerHeroColor(value: string) {
+  const match = /^#([0-9a-f]{6})$/i.exec(value.trim());
+  if (!match) return false;
+  const encoded = Number.parseInt(match[1], 16);
+  const channels = [(encoded >> 16) & 255, (encoded >> 8) & 255, encoded & 255].map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return 1.05 / (luminance + 0.05) < 4.5;
+}
+
 function ColorField({ label, value, readOnly, onChange }: { label: string; value: string; readOnly: boolean; onChange: (value: string) => void }) {
   return (
     <Field label={label} readOnly={readOnly}>
@@ -1778,22 +1796,14 @@ function BrandPagePreviewDialog({
 }) {
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const targetOrigin = useMemo(() => {
-    try {
-      return new URL(PUBLIC_SITE_BASE_URL).origin;
-    } catch {
-      return '*';
-    }
-  }, []);
+  const targetOrigin = useMemo(() => previewOrigin(PUBLIC_SITE_BASE_URL), []);
   const postPreviewDraft = useCallback(() => {
     const targetWindow = iframeRef.current?.contentWindow;
-    if (!targetWindow) return;
-    if (targetOrigin !== '*') {
-      try {
-        if (targetWindow.location.origin !== targetOrigin) return;
-      } catch {
-        // Cross-origin access is expected after the public preview loads.
-      }
+    if (!targetWindow || !targetOrigin) return;
+    try {
+      if (targetWindow.location.origin !== targetOrigin) return;
+    } catch {
+      // Cross-origin access is expected after the public preview loads.
     }
     targetWindow.postMessage(
       {
@@ -1816,7 +1826,7 @@ function BrandPagePreviewDialog({
     };
 
     function handleMessage(event: MessageEvent<unknown>) {
-      if (targetOrigin !== '*' && event.origin !== targetOrigin) return;
+      if (!targetOrigin || event.origin !== targetOrigin) return;
       if (event.source !== iframeRef.current?.contentWindow) return;
       if (
         typeof event.data === 'object' &&

@@ -245,6 +245,10 @@ test('the product detail presents one workbench with clear navigation and varian
   await expect(page.locator('#product-group-main #product-group-display')).toBeVisible();
   await expect(page.locator('#product-group-display [data-display-status-badge] > span')).toHaveCount(1);
   await expect(page.locator('#product-group-display')).toContainText('Duyệt: Đã duyệt');
+  await expect(page.locator('#product-group-display')).not.toContainText('Đang hiển thị trên website.');
+  await expect(page.locator('#product-group-display summary')).toHaveText('Chi tiết trạng thái');
+  await page.locator('#product-group-display summary').click();
+  await expect(page.locator('#product-group-display').getByText('Duyệt: Đã duyệt')).toBeVisible();
   await expect(page.locator('#product-group-display').getByRole('button', { name: 'Lưu trữ hiển thị' })).toBeVisible();
   await page.locator('#product-group-display').getByRole('button', { name: 'Lưu trữ hiển thị' }).click();
   const archiveDisplayDialog = page.getByRole('dialog', { name: 'Lưu trữ hiển thị' });
