@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -62,17 +62,16 @@ export function HomeHeroBannerCarousel({
 }) {
   const router = useRouter();
   const companyName = getPublicCompanyName(companyInfo);
-  const sortedBanners = useMemo(() => sortHeroBanners(banners), [banners]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [imageRatios, setImageRatios] = useState<Record<string, number>>({});
   const [paused, setPaused] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
   const prefersReducedMotion = usePrefersReducedMotion();
-  const hasMultipleBanners = sortedBanners.length > 1;
+  const hasMultipleBanners = banners.length > 1;
   const useImageOnlyFrame =
-    sortedBanners.length > 0 && sortedBanners.every((banner) => banner.display_mode === 'image_only');
-  const listingImageOnlyActions = variant === 'listing' && sortedBanners[activeIndex]?.display_mode === 'image_only'
-    ? resolveBannerActions(sortedBanners[activeIndex])
+    banners.length > 0 && banners.every((banner) => banner.display_mode === 'image_only');
+  const listingImageOnlyActions = variant === 'listing' && banners[activeIndex]?.display_mode === 'image_only'
+    ? resolveBannerActions(banners[activeIndex])
     : [];
   const frameClass = useImageOnlyFrame
     ? variant === 'page'
@@ -88,12 +87,12 @@ export function HomeHeroBannerCarousel({
           : ''
       }`;
   const frameStyle: CSSProperties | undefined = useImageOnlyFrame && variant === 'page'
-    ? { aspectRatio: imageRatios[sortedBanners[activeIndex]?.id] ?? 12 / 5 }
+    ? { aspectRatio: imageRatios[banners[activeIndex]?.id] ?? 12 / 5 }
     : undefined;
 
   useEffect(() => {
-    setActiveIndex((current) => Math.min(current, Math.max(sortedBanners.length - 1, 0)));
-  }, [sortedBanners.length]);
+    setActiveIndex((current) => Math.min(current, Math.max(banners.length - 1, 0)));
+  }, [banners.length]);
 
   useEffect(() => {
     if (!hasMultipleBanners || paused || prefersReducedMotion) {
@@ -101,18 +100,18 @@ export function HomeHeroBannerCarousel({
     }
 
     const timeout = window.setTimeout(() => {
-      setActiveIndex((current) => (current + 1) % sortedBanners.length);
+      setActiveIndex((current) => (current + 1) % banners.length);
     }, AUTO_SLIDE_INTERVAL_MS);
 
     return () => window.clearTimeout(timeout);
-  }, [activeIndex, hasMultipleBanners, paused, prefersReducedMotion, sortedBanners.length, timerKey]);
+  }, [activeIndex, hasMultipleBanners, paused, prefersReducedMotion, banners.length, timerKey]);
 
   function showBanner(nextIndex: number) {
-    if (sortedBanners.length === 0) {
+    if (banners.length === 0) {
       return;
     }
 
-    setActiveIndex((nextIndex + sortedBanners.length) % sortedBanners.length);
+    setActiveIndex((nextIndex + banners.length) % banners.length);
     setTimerKey((current) => current + 1);
   }
 
@@ -142,7 +141,7 @@ export function HomeHeroBannerCarousel({
     router.push(href);
   }
 
-  if (sortedBanners.length === 0) {
+  if (banners.length === 0) {
     return <FallbackHero companyName={companyName} />;
   }
 
@@ -158,7 +157,7 @@ export function HomeHeroBannerCarousel({
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {sortedBanners.map((banner, index) => (
+      {banners.map((banner, index) => (
         <HeroBannerSlide
           active={index === activeIndex}
           banner={banner}
@@ -178,7 +177,7 @@ export function HomeHeroBannerCarousel({
         <>
           <button
             aria-label="Banner trước"
-            className={`absolute left-3 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-slate-950/35 text-base font-semibold text-white shadow-soft backdrop-blur-sm transition-all hover:scale-110 hover:bg-slate-950/55 focus:outline-none focus:ring-2 focus:ring-white/70 sm:left-6 sm:h-10 sm:w-10 sm:text-xl ${useImageOnlyFrame && variant === 'page' ? 'max-sm:hidden' : ''}`}
+            className="absolute left-6 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-slate-950/35 text-xl font-semibold text-white shadow-soft backdrop-blur-sm transition-colors hover:bg-slate-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:flex"
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
               event.stopPropagation();
               showBanner(activeIndex - 1);
@@ -189,7 +188,7 @@ export function HomeHeroBannerCarousel({
           </button>
           <button
             aria-label="Banner tiếp theo"
-            className={`absolute right-3 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-slate-950/35 text-base font-semibold text-white shadow-soft backdrop-blur-sm transition-all hover:scale-110 hover:bg-slate-950/55 focus:outline-none focus:ring-2 focus:ring-white/70 sm:right-6 sm:h-10 sm:w-10 sm:text-xl ${useImageOnlyFrame && variant === 'page' ? 'max-sm:hidden' : ''}`}
+            className="absolute right-6 top-1/2 z-30 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-slate-950/35 text-xl font-semibold text-white shadow-soft backdrop-blur-sm transition-colors hover:bg-slate-950/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 sm:flex"
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
               event.stopPropagation();
               showBanner(activeIndex + 1);
@@ -199,7 +198,7 @@ export function HomeHeroBannerCarousel({
             ›
           </button>
           <div className={`absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 sm:bottom-5 ${useImageOnlyFrame && variant === 'page' ? 'max-sm:hidden' : ''}`}>
-            {sortedBanners.map((banner, index) => (
+            {banners.map((banner, index) => (
               <button
                 aria-current={index === activeIndex ? 'true' : undefined}
                 aria-label={`Chuyển tới banner ${index + 1}`}
@@ -213,8 +212,8 @@ export function HomeHeroBannerCarousel({
               >
                 <span
                   className={[
-                    'h-2.5 rounded-full border border-white/70 transition-all',
-                    index === activeIndex ? 'w-8 bg-white' : 'w-2.5 bg-white/35 group-hover:bg-white/60'
+                    'h-2.5 w-8 origin-center rounded-full border border-white/70 transition-[transform,background-color] duration-200 motion-reduce:transition-none',
+                    index === activeIndex ? 'scale-x-100 bg-white' : 'scale-x-[0.3125] bg-white/35 group-hover:bg-white/60'
                   ].join(' ')}
                 />
               </button>
@@ -233,9 +232,9 @@ export function HomeHeroBannerCarousel({
     {useImageOnlyFrame && variant === 'page' && hasMultipleBanners ? (
       <div aria-label="Chọn banner" className="flex min-h-12 items-center justify-center gap-1 border-y border-borderBlue bg-white sm:hidden">
         <span className="mr-2 text-[12px] font-semibold tabular-nums text-secondary">
-          {activeIndex + 1} / {sortedBanners.length}
+          {activeIndex + 1} / {banners.length}
         </span>
-        {sortedBanners.map((banner, index) => (
+        {banners.map((banner, index) => (
           <button
             aria-current={index === activeIndex ? 'true' : undefined}
             aria-label={`Chuyển tới banner ${index + 1}`}
@@ -244,7 +243,7 @@ export function HomeHeroBannerCarousel({
             onClick={() => showBanner(index)}
             type="button"
           >
-            <span className={`h-2.5 rounded-full transition-all ${index === activeIndex ? 'w-7 bg-primary' : 'w-2.5 bg-primary/35'}`} />
+            <span className={`h-2.5 w-7 origin-center rounded-full transition-[transform,background-color] duration-200 motion-reduce:transition-none ${index === activeIndex ? 'scale-x-100 bg-primary' : 'scale-x-[0.36] bg-primary/35'}`} />
           </button>
         ))}
       </div>
@@ -368,10 +367,10 @@ function HeroBannerSlide({
       ) : null}
       {!isImageOnly ? <div className={`absolute inset-0 ${HERO_OVERLAY_CLASS[variant]}`} /> : null}
       {active && !isImageOnly ? (
-        <Container className={`relative z-10 flex flex-col ${HERO_FRAME_CLASS[variant]} ${verticalClass}${hasNavButtons ? ` max-sm:px-10 ${variant === 'listing' ? 'max-sm:pb-12' : `max-sm:pb-20 ${variant === 'home' ? 'max-sm:min-h-[340px]' : 'max-sm:min-h-[300px]'}`}` : ''}`}>
+        <Container className={`relative z-10 flex flex-col ${HERO_FRAME_CLASS[variant]} ${verticalClass}${hasNavButtons ? ` ${variant === 'listing' ? 'max-sm:pb-12' : `max-sm:pb-20 ${variant === 'home' ? 'max-sm:min-h-[340px]' : 'max-sm:min-h-[300px]'}`}` : ''}`}>
           <div className={`flex flex-col gap-4 ${horizontalClass}`}>
             <TitleTag
-              className={`max-w-full sm:max-w-[600px] lg:max-w-[760px] text-balance font-display font-extrabold tracking-[0] ${titleSizeClass}`}
+              className={`max-w-full sm:max-w-[600px] lg:max-w-[760px] text-balance font-display font-bold tracking-[0] ${titleSizeClass}`}
               style={{ color: heroTitleColor }}
             >
               {headline}
@@ -392,7 +391,7 @@ function HeroBannerSlide({
         </Container>
       ) : null}
       {active && isImageOnly && actions.length > 0 && variant !== 'listing' ? (
-        <div className="absolute bottom-3 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-2 rounded-lg bg-white/90 p-2 shadow-soft backdrop-blur-sm sm:bottom-5 sm:left-5">
+        <div className={`absolute left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-2 rounded-lg bg-white/90 p-2 shadow-soft backdrop-blur-sm sm:left-5 ${hasNavButtons ? 'bottom-16 sm:bottom-20' : 'bottom-3 sm:bottom-5'}`}>
           {actions.map((action, index) => <HeroActionLink action={action} key={`${action.url}-${index}`} />)}
         </div>
       ) : null}
@@ -546,16 +545,6 @@ function resolveBannerTextColor(value: string | null | undefined): string {
   return typeof value === 'string' && value.trim()
     ? value.trim()
     : '#ffffff';
-}
-
-function sortHeroBanners(banners: PublicBannerListItem[]) {
-  return banners
-    .map((banner, index) => ({ banner, index }))
-    .sort((left, right) => {
-      const sortDiff = left.banner.sort_order - right.banner.sort_order;
-      return sortDiff === 0 ? left.index - right.index : sortDiff;
-    })
-    .map(({ banner }) => banner);
 }
 
 function usePrefersReducedMotion() {

@@ -112,7 +112,7 @@ export function PageContentPreviewClient({
     let latestMessageSequence = 0;
 
     async function handleMessage(event: MessageEvent<unknown>) {
-      if (!isAllowedPreviewOrigin(event.origin) || !isPreviewMessage(event.data)) {
+      if (event.source !== window.parent || !isAllowedPreviewOrigin(event.origin) || !isPreviewMessage(event.data)) {
         return;
       }
 

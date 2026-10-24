@@ -59,6 +59,7 @@ function removeRecordKey<T>(record: Record<string, T>, key: string) {
 
 export function QuoteRequestForm() {
   const formRef = useRef<HTMLFormElement>(null);
+  const submitLockRef = useRef(false);
   const emptyCloseRef = useRef<HTMLButtonElement>(null);
   const successCloseRef = useRef<HTMLButtonElement>(null);
   const {
@@ -153,6 +154,9 @@ export function QuoteRequestForm() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitLockRef.current) {
+      return;
+    }
     setSuccessMessage(null);
     setErrorMessage(null);
 
@@ -187,7 +191,6 @@ export function QuoteRequestForm() {
       return;
     }
 
-    setIsSubmitting(true);
     const formData = new FormData(form);
     const normalizedValues = {
       full_name: String(formData.get('full_name') || '').trim(),
@@ -199,9 +202,11 @@ export function QuoteRequestForm() {
 
     if (Object.keys(nextErrors).length > 0) {
       focusFirstInvalidField(nextErrors);
-      setIsSubmitting(false);
       return;
     }
+
+    submitLockRef.current = true;
+    setIsSubmitting(true);
 
     const payload: PublicQuoteRequestPayload = {
       full_name: normalizedValues.full_name,
@@ -248,6 +253,7 @@ export function QuoteRequestForm() {
             : 'Không thể gửi yêu cầu lúc này.'
       );
     } finally {
+      submitLockRef.current = false;
       setIsSubmitting(false);
     }
   }

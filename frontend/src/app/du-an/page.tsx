@@ -29,11 +29,7 @@ export default async function ProjectsRoutePage() {
   if (!pageContent) notFound();
 
   const [projectsResponse, heroBannersResponse] = await Promise.all([
-    getPublicProjects({ page: 1, page_size: 40 }).catch(() => ({
-      items: [],
-      pagination: { page: 1, page_size: 40, total: 0, page_count: 1 },
-      filters: { q: null }
-    })),
+    getPublicProjects({ page: 1, page_size: 40 }),
     getPublicBannersForPlacement('PROJECTS_HERO').catch(() =>
       emptyPublicBannersForPlacement('PROJECTS_HERO')
     )

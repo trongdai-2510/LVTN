@@ -295,21 +295,35 @@ export function ServiceListingPage({
           ),
 
           'services-when': services.some((service) => service.when_to_contact && service.when_to_contact.trim()) ? (
-        <ServiceWhenToContact services={services} />
+            <details className="group border-t border-borderBlue bg-subtle/55" data-service-guidance="situations">
+              <Container as="summary" className={`flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 py-4 font-display text-xl font-semibold text-secondary [&::-webkit-details-marker]:hidden ${FOCUS_RING}`} size="wide">
+                Khi nào cần hỗ trợ?
+                <ArrowRight className="h-5 w-5 shrink-0 text-primary transition-transform group-open:rotate-90" />
+              </Container>
+              <ServiceWhenToContact services={services} />
+            </details>
           ) : null,
 
-          'services-process': hasAdminBlocks ? (
-            <ExtraBlocksRenderer appearance="services" blocks={pageContent?.extra_blocks ?? null} containerSize="wide" hideContactLink={visibleSections.includes('services-cta')} />
-          ) : (
-            <>
-              <ServiceProcess />
-              <ServiceContactPrep
-                contactSlug={contactSlug}
-                hotline={publicHotline}
-                hotlineHref={hotlineHref}
-                showContactAction={!visibleSections.includes('services-cta')}
-              />
-            </>
+          'services-process': (
+            <details className="group border-t border-borderBlue bg-subtle/55" data-service-guidance="process">
+              <Container as="summary" className={`flex min-h-16 cursor-pointer list-none items-center justify-between gap-4 py-4 font-display text-xl font-semibold text-secondary [&::-webkit-details-marker]:hidden ${FOCUS_RING}`} size="wide">
+                Cách làm việc và thông tin cần gửi
+                <ArrowRight className="h-5 w-5 shrink-0 text-primary transition-transform group-open:rotate-90" />
+              </Container>
+              {hasAdminBlocks ? (
+                <ExtraBlocksRenderer appearance="services" blocks={pageContent?.extra_blocks ?? null} containerSize="wide" hideContactLink={visibleSections.includes('services-cta')} />
+              ) : (
+                <>
+                  <ServiceProcess />
+                  <ServiceContactPrep
+                    contactSlug={contactSlug}
+                    hotline={publicHotline}
+                    hotlineHref={hotlineHref}
+                    showContactAction={!visibleSections.includes('services-cta')}
+                  />
+                </>
+              )}
+            </details>
           ),
           'services-story': storyHasContent && !storyJoinsContact ? (
             <ServiceEditorialBlock pageContent={pageContent} />
@@ -487,8 +501,9 @@ function ServiceCard({ service, index }: { service: PublicServiceListItem; index
       </div>
       <div className="min-w-0">
         <h3 className="font-display text-[clamp(1.5rem,2.3vw,2rem)] font-semibold leading-[1.2] tracking-[-0.025em] text-secondary">{service.title}</h3>
-        {service.subtitle ? <p className="mt-3 max-w-[48ch] text-base font-medium leading-relaxed text-primaryStrong">{service.subtitle}</p> : null}
-        {service.description ? <p className="mt-3 max-w-[60ch] text-base leading-relaxed text-body">{service.description}</p> : null}
+        {service.subtitle || service.description ? (
+          <p className="mt-3 max-w-[60ch] text-base leading-relaxed text-body">{service.subtitle || service.description}</p>
+        ) : null}
         {service.typical_duration ? <p className="mt-4 inline-flex items-start gap-2 text-sm leading-relaxed text-muted"><Clock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />{service.typical_duration}</p> : null}
       </div>
       <div className="min-w-0 lg:border-l lg:border-borderBlue lg:pl-8">
@@ -517,23 +532,13 @@ function ServiceWhenToContact({ services }: { services: PublicServiceListItem[] 
   const items = services.filter((service) => Boolean(service.when_to_contact && service.when_to_contact.trim()));
 
   return (
-    <section className="border-t border-borderBlue bg-subtle/55" id="khi-nao-gui-yeu-cau">
-      <Container className="grid gap-10 py-14 sm:py-16 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)] lg:gap-16 lg:py-20" size="wide">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Khi nào liên hệ</p>
-            <h2 className="mt-4 max-w-[16ch] font-display text-[clamp(2rem,3.2vw,3rem)] font-semibold leading-[1.12] tracking-[-0.035em] text-secondary">
-              Khi nào nên gửi yêu cầu cho Song Thanh?
-            </h2>
-            <p className="mt-5 max-w-[42ch] text-base leading-relaxed text-body">
-              Những tình huống dưới đây giúp bạn xác định dịch vụ phù hợp với nhu cầu hiện tại.
-            </p>
-          </div>
-
+    <section aria-label="Tình huống phù hợp" id="khi-nao-gui-yeu-cau">
+      <Container className="pb-8 lg:pb-10" size="wide">
           <div className="border-t border-borderBlue">
             {items.map((service) => {
               const Icon = getServiceIcon(service.icon_key);
               return (
-                <article className="grid gap-2 border-b border-borderBlue py-5 sm:grid-cols-[minmax(0,0.65fr)_minmax(0,1.35fr)] sm:gap-6" key={service.id}>
+                <article className="grid gap-2 border-b border-borderBlue py-4 sm:grid-cols-[minmax(0,0.65fr)_minmax(0,1.35fr)] sm:gap-6" key={service.id}>
                   <h3 className="flex items-start gap-3 font-display text-base font-semibold leading-snug text-secondary sm:text-lg">
                     <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary" />{service.title}
                   </h3>
@@ -646,7 +651,7 @@ function ServiceEditorialBlock({
   return (
     <section className="bg-subtle/55 pb-12 lg:pb-16">
       <Container size="wide">
-        <div className="prose-content max-w-[70ch] border-l-2 border-primary pl-5 text-base leading-relaxed text-body sm:pl-7 sm:text-lg">
+        <div className="prose-content max-w-[70ch] text-base leading-relaxed text-body sm:text-lg">
           <HtmlContent sanitizedHtml={pageContent.content_html ?? ''} />
         </div>
       </Container>

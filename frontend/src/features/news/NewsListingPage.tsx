@@ -14,6 +14,7 @@ import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicPageContentDetailResponse } from '@/types/contracts/public-page-contents';
 import type { PublicNewsCategoryItem, PublicNewsListItem, PublicNewsListResponse } from '@/types/contracts/public-news';
 import type { PublicCompanyInfo } from '@/types/contracts/public-site-shell';
+import { resolveNewsHeading } from './newsHeading';
 
 export function NewsListingPage({
   banners = [],
@@ -35,7 +36,7 @@ export function NewsListingPage({
   const showLandingContent = data.page === 1 && !activeCategory && !q;
   const showHeroBanner = hasHeroBanner && showLandingContent;
   const activeCategoryName = categories.find((cat) => cat.slug === activeCategory)?.name;
-  const title = pageContent?.title?.trim() || 'Tin tức & Sự kiện';
+  const landingHeading = resolveNewsHeading(pageContent?.title, showHeroBanner ? banners : []);
   const excerpt = pageContent?.excerpt?.trim() || '';
   const hasExtraBlocks = showLandingContent && (pageContent?.extra_blocks?.blocks ?? []).length > 0;
 
@@ -78,12 +79,13 @@ export function NewsListingPage({
             ) : null}
               <p className="type-eyebrow mb-2 text-primary">Bản tin Song Thanh</p>
               {showHeroBanner ? (
-                <>
-                  {banners.every((banner) => banner.display_mode === 'image_only') ? <h1 className="sr-only">{title}</h1> : null}
-                  <h2 className="font-display text-[30px] font-bold leading-tight text-secondary sm:text-[38px]">Mới cập nhật</h2>
-                </>
+                landingHeading.tag === 'h1' ? (
+                  <h1 className="font-display text-[30px] font-bold leading-tight text-secondary sm:text-[38px]">{landingHeading.title}</h1>
+                ) : (
+                  <h2 className="font-display text-[30px] font-bold leading-tight text-secondary sm:text-[38px]">{landingHeading.title}</h2>
+                )
               ) : (
-                <h1 className="type-page-title text-secondary">{q ? 'Kết quả tìm kiếm' : activeCategoryName || title}</h1>
+                <h1 className="type-page-title text-secondary">{q ? 'Kết quả tìm kiếm' : activeCategoryName || landingHeading.title}</h1>
               )}
             </div>
             <div className="space-y-3">
@@ -187,7 +189,6 @@ export function NewsListingPage({
         compactTop
         companyInfo={companyInfo}
         formTitle="Thông tin của bạn"
-        supportingContent={<p>Để lại thông tin công trình hoặc thiết bị cần trao đổi, Song Thanh sẽ tiếp nhận và phản hồi.</p>}
         titleOverride="Trao đổi nhu cầu của bạn"
         variant="light"
       />

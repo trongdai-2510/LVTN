@@ -173,6 +173,11 @@ export function ProductVariantSelector({
   const [groupQueries, setGroupQueries] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [helperGroupId, setHelperGroupId] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    setIsReady(true);
+  }, []);
 
   useEffect(() => {
     setAttributeSelections(
@@ -274,6 +279,7 @@ export function ProductVariantSelector({
                 <span className="sr-only">Tìm trong {group.label}</span>
                 <input
                   className="h-11 w-full rounded-sm border border-[#D7E3FA] px-3 text-[14px] text-secondary outline-none transition placeholder:text-body/55 focus:border-primary"
+                  disabled={!isReady}
                   id={`group-search-${group.id}`}
                   onChange={(event) =>
                     setGroupQueries((current) => ({
@@ -334,7 +340,7 @@ export function ProductVariantSelector({
                           ? 'border-[#D7E3FA] bg-white text-secondary hover:border-primary/50 hover:bg-[#F7FAFF]'
                           : 'cursor-not-allowed border-[#CBD5E1] bg-[#E5EAF2] text-[#94A3B8] opacity-70'
                     ].join(' ')}
-                    disabled={!isClickable}
+                    disabled={!isReady || !isClickable}
                     key={option.valueKey}
                     title={
                       isSelected || isCompatible
@@ -385,6 +391,7 @@ export function ProductVariantSelector({
             !(groupQueries[group.id] && groupQueries[group.id].trim().length > 0) ? (
               <button
                 className="text-[12px] font-bold uppercase tracking-[0.05em] text-primary transition hover:text-primaryStrong"
+                disabled={!isReady}
                 onClick={() =>
                   setExpandedGroupIds((current) => ({
                     ...current,
@@ -433,6 +440,7 @@ export function ProductVariantSelector({
             return (
               <button
                 aria-pressed={isSelected}
+                disabled={!isReady}
                 className={[
                   'flex min-h-[66px] w-full min-w-0 max-w-full flex-1 basis-[calc(50%-0.3125rem)] flex-col justify-center rounded-sm border px-4 py-3 text-left transition sm:w-auto sm:flex-none sm:basis-auto sm:min-w-[168px]',
                   isSelected
@@ -475,6 +483,7 @@ export function ProductVariantSelector({
           </span>
           <input
             className="h-11 w-full rounded-sm border border-[#D7E3FA] px-3 text-[14px] text-secondary outline-none transition placeholder:text-body/55 focus:border-primary"
+            disabled={!isReady}
             id="variant-search"
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="Tìm mã hoặc tên sản phẩm"
@@ -501,6 +510,7 @@ export function ProductVariantSelector({
               return (
                 <button
                   aria-pressed={isSelected}
+                  disabled={!isReady}
                   className={[
                     'flex w-full flex-col rounded-sm border px-4 py-3 text-left transition',
                     isSelected

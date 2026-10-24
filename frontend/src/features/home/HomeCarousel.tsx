@@ -5,6 +5,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type TransitionEvent as ReactTransitionEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -12,8 +13,8 @@ import {
   useState
 } from 'react';
 
-const AUTO_SCROLL_INTERVAL_MS = 2000;
-const LOOP_TRANSITION_MS = 520;
+const AUTO_SCROLL_INTERVAL_MS = 5000;
+const LOOP_TRANSITION_MS = 620;
 const LOOP_SWIPE_THRESHOLD_PX = 44;
 const LOOP_REENABLE_TRANSITION_DELAY_MS = 32;
 
@@ -46,30 +47,33 @@ function getScrollStep(viewport: HTMLDivElement, track: HTMLDivElement | null) {
 function getResponsiveVisibleCount(
   layout: HomeCarouselProps['layout'],
   desktopVisibleCount: NonNullable<HomeCarouselProps['desktopVisibleCount']>,
-  viewportWidth: number
+  screenWidth: number
 ) {
   if (layout === 'brand-strip') {
-    if (viewportWidth >= 1280) return 6;
-    if (viewportWidth >= 1024) return 4;
-    if (viewportWidth >= 640) return 3;
+    if (screenWidth >= 1280) return 6;
+    if (screenWidth >= 1024) return 4;
+    if (screenWidth >= 640) return 3;
     return 2;
   }
 
   if (layout === 'fixed-gap' || desktopVisibleCount === 4) {
-    if (viewportWidth >= 1280) return 4;
-    if (viewportWidth >= 1024) return 3;
-    if (viewportWidth >= 640) return 2;
+    if (screenWidth >= 1280) return 4;
+    if (screenWidth >= 1024) return 3;
+    if (screenWidth >= 640) return 2;
     return 1;
   }
 
-  if (viewportWidth >= 1024) return 3;
-  if (viewportWidth >= 640) return 2;
+  if (screenWidth >= 1024) return 3;
+  if (screenWidth >= 640) return 2;
   return 1;
 }
 
+function getCircularIndex(index: number, length: number) {
+  return ((index % length) + length) % length;
+}
+
 function getCircularItem<T>(items: T[], index: number) {
-  const normalizedIndex = ((index % items.length) + items.length) % items.length;
-  return items[normalizedIndex];
+  return items[getCircularIndex(index, items.length)];
 }
 
 export function HomeCarousel({
@@ -91,16 +95,18 @@ export function HomeCarousel({
   const dragConsumedRef = useRef(false);
   const items = Children.toArray(children);
   const minimumLoopItems = layout === 'brand-strip' ? 6 : desktopVisibleCount;
-  const shouldLoop = loop && items.length > minimumLoopItems;
+  const [loopVisibleCount, setLoopVisibleCount] = useState(minimumLoopItems);
+  const shouldLoop = loop && items.length > loopVisibleCount;
   const [canScroll, setCanScroll] = useState(false);
+  const [isInView, setIsInView] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isLoopReady, setIsLoopReady] = useState(false);
   const [isLoopTransitionEnabled, setIsLoopTransitionEnabled] = useState(false);
   const [loopDragOffset, setLoopDragOffset] = useState(0);
   const [loopOffsetSteps, setLoopOffsetSteps] = useState(-1);
   const [loopStartIndex, setLoopStartIndex] = useState(0);
   const [loopStep, setLoopStep] = useState(0);
-  const [loopVisibleCount, setLoopVisibleCount] = useState(minimumLoopItems);
 
   const updateCanScroll = useCallback(() => {
     const viewport = viewportRef.current;
@@ -119,19 +125,25 @@ export function HomeCarousel({
   }, [shouldLoop]);
 
   const updateLoopMeasurements = useCallback(() => {
-    if (!shouldLoop) {
-      return;
-    }
-
     const viewport = viewportRef.current;
 
     if (!viewport) {
       return;
     }
 
-    setLoopVisibleCount(getResponsiveVisibleCount(layout, desktopVisibleCount, viewport.clientWidth));
-    setLoopStep(getScrollStep(viewport, trackRef.current));
+    setLoopVisibleCount(getResponsiveVisibleCount(layout, desktopVisibleCount, window.innerWidth));
+    if (shouldLoop) {
+      setLoopStep(getScrollStep(viewport, trackRef.current));
+    }
   }, [desktopVisibleCount, layout, shouldLoop]);
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setPrefersReducedMotion(query.matches);
+    const updatePreference = (event: MediaQueryListEvent) => setPrefersReducedMotion(event.matches);
+    query.addEventListener('change', updatePreference);
+    return () => query.removeEventListener('change', updatePreference);
+  }, []);
 
   const enableLoopTransitionAfterReset = useCallback(() => {
     if (loopFrameRef.current !== null) {
@@ -157,12 +169,19 @@ export function HomeCarousel({
       return;
     }
 
+    if (prefersReducedMotion) {
+      setLoopStartIndex((currentIndex) =>
+        (currentIndex + (direction === 'next' ? 1 : -1) + items.length) % items.length
+      );
+      return;
+    }
+
     loopIsAnimatingRef.current = true;
     setIsLoopReady(true);
     setIsLoopTransitionEnabled(true);
     setLoopDragOffset(0);
     setLoopOffsetSteps(direction === 'next' ? -2 : 0);
-  }, [loopStep]);
+  }, [items.length, loopStep, prefersReducedMotion]);
 
   const move = useCallback((direction: 'previous' | 'next') => {
     const viewport = viewportRef.current;
@@ -187,11 +206,11 @@ export function HomeCarousel({
           ? maxScrollLeft
           : Math.max(0, viewport.scrollLeft - step);
 
-    viewport.scrollTo({ left: nextScrollLeft, behavior: 'smooth' });
-  }, [shouldLoop, startLoopMove]);
+    viewport.scrollTo({ left: nextScrollLeft, behavior: prefersReducedMotion ? 'instant' : 'smooth' });
+  }, [prefersReducedMotion, shouldLoop, startLoopMove]);
 
-  const handleLoopTransitionEnd = useCallback(() => {
-    if (!shouldLoop || items.length === 0) {
+  const handleLoopTransitionEnd = useCallback((event: ReactTransitionEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || event.propertyName !== 'transform' || !shouldLoop || items.length === 0) {
       return;
     }
 
@@ -317,9 +336,27 @@ export function HomeCarousel({
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(viewport);
     if (track) resizeObserver.observe(track);
+    window.addEventListener('resize', handleResize);
 
-    return () => resizeObserver.disconnect();
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
   }, [items.length, updateCanScroll, updateLoopMeasurements]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || typeof IntersectionObserver === 'undefined') {
+      setIsInView(true);
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => setIsInView(entry.isIntersecting), {
+      threshold: 0.1
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
     if (!shouldLoop) {
@@ -358,13 +395,13 @@ export function HomeCarousel({
   }, []);
 
   useEffect(() => {
-    if (!canScroll || isPaused || autoScrollIntervalMs <= 0) {
+    if (!canScroll || !isInView || isPaused || prefersReducedMotion || autoScrollIntervalMs <= 0) {
       return undefined;
     }
 
     const intervalId = window.setInterval(() => move('next'), autoScrollIntervalMs);
     return () => window.clearInterval(intervalId);
-  }, [autoScrollIntervalMs, canScroll, isPaused, move]);
+  }, [autoScrollIntervalMs, canScroll, isInView, isPaused, move, prefersReducedMotion]);
 
   const itemBasisClassName =
     layout === 'brand-strip'
@@ -372,12 +409,12 @@ export function HomeCarousel({
       : layout === 'fixed-gap'
         ? 'basis-full sm:basis-[calc((100%_-_24px)/2)] lg:basis-[calc((100%_-_48px)/3)] xl:basis-[calc((100%_-_72px)/4)]'
         : desktopVisibleCount === 4
-          ? 'basis-full sm:basis-1/2 lg:basis-1/3 xl:basis-1/4'
-          : 'basis-full sm:basis-1/2 lg:basis-1/3';
+          ? 'basis-full sm:basis-[calc((100%_-_24px)/2)] lg:basis-[calc((100%_-_48px)/3)] xl:basis-[calc((100%_-_72px)/4)]'
+          : 'basis-full sm:basis-[calc((100%_-_24px)/2)] lg:basis-[calc((100%_-_48px)/3)]';
   const viewportClassName = [
     shouldLoop
       ? 'overflow-hidden touch-pan-y'
-      : 'overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+      : 'overflow-x-auto scroll-smooth motion-reduce:scroll-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
     !shouldLoop && (layout === 'fixed-gap' || layout === 'brand-strip') ? 'snap-x snap-mandatory' : ''
   ].join(' ');
   const trackClassName = [
@@ -404,7 +441,7 @@ export function HomeCarousel({
       transform: `translate3d(${loopTranslateX}px, 0, 0)`,
       transition:
         isLoopTransitionEnabled && loopDragOffset === 0
-          ? `transform ${LOOP_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
+          ? `transform ${LOOP_TRANSITION_MS}ms cubic-bezier(0.33, 1, 0.68, 1)`
           : 'none',
       willChange: 'transform'
     }
@@ -415,7 +452,9 @@ export function HomeCarousel({
       return {
         item: getCircularItem(items, itemIndex),
         itemIndex,
-        key: `${loopStartIndex}-${slotIndex}-${itemIndex}`,
+        key: slotIndex === 0 || slotIndex === loopVisibleCount + 1
+          ? `clone-${slotIndex}-${getCircularIndex(itemIndex, items.length)}`
+          : `item-${getCircularIndex(itemIndex, items.length)}`,
         setIndex: slotIndex
       };
     })

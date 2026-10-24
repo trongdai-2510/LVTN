@@ -100,13 +100,11 @@ export function ProjectListingPage({
           <div className={`grid items-center gap-10 ${heroMosaic.length > 0 ? 'lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]' : ''} lg:gap-14`}>
             <div className="flex flex-col gap-7">
               <div className="space-y-5">
-                <p className="type-eyebrow text-primary">Hồ sơ dự án</p>
                 <h1 className="type-page-title text-balance text-secondary">{heroTitle}</h1>
                 {pageContent?.excerpt?.trim() ? (
                   <p className="type-body-lg max-w-[60ch] text-body">{pageContent.excerpt.trim()}</p>
                 ) : null}
               </div>
-              {projects.length > 0 ? <p className="border-t border-borderBlue pt-4 type-body-sm text-body">Đang hiển thị {projects.length} hồ sơ dự án công khai.</p> : null}
             </div>
 
             {heroMosaic.length > 0 ? (
@@ -206,12 +204,8 @@ export function ProjectListingPage({
       <ExtraBlocksRenderer blocks={pageContent?.extra_blocks ?? null} containerSize="wide" />
 
       {hasExtraContent ? (
-        <section className="bg-primarySoft py-14 lg:py-24">
-          <Container className="space-y-8" size="wide">
-            <div className="space-y-3">
-              <p className="type-eyebrow text-primary">Thông tin thêm</p>
-              <h2 className="type-section-title mt-4 text-secondary">Nội dung dự án</h2>
-            </div>
+        <section aria-label="Thông tin dự án" className="bg-primarySoft py-14 lg:py-20">
+          <Container size="wide">
             <Card className="p-8">
               <HtmlContent sanitizedHtml={pageContent?.content_html ?? ''} />
             </Card>
@@ -226,7 +220,6 @@ export function ProjectListingPage({
         <Container className="grid gap-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-center" size="wide">
           <div>
             <h2 className="type-section-title text-secondary">Trao đổi về công trình của bạn</h2>
-            <p className="type-body-sm mt-2 max-w-[65ch] text-body">Gửi bối cảnh và yêu cầu kỹ thuật để Song Thanh xem xét hướng hỗ trợ phù hợp.</p>
           </div>
           <Link className="type-button-lg inline-flex min-h-12 items-center justify-center rounded-xs bg-primary px-6 text-white transition hover:bg-primaryStrong" href="/lien-he">
             Gửi thông tin dự án

@@ -36,6 +36,13 @@ function plainText(value: string | null | undefined): string | null {
   return text || null;
 }
 
+function truncateAtWord(value: string | null, limit: number): string | null {
+  if (!value || value.length <= limit) return value;
+  const clipped = value.slice(0, limit - 1);
+  const lastSpace = clipped.lastIndexOf(' ');
+  return `${(lastSpace > limit * 0.7 ? clipped.slice(0, lastSpace) : clipped).trimEnd()}…`;
+}
+
 function buildVariantUrl(productUrl: string, variantId: string): string {
   const variantUrl = new URL(productUrl);
   variantUrl.searchParams.set('variant', variantId);
@@ -51,7 +58,7 @@ export async function generateMetadata({ params }: ProductDetailPageProps): Prom
     const title = `${group.name}${brandSuffix} | Song Thanh`;
     const description =
       plainText(group.short_description) ||
-      plainText(group.detailed_description)?.slice(0, 200) ||
+      truncateAtWord(plainText(group.detailed_description), 200) ||
       `${group.name}${brandSuffix} — thông số, hình ảnh và báo giá tại Song Thanh.`;
     const ogImage = resolvePublicFileSource(group.thumbnail_file) || undefined;
 
@@ -181,7 +188,7 @@ export default async function ProductDetailPage({
   const productImage = productImageSource ? toAbsoluteSiteUrl(productImageSource) : null;
   const productDescription =
     plainText(detail.product_group.short_description) ||
-    plainText(detail.product_group.detailed_description)?.slice(0, 300) ||
+    truncateAtWord(plainText(detail.product_group.detailed_description), 300) ||
     detail.product_group.name;
   const pricedVariants = detail.variants.flatMap((variant) => {
     const price = variant.public_price_amount;

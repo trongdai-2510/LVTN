@@ -48,11 +48,7 @@ export default async function PartnersRoutePage() {
   if (!pageContent) notFound();
 
   const [brandsResponse, heroBannersResponse] = await Promise.all([
-    getAllPublicBrands().catch(() => ({
-      items: [],
-      pagination: { page: 1, page_size: 40, total: 0, page_count: 1 },
-      filters: { q: null }
-    })),
+    getAllPublicBrands(),
     getPublicBannersForPlacement('BRANDS_HERO').catch(() =>
       emptyPublicBannersForPlacement('BRANDS_HERO')
     )

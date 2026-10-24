@@ -10,9 +10,10 @@ import { PublicPageViewTracker } from '@/components/analytics/PublicPageViewTrac
 
 type PublicShellProps = PropsWithChildren<{
   shell: PublicSiteShellResponse;
+  shellUnavailable?: boolean;
 }>;
 
-export function PublicShell({ shell, children }: PublicShellProps) {
+export function PublicShell({ shell, shellUnavailable = false, children }: PublicShellProps) {
   return (
     <div className="min-h-screen bg-background text-text">
       <a
@@ -28,7 +29,7 @@ export function PublicShell({ shell, children }: PublicShellProps) {
         <FloatingContactButtons shell={shell} />
         <LazyQuoteRequestModal />
       </SiteShellProvider>
-      <SiteFooter shell={shell} variant="default" />
+      <SiteFooter shell={shell} unavailable={shellUnavailable} variant="default" />
     </div>
   );
 }

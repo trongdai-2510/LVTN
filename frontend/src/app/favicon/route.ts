@@ -3,6 +3,7 @@ import { ImageResponse } from 'next/og';
 
 import { getPublicFaviconSource } from '@/features/site-shell/site-shell.public';
 import { getPublicSiteShell } from '@/lib/api/public-site-shell';
+import { readFaviconImage, resolveManagedFaviconUrl } from '@/lib/security/faviconSource';
 
 const FAVICON_SIZE = 96;
 
@@ -10,40 +11,12 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-function resolveFaviconUrl(source: string): string {
-  if (source.startsWith('http://') || source.startsWith('https://') || source.startsWith('data:image/')) {
-    return source;
-  }
-
+function getApiBaseUrl(): string | null {
   const baseUrl =
     process.env.API_BASE_URL ??
     process.env.NEXT_PUBLIC_API_BASE_URL ??
     (process.env.NODE_ENV === 'production' ? null : 'http://localhost:4000');
-
-  if (!baseUrl) {
-    throw new Error('Public API base URL is not configured for favicon loading.');
-  }
-
-  return new URL(source, baseUrl).toString();
-}
-
-async function loadFaviconDataUrl(source: string): Promise<string> {
-  if (source.startsWith('data:image/')) {
-    return source;
-  }
-
-  const response = await fetch(resolveFaviconUrl(source), { cache: 'no-store' });
-  if (!response.ok) {
-    throw new Error(`Unable to load favicon: HTTP ${response.status}`);
-  }
-
-  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png';
-  if (!contentType.startsWith('image/')) {
-    throw new Error(`Unsupported favicon content type: ${contentType}`);
-  }
-
-  const image = Buffer.from(await response.arrayBuffer()).toString('base64');
-  return `data:${contentType};base64,${image}`;
+  return baseUrl;
 }
 
 function fallbackMark() {
@@ -72,9 +45,15 @@ export async function GET() {
   const source = getPublicFaviconSource(shell.company_info);
 
   let imageNode: ReactElement = fallbackMark();
-  if (source) {
+  const faviconUrl = source ? resolveManagedFaviconUrl(source, getApiBaseUrl() ?? '') : null;
+  if (faviconUrl) {
     try {
-      const dataUrl = await loadFaviconDataUrl(source);
+      const response = await fetch(faviconUrl, {
+        cache: 'no-store',
+        redirect: 'error',
+        signal: AbortSignal.timeout(5_000)
+      });
+      const dataUrl = await readFaviconImage(response);
       imageNode = createElement('img', {
         alt: '',
         height: 88,

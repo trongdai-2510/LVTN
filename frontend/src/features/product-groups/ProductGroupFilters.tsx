@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import {
   buildProductListingHref,
@@ -13,6 +13,7 @@ import {
 } from '@/features/product-search/public-product-search';
 import { MAX_PUBLIC_PRODUCT_SEARCH_QUERY_LENGTH } from '@/features/product-search/publicProductSearchConstants';
 import type { PublicProductGroupSort } from '@/types/contracts/public-product-groups';
+import { getProductGroupSortLabel, PRODUCT_GROUP_SORT_OPTIONS } from './productGroupSort';
 
 type ProductGroupFiltersProps = {
   categoryNav?: ReactNode;
@@ -31,33 +32,6 @@ type ProductGroupFiltersProps = {
   onNavigate: (href: string, mode?: 'push' | 'replace') => void;
 };
 
-const SORT_OPTIONS: Array<{ value: PublicProductGroupSort; label: string }> = [
-  { value: 'newest', label: 'Mới nhất' },
-  { value: 'popular', label: 'Phổ biến nhất' },
-  { value: 'name_asc', label: 'Tên A → Z' },
-  { value: 'name_desc', label: 'Tên Z → A' }
-];
-
-function getSortLabel(currentSort: PublicProductGroupSort | '') {
-  if (currentSort === 'popular') {
-    return 'Phổ biến nhất';
-  }
-
-  if (currentSort === 'name_asc') {
-    return 'Tên A → Z';
-  }
-
-  if (currentSort === 'name_desc') {
-    return 'Tên Z → A';
-  }
-
-  if (currentSort === 'newest' || currentSort === '') {
-    return 'Mới nhất';
-  }
-
-  return 'Sắp xếp';
-}
-
 export function ProductGroupFilters({
   categoryNav,
   currentBrands,
@@ -75,7 +49,7 @@ export function ProductGroupFilters({
   onNavigate
 }: ProductGroupFiltersProps) {
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
-  const activeSortLabel = useMemo(() => getSortLabel(currentSort), [currentSort]);
+  const activeSortLabel = getProductGroupSortLabel(currentSort);
 
   function buildListingHref({
     q = currentQ,
@@ -130,7 +104,7 @@ export function ProductGroupFilters({
     navigate: (href) => onNavigate(href, 'push')
   });
 
-  function handleSortSelect(nextSort: PublicProductGroupSort) {
+  function handleSortSelect(nextSort: PublicProductGroupSort | '') {
     if (isPending) {
       return;
     }
@@ -253,19 +227,19 @@ export function ProductGroupFilters({
           {isSortMenuOpen ? (
             <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[244px] rounded-xl border border-[#d9e4f0] bg-white p-2 shadow-soft">
               <div className="space-y-1">
-                {SORT_OPTIONS.map((option) =>
+                {PRODUCT_GROUP_SORT_OPTIONS.map((option) =>
                   <button
-                    aria-pressed={currentSort === option.value || (option.value === 'newest' && currentSort === '')}
+                    aria-pressed={currentSort === option.value}
                     className={[
                       'flex min-h-11 w-full items-center rounded-lg px-3 py-2 text-left text-[13px] font-medium leading-5 transition',
                       isPending
                         ? 'cursor-wait opacity-55'
-                        : currentSort === option.value || (option.value === 'newest' && currentSort === '')
+                        : currentSort === option.value
                         ? 'bg-primary/8 text-primaryStrong'
                         : 'text-secondary hover:bg-subtle'
                     ].join(' ')}
                     disabled={isPending}
-                    key={option.value}
+                    key={option.value || 'priority'}
                     onClick={() => handleSortSelect(option.value)}
                     type="button"
                   >

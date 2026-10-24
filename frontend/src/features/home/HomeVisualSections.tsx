@@ -23,14 +23,12 @@ import type { PublicCompanyInfo } from '@/types/contracts/public-site-shell';
 import { Card } from '@/components/ui/Card';
 import { MailIcon, PhoneIcon } from '@/components/ui/ContactIcons';
 import { Container } from '@/components/ui/Container';
-import { EmptyMedia } from '@/components/ui/EmptyMedia';
 import { ProductCategoryCard } from '@/features/product-categories/ProductCategoryCard';
 import { ProductGroupCard } from '@/features/product-groups/ProductGroupCard';
 import { HomeQuoteRequestForm, type QuoteServiceContext } from '@/features/quote-request/HomeQuoteRequestForm';
 import {
   getPublicAddress,
   getPublicCompanyLegalName,
-  getPublicCompanyName,
   getPublicEmail,
   getPublicHotlines,
   getPublicSafeUrl
@@ -55,7 +53,7 @@ function applyListMode<T extends { id: string }>(
   ids: string[],
   limit: number
 ): T[] {
-  if (mode === 'manual' && ids.length > 0) {
+  if (mode === 'manual') {
     const byId = new Map(items.map((item) => [item.id, item]));
     return ids
       .map((id) => byId.get(id))
@@ -90,10 +88,12 @@ export function HomeHeroSection({
 export function HomeProductCategoriesSection({
   categories,
   titleOverride,
-  config
+  config,
+  unavailable = false
 }: Pick<HomeVisualSectionsProps, 'categories'> & {
   titleOverride?: string | null;
   config?: ProductCategoriesSectionConfig;
+  unavailable?: boolean;
 }) {
   const title = titleOverride?.trim() || 'Danh mục thiết bị';
   const mode = config?.mode ?? 'auto';
@@ -112,14 +112,14 @@ export function HomeProductCategoriesSection({
           </Link>
         </div>
         {visibleCategories.length > 0 ? (
-          <HomeCarousel ariaLabel={title} desktopVisibleCount={4}>
+          <HomeCarousel ariaLabel={title} desktopVisibleCount={4} loop>
             {visibleCategories.map((category) => (
               <ProductCategoryCard category={category} key={category.id} />
             ))}
           </HomeCarousel>
         ) : (
-          <div className="type-body-sm rounded-sm border border-borderSoft bg-surface px-5 py-6 text-body">
-            Danh mục sản phẩm đang được cập nhật.
+          <div className="type-body-sm rounded-sm border border-borderSoft bg-surface px-5 py-6 text-body" role={unavailable ? 'alert' : undefined}>
+            {unavailable ? 'Chưa tải được danh mục sản phẩm. Vui lòng thử lại sau.' : 'Danh mục sản phẩm đang được cập nhật.'}
           </div>
         )}
       </Container>
@@ -135,7 +135,6 @@ export function HomeCompanyOverviewSection({
   titleOverride?: string | null;
   config?: CompanyOverviewSectionConfig;
 }) {
-  const companyName = getPublicCompanyName(companyInfo);
   const companyLegalName = getPublicCompanyLegalName(companyInfo);
   const publicHotlines = getPublicHotlines(companyInfo);
   const publicHotline = publicHotlines[0] || 'Đang cập nhật';
@@ -158,7 +157,9 @@ export function HomeCompanyOverviewSection({
   return (
     <section className="bg-panel py-12 lg:py-20">
       <Container
-        className="grid items-stretch gap-8 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-14"
+        className={featuredImageSource
+          ? 'grid items-stretch gap-8 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:gap-14'
+          : 'flex justify-center'}
         size="narrow"
       >
         {featuredImageSource ? (
@@ -171,21 +172,8 @@ export function HomeCompanyOverviewSection({
               src={featuredImageSource}
             />
           </div>
-        ) : (
-          <div className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-sm border border-borderBlue bg-gradient-to-br from-primarySoft/40 to-white lg:aspect-[4/5] lg:h-full">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,oklch(0.92_0.04_240/0.4),transparent_60%)]" />
-            <div className="relative max-w-[18ch] text-center">
-              <span className="inline-flex h-16 w-16 items-center justify-center rounded-sm bg-white text-2xl font-bold tracking-[0.04em] text-primary shadow-soft">
-                ST
-              </span>
-              <p className="mt-5 type-card-title-sm text-secondary">{companyName}</p>
-              <p className="mt-2 type-caption leading-relaxed text-body">
-                Hình minh hoạ sẽ thay khi nội dung giới thiệu có ảnh đại diện.
-              </p>
-            </div>
-          </div>
-        )}
-        <div className="flex flex-col justify-center space-y-6">
+        ) : null}
+        <div className={['flex flex-col justify-center space-y-6', featuredImageSource ? '' : 'w-full max-w-[980px]'].join(' ')}>
           <div className="space-y-4">
             <p className="type-eyebrow text-primary">Về chúng tôi</p>
             <h2 className="type-section-title text-secondary">{heading}</h2>
@@ -262,10 +250,12 @@ export function HomeFeaturedProductsSection({
   featuredProducts,
   brands,
   titleOverride,
-  config
+  config,
+  unavailable = false
 }: Pick<HomeVisualSectionsProps, 'featuredProducts' | 'brands'> & {
   titleOverride?: string | null;
   config?: FeaturedProductsSectionConfig;
+  unavailable?: boolean;
 }) {
   const title = titleOverride?.trim() || 'Nhóm sản phẩm nổi bật';
   const mode = config?.mode ?? 'auto';
@@ -293,6 +283,7 @@ export function HomeFeaturedProductsSection({
             desktopVisibleCount={4}
             hideControlsWhenStatic
             layout="fixed-gap"
+            loop
           >
             {visibleProducts.map((productGroup) => (
               <ProductGroupCard
@@ -304,10 +295,11 @@ export function HomeFeaturedProductsSection({
             ))}
           </HomeCarousel>
         ) : (
-          <div className="rounded-sm border border-borderSoft/30 bg-white px-8 py-12 shadow-soft">
-            <h3 className="font-display text-[24px] font-extrabold leading-8 text-secondary">
-              Nhóm sản phẩm đang được cập nhật
+          <div className="rounded-sm border border-borderSoft/30 bg-white px-8 py-12 shadow-soft" role={unavailable ? 'alert' : undefined}>
+            <h3 className="font-display text-[24px] font-bold leading-8 text-secondary">
+              {unavailable ? 'Chưa tải được sản phẩm nổi bật' : 'Nhóm sản phẩm đang được cập nhật'}
             </h3>
+            {unavailable ? <p className="type-body-sm mt-3 text-body">Vui lòng thử lại sau hoặc xem danh sách sản phẩm.</p> : null}
           </div>
         )}
       </Container>
@@ -351,11 +343,7 @@ export function HomeServicesSection({
                       src={imageSource}
                     />
                   </div>
-                ) : (
-                  <div className="type-caption flex h-[90px] items-center justify-center bg-subtle font-bold text-primary sm:h-[120px]">
-                    ST
-                  </div>
-                )}
+                ) : null}
                 <div className="p-3 sm:p-6">
                   <h3 className="type-card-title line-clamp-2 text-secondary transition-colors group-hover:text-primary">
                     {service.title}
@@ -417,7 +405,7 @@ export function HomeProjectsSection({
                 href={`/du-an/${project.slug}`}
                 key={project.id}
               >
-                <Card className="h-full overflow-hidden transition-shadow group-hover:shadow-action">
+                <Card className="flex h-full flex-col overflow-hidden transition-shadow group-hover:shadow-action">
                   {imageSource ? (
                     <div className="relative h-[220px] w-full overflow-hidden sm:h-[280px] lg:h-[320px]">
                       <Image
@@ -429,13 +417,11 @@ export function HomeProjectsSection({
                         src={imageSource}
                       />
                     </div>
-                  ) : (
-                    <EmptyMedia
-                      className="min-h-[220px] rounded-none border-0 sm:min-h-[280px] lg:min-h-[320px]"
-                      label={project.title}
-                    />
-                  )}
-                  <div className="p-5">
+                  ) : null}
+                  <div className={`flex flex-1 flex-col justify-center p-5 sm:p-6 ${imageSource ? '' : 'min-h-[200px]'}`}>
+                    {!imageSource && project.client_name?.trim() ? (
+                      <p className="type-label mb-3 line-clamp-1 text-primary">{project.client_name.trim()}</p>
+                    ) : null}
                     <h3 className="type-card-title line-clamp-2 text-secondary transition-colors group-hover:text-primary">
                       {project.title}
                     </h3>
@@ -443,6 +429,9 @@ export function HomeProjectsSection({
                       <p className="type-body-sm mt-2 line-clamp-2 text-body">
                         {project.description.trim()}
                       </p>
+                    ) : null}
+                    {!imageSource && project.location?.trim() ? (
+                      <p className="type-caption mt-4 line-clamp-2 text-body">{project.location.trim()}</p>
                     ) : null}
                   </div>
                 </Card>
@@ -508,7 +497,7 @@ function BrandLogoTile({
     <span className="type-label font-bold uppercase text-body">{brand.name}</span>
   );
   const className =
-    'relative flex h-full min-h-[88px] w-full items-center justify-center rounded-sm border border-borderSoft bg-white px-6 py-4 shadow-soft transition hover:border-primary/30';
+    'relative flex h-full min-h-[88px] w-full items-center justify-center rounded-sm border border-borderSoft bg-white px-6 py-4 shadow-soft transition-[transform,border-color,box-shadow] duration-300 ease-out hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-action motion-reduce:transition-none motion-reduce:hover:translate-y-0';
   if (websiteUrl) {
     return (
       <a className={className} href={websiteUrl} rel="noreferrer" target="_blank">
@@ -548,17 +537,20 @@ function splitNumberSignal(combined: string): { value: string; label: string } {
   return { value: combined, label: '' };
 }
 export function HomeTrustStripSection({
-  services,
-  projects,
-  brands,
+  serviceCount,
+  projectCount,
+  brandCount,
   config
-}: Pick<HomeVisualSectionsProps, 'services' | 'projects' | 'brands'> & {
+}: {
+  serviceCount: number;
+  projectCount: number;
+  brandCount: number;
   config?: TrustStripSectionConfig;
 }) {
   const mode = config?.mode ?? 'auto';
   const manualSignals = (config?.signals ?? []).filter((signal) => signal.label && signal.value);
   const signals: TrustSignalDisplay[] = [];
-  if (mode === 'manual' && manualSignals.length > 0) {
+  if (mode === 'manual') {
     manualSignals.forEach((signal, index) => {
       signals.push({
         key: `manual-${index}`,
@@ -575,7 +567,7 @@ export function HomeTrustStripSection({
       });
     });
   } else {
-    if (services.length > 0) {
+    if (serviceCount > 0) {
       signals.push({
         key: 'services',
         icon: (
@@ -583,12 +575,12 @@ export function HomeTrustStripSection({
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z" />
           </TrustIcon>
         ),
-        value: String(services.length),
+        value: String(serviceCount),
         label: 'Dịch vụ',
         sublabel: 'kỹ thuật chuyên sâu'
       });
     }
-    if (projects.length > 0) {
+    if (projectCount > 0) {
       signals.push({
         key: 'projects',
         icon: (
@@ -602,12 +594,12 @@ export function HomeTrustStripSection({
             <path d="M9 18v.01" />
           </TrustIcon>
         ),
-        value: String(projects.length),
+        value: String(projectCount),
         label: 'Dự án',
         sublabel: 'đã triển khai'
       });
     }
-    if (brands.length > 0) {
+    if (brandCount > 0) {
       signals.push({
         key: 'brands',
         icon: (
@@ -616,7 +608,7 @@ export function HomeTrustStripSection({
             <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
           </TrustIcon>
         ),
-        value: String(brands.length),
+        value: String(brandCount),
         label: 'Thương hiệu',
         sublabel: 'sản phẩm chính hãng'
       });
@@ -751,8 +743,7 @@ export function HomeContactCtaSection({
           </div>
           {showQuoteForm ? (
             <div className={`relative mt-8 rounded-sm bg-white p-5 sm:p-8 lg:mt-0 ${isLight ? 'border border-borderBlue shadow-soft' : 'shadow-[0_25px_50px_rgb(0_0_0_/_0.25)]'}`}>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Biểu mẫu trực tuyến</p>
-              <h3 className="mb-7 mt-3 font-display text-2xl font-semibold leading-tight text-secondary sm:text-3xl">{formTitle}</h3>
+              <h3 className="mb-7 font-display text-2xl font-semibold leading-tight text-secondary sm:text-3xl">{formTitle}</h3>
               <HomeQuoteRequestForm serviceContext={serviceContext} />
             </div>
           ) : null}

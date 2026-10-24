@@ -44,6 +44,7 @@ const initialValues: HomeQuoteFormValues = {
 
 export function HomeQuoteRequestForm({ serviceContext = null }: { serviceContext?: QuoteServiceContext | null }) {
   const formRef = useRef<HTMLFormElement>(null);
+  const submitLockRef = useRef(false);
   const [values, setValues] = useState<HomeQuoteFormValues>(initialValues);
   const [fieldErrors, setFieldErrors] = useState<HomeQuoteFormErrors>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -87,6 +88,7 @@ export function HomeQuoteRequestForm({ serviceContext = null }: { serviceContext
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitLockRef.current) return;
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -98,6 +100,7 @@ export function HomeQuoteRequestForm({ serviceContext = null }: { serviceContext
       return;
     }
 
+    submitLockRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -128,6 +131,7 @@ export function HomeQuoteRequestForm({ serviceContext = null }: { serviceContext
           : 'Không thể gửi yêu cầu tư vấn lúc này.'
       );
     } finally {
+      submitLockRef.current = false;
       setIsSubmitting(false);
     }
   }
@@ -166,7 +170,7 @@ export function HomeQuoteRequestForm({ serviceContext = null }: { serviceContext
       ) : null}
 
       {serviceContext ? (
-        <p className="border-l-2 border-primary bg-primarySoft/55 px-4 py-3 text-sm leading-relaxed text-secondary">
+        <p className="rounded-sm bg-primarySoft/55 px-4 py-3 text-sm leading-relaxed text-secondary">
           Dịch vụ đang hỏi: <span className="font-semibold">{serviceContext.title}</span>
         </p>
       ) : null}

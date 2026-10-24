@@ -5,6 +5,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { Container } from '@/components/ui/Container';
 import { getPublicSafeUrl } from '@/features/site-shell/site-shell.public';
 import { BrandDocumentViewer, type BrandViewerDocument } from './BrandDocumentViewer';
+import { readableHeroColor } from './brandHeroColor';
 import { mergeBrandProducts, selectBrandProducts } from './brandProductSelection';
 import { buildProductListingHref } from '@/features/product-categories/product-category-routing';
 import { resolvePublicFileSource } from '@/lib/public-file';
@@ -151,17 +152,6 @@ function shouldHideDefaultSupportCopy(
 function resolvePublicImageSource(file: PublicFileSummary | null | undefined) {
   if (!file?.mime_type?.startsWith('image/')) return null;
   return resolvePublicFileSource(file);
-}
-
-function safeHeroColor(value: string | null | undefined, fallback: string) {
-  const color = parseHex(value);
-  if (!color) return fallback;
-  const channels = [color.r, color.g, color.b].map((channel) => {
-    const normalized = channel / 255;
-    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-  });
-  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
-  return 1.05 / (luminance + 0.05) >= 4.5 ? toHex(color) : fallback;
 }
 
 function splitBrandTitle(title: string): { main: string; tagline: string | null } {
@@ -628,9 +618,9 @@ function BrandHero({ brandDetail, brandProducts = [], tone, archetype }: BrandDe
   const { brand, brand_page: page, hero_banner: heroBanner } = brandDetail;
   const heroImageSource = resolvePublicImageSource(heroBanner?.image_file);
   const mobileHeroImageSource = resolvePublicImageSource(heroBanner?.image_mobile_file) ?? heroImageSource;
-  const eyebrowColor = safeHeroColor(page.hero_eyebrow_color, '#004ab4');
-  const titleColor = safeHeroColor(page.hero_title_color, '#0b1c30');
-  const excerptColor = safeHeroColor(page.hero_excerpt_color, '#334155');
+  const eyebrowColor = readableHeroColor(page.hero_eyebrow_color, '#004ab4');
+  const titleColor = readableHeroColor(page.hero_title_color, '#0b1c30');
+  const excerptColor = readableHeroColor(page.hero_excerpt_color, '#334155');
   const hasProducts = brandDetail.derived_categories.length > 0 || brandDetail.pinned_products.length > 0 || brandProducts.length > 0;
   const showPrimaryAction = hasProducts || !hasText(page.cta_button_label);
   const primaryHref = hasProducts ? buildProductListingHref({ brands: brand.slug }) : '/lien-he';
@@ -705,7 +695,7 @@ function BrandHero({ brandDetail, brandProducts = [], tone, archetype }: BrandDe
                 return tagline ? (
                   <>
                     <span className="block">{main}</span>
-                    <span className="mt-2 block font-semibold opacity-85" style={{ fontSize: '0.52em', lineHeight: 1.2 }}>{tagline}</span>
+                    <span className="mt-2 block font-semibold" style={{ fontSize: '0.52em', lineHeight: 1.2 }}>{tagline}</span>
                   </>
                 ) : main;
               })()}

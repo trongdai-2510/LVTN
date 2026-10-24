@@ -6,7 +6,7 @@ import { getPublicPageContentBySlug, getPublicPageContentBySlugOrNull } from '@/
 import { getPublicNewsCategories, getPublicNewsList } from '@/lib/api/public-news';
 import { getPublicSiteShell } from '@/lib/api/public-site-shell';
 import { emptyPublicBannersForPlacement, getPublicBannersForPlacement } from '@/lib/public-banner-placement';
-import type { PublicNewsCategoryListResponse, PublicNewsListResponse } from '@/types/contracts/public-news';
+import type { PublicNewsCategoryListResponse } from '@/types/contracts/public-news';
 import { resolvePublicFileSource } from '@/lib/public-file';
 import { buildSeoMetadata } from '@/lib/seo/metadata';
 
@@ -34,15 +34,6 @@ type NewsRoutePageProps = {
   }>;
 };
 
-const EMPTY_NEWS_RESPONSE: PublicNewsListResponse = {
-  items: [],
-  total: 0,
-  page: 1,
-  limit: 9,
-  total_pages: 0,
-  category_slug: null
-};
-
 const EMPTY_CATEGORIES: PublicNewsCategoryListResponse = { items: [] };
 
 export default async function NewsRoutePage({ searchParams }: NewsRoutePageProps) {
@@ -55,7 +46,7 @@ export default async function NewsRoutePage({ searchParams }: NewsRoutePageProps
   const q = params.q?.trim() || undefined;
 
   const [data, categoriesData, heroBannersResponse, shell] = await Promise.all([
-    getPublicNewsList({ page, limit: 9, category, q }).catch(() => ({ ...EMPTY_NEWS_RESPONSE, page })),
+    getPublicNewsList({ page, limit: 9, category, q }),
     getPublicNewsCategories().catch(() => EMPTY_CATEGORIES),
     getPublicBannersForPlacement('NEWS_HERO').catch(() => emptyPublicBannersForPlacement('NEWS_HERO')),
     getPublicSiteShell().catch(() => ({ company_info: null }))

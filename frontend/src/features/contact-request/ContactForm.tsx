@@ -56,6 +56,7 @@ function buildMessageForSubmit(message: string, serviceContext: ContactServiceCo
 
 export function ContactForm({ serviceContext = null }: ContactFormProps) {
   const formRef = useRef<HTMLFormElement>(null);
+  const submitLockRef = useRef(false);
   const [values, setValues] = useState<ContactFormValues>(initialValues);
   const [fieldErrors, setFieldErrors] = useState<ContactFormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -107,6 +108,7 @@ export function ContactForm({ serviceContext = null }: ContactFormProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitLockRef.current) return;
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -122,6 +124,7 @@ export function ContactForm({ serviceContext = null }: ContactFormProps) {
       return;
     }
 
+    submitLockRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -142,6 +145,7 @@ export function ContactForm({ serviceContext = null }: ContactFormProps) {
         error instanceof Error ? error.message : 'Không thể gửi yêu cầu liên hệ lúc này.'
       );
     } finally {
+      submitLockRef.current = false;
       setIsSubmitting(false);
     }
   }
@@ -158,9 +162,7 @@ export function ContactForm({ serviceContext = null }: ContactFormProps) {
       onSubmit={handleSubmit}
       ref={formRef}
     >
-      <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Biểu mẫu trực tuyến</p>
-      <h2 className="mt-3 font-display text-3xl font-semibold leading-tight text-secondary sm:text-4xl">Gửi yêu cầu</h2>
-      <p className="mt-4 max-w-[60ch] text-base leading-relaxed text-body">Để lại thông tin và nội dung cần trao đổi, Song Thanh sẽ tiếp nhận yêu cầu của bạn.</p>
+      <h2 className="font-display text-3xl font-semibold leading-tight text-secondary sm:text-4xl">Gửi yêu cầu</h2>
 
       <div className="mt-8 space-y-6">
         {serviceContext ? (

@@ -99,10 +99,8 @@ export function ContactInfo({ companyInfo }: ContactInfoProps) {
 
   return (
     <aside className="scroll-mt-28 lg:pt-1" id="thong-tin-lien-he">
-      <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Liên hệ trực tiếp</p>
-      <h2 className="mt-3 font-display text-3xl font-semibold leading-tight text-secondary">Thông tin liên hệ</h2>
-      <p className="mt-4 max-w-[46ch] text-base leading-relaxed text-body">Chọn kênh phù hợp với nhu cầu của bạn.</p>
-      <div className="mt-8">
+      <h2 className="font-display text-3xl font-semibold leading-tight text-secondary">Thông tin liên hệ</h2>
+      <div className="mt-6">
         {items.map(({ label, values, icon }) => (
           <div className="flex gap-4 border-t border-borderBlue py-5" key={label}>
             <span aria-hidden="true" className="mt-0.5 shrink-0 text-primary">
@@ -137,7 +135,6 @@ export function ContactInfo({ companyInfo }: ContactInfoProps) {
 
 export function ContactMapEmbed({ companyInfo }: ContactInfoProps) {
   const mapSrc = getSafeMapSrc(companyInfo?.map_embed_code);
-  const address = getPublicAddress(companyInfo);
 
   if (mapSrc) {
     return (
@@ -156,7 +153,6 @@ export function ContactMapEmbed({ companyInfo }: ContactInfoProps) {
       <div>
         <MapPinIcon className="h-7 w-7 text-primary" />
         <p className="mt-5 font-display text-xl font-semibold text-secondary">Bản đồ văn phòng đang được cập nhật</p>
-        <p className="mt-2 text-sm leading-relaxed text-body">{address ? 'Bạn có thể dùng địa chỉ và liên kết Google Maps ở bên cạnh để tìm đường.' : 'Vui lòng dùng thông tin liên hệ ở trên để trao đổi với Song Thanh.'}</p>
       </div>
     </div>
   );

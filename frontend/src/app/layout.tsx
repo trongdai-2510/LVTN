@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter, Manrope } from 'next/font/google';
+import { Be_Vietnam_Pro } from 'next/font/google';
 
 import '@/styles/globals.css';
 import '@/styles/partners.css';
@@ -15,24 +15,18 @@ import {
   getPublicSocialLinks
 } from '@/features/site-shell/site-shell.public';
 import { serializeJsonLd } from '@/lib/seo/json-ld';
+import type { PublicSiteShellResponse } from '@/types/contracts/public-site-shell';
 
 // Company settings drive the shared header/footer and must reflect admin saves
 // on the next page load instead of being frozen in a previously rendered shell.
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const inter = Inter({
+const beVietnamPro = Be_Vietnam_Pro({
   subsets: ['latin', 'vietnamese'],
   display: 'swap',
-  variable: '--font-inter',
+  variable: '--font-be-vietnam-pro',
   weight: ['400', '500', '600', '700']
-});
-
-const manrope = Manrope({
-  subsets: ['latin', 'vietnamese'],
-  display: 'swap',
-  variable: '--font-manrope',
-  weight: ['600', '700', '800']
 });
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -86,14 +80,21 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const shell = await getPublicSiteShell().catch(() => ({
-    company_info: null,
-    social_links: [],
-    header_menu: null,
-    footer_quick_menu: null,
-    footer_support_menu: null,
-    footer_legal_menu: null
-  }));
+  let shell: PublicSiteShellResponse;
+  let shellUnavailable = false;
+  try {
+    shell = await getPublicSiteShell();
+  } catch {
+    shellUnavailable = true;
+    shell = {
+      company_info: null,
+      social_links: [],
+      header_menu: null,
+      footer_quick_menu: null,
+      footer_support_menu: null,
+      footer_legal_menu: null
+    };
+  }
 
   const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://songthanhelectric.com.vn').replace(/\/$/, '');
   const sameAs = Array.from(new Set(getPublicSocialLinks(shell.social_links).map((link) => link.url)));
@@ -116,7 +117,7 @@ export default async function RootLayout({
   };
 
   return (
-    <html className={`${inter.variable} ${manrope.variable}`} lang="vi">
+    <html className={beVietnamPro.variable} lang="vi">
       <head>
         {publicApiOrigin ? (
           <>
@@ -130,7 +131,7 @@ export default async function RootLayout({
         />
       </head>
       <body>
-        <PublicShell shell={shell}>{children}</PublicShell>
+        <PublicShell shell={shell} shellUnavailable={shellUnavailable}>{children}</PublicShell>
       </body>
     </html>
   );

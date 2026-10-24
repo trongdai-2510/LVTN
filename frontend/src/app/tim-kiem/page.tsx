@@ -72,7 +72,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           q: query,
           page: requestedPage,
           page_size: SEARCH_PAGE_SIZE
-        }).catch(() => emptySearchResponse(requestedPage))
+        })
       : Promise.resolve(emptySearchResponse(1)),
     getAllPublicBrands().catch(() => ({ items: [] }))
   ]);
@@ -97,10 +97,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           </nav>
 
           <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:items-end">
-            <div className="space-y-3 border-l-4 border-primary pl-5">
-              <p className="type-caption font-bold uppercase tracking-[0.08em] text-primary">
-                Tra cứu danh mục
-              </p>
+            <div className="space-y-3">
               <h1
                 className="type-page-title-compact text-secondary"
                 id="public-search-title"

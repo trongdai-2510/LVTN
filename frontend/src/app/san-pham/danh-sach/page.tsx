@@ -303,7 +303,7 @@ export default async function ProductListingPage({ searchParams }: ProductListin
           sort: currentSort || undefined,
           page: currentPage,
           page_size: currentPageSize
-        }).catch(() => null)
+        })
       : null;
   const [categoriesResponse, brandsResponse] = await Promise.all([
     getPublicProductCategories().catch(() => ({ items: [] })),
@@ -353,26 +353,6 @@ export default async function ProductListingPage({ searchParams }: ProductListin
       ? initialSelectedCategoryIds.join(',')
       : lockedParentCategoryId
     : initialSelectedCategoryIds.join(',');
-  const emptyResponse: PublicProductGroupsResponse = {
-    items: [],
-    pagination: { page: currentPage, page_size: currentPageSize, total: 0, page_count: 1 },
-    filters: {
-      q: currentQ || null,
-      category_id: effectiveCategoryFilterId || null,
-      brand_id: null,
-      brands: currentBrandSlug || null,
-      status: currentStatus || null,
-      sort: currentSort || null,
-      spec_filters: currentSpecFilterTokens
-    },
-    facets: {
-      brands: [],
-      status: [],
-      child_categories: [],
-      specs: []
-    }
-  };
-
   const productGroupsResponsePromise = unscopedProductsPromise ?? getPublicProductGroups({
     q: currentQ || undefined,
     category_id: effectiveCategoryFilterId || undefined,
@@ -382,7 +362,7 @@ export default async function ProductListingPage({ searchParams }: ProductListin
     sort: currentSort || undefined,
     page: currentPage,
     page_size: currentPageSize
-  }).catch(() => null);
+  });
   const childCategoryFacetResponsePromise = lockedParentCategoryId && initialSelectedCategoryIds.length > 0
     ? getPublicProductGroups({
         q: currentQ || undefined,
@@ -399,7 +379,7 @@ export default async function ProductListingPage({ searchParams }: ProductListin
     childCategoryFacetResponsePromise,
     listingBannersPromise
   ]);
-  const productGroupsResponse = loadedProductGroupsResponse ?? emptyResponse;
+  const productGroupsResponse = loadedProductGroupsResponse;
   if (currentPage > productGroupsResponse.pagination.page_count) {
     redirect(buildProductListingHref({
       q: currentQ,

@@ -67,17 +67,16 @@ function BulletListBlock({
 
   if (appearance === 'services') {
     return (
-      <section className="border-t border-borderBlue bg-subtle/55 pb-8 pt-14 sm:pt-16 lg:pt-20">
-        <Container className="grid gap-9 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-16" size={containerSize}>
+      <section className="border-t border-borderBlue bg-subtle/55 py-10 lg:py-12">
+        <Container className="grid gap-6 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:gap-12" size={containerSize}>
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Trước khi liên hệ</p>
-            {hasTitle ? <h2 className="mt-4 max-w-[18ch] font-display text-[clamp(2rem,3.2vw,3rem)] font-semibold leading-[1.12] tracking-[-0.035em] text-secondary">{block.title}</h2> : null}
+            {hasTitle ? <h2 className="max-w-[18ch] font-display text-[clamp(1.75rem,2.8vw,2.5rem)] font-semibold leading-[1.12] tracking-[-0.035em] text-secondary">{block.title}</h2> : null}
           </div>
           <ol className="border-t border-borderBlue">
             {block.items.map((item, index) => {
               const safeLinkTarget = normalizePublicNavigationTarget(item.link?.target);
               return (
-                <li className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-5 border-b border-borderBlue py-5" key={index}>
+                <li className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-4 border-b border-borderBlue py-3" key={index}>
                   <span className="font-display text-lg font-semibold tabular-nums text-primary">{String(index + 1).padStart(2, '0')}</span>
                   <div>
                     <p className="text-base leading-relaxed text-secondary">{item.text}</p>
@@ -228,14 +227,14 @@ function ImageCardBlock({
       <div className="relative aspect-[16/9] w-full overflow-hidden bg-subtle">
         <Image
           src={src}
-          alt={block.image_file.original_filename || block.title || 'Ảnh'}
+          alt={block.title?.trim() || block.image_file.original_filename || 'Ảnh minh họa'}
           fill
           sizes="(max-width: 768px) 100vw, 50vw"
           className="object-cover"
         />
         <div aria-hidden="true" className={`absolute inset-0 ${toneClasses.dot}`} />
       </div>
-      {(block.title || block.description) && (
+      {(block.title || block.description || safeLinkTarget) && (
         <div className="p-6 lg:p-8">
           {block.title ? (
             <h3 className={`type-eyebrow font-bold uppercase tracking-[0.08em] ${toneClasses.accent}`}>
@@ -244,6 +243,11 @@ function ImageCardBlock({
           ) : null}
           {block.description ? (
             <p className="mt-3 text-[15px] leading-[1.6] text-body">{block.description}</p>
+          ) : null}
+          {safeLinkTarget ? (
+            <span className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary">
+              {block.link?.label?.trim() || 'Xem chi tiết'} <span aria-hidden="true">→</span>
+            </span>
           ) : null}
         </div>
       )}
@@ -280,23 +284,22 @@ function CardGridBlock({
 
   if (appearance === 'services') {
     return (
-      <section className="bg-white py-14 sm:py-16 lg:py-20">
+      <section className="bg-white py-10 lg:py-12">
         <Container size={containerSize}>
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Cách phối hợp</p>
-          {block.title ? <h2 className="mt-4 font-display text-[clamp(2rem,3.2vw,3rem)] font-semibold leading-[1.12] tracking-[-0.035em] text-secondary">{block.title}</h2> : null}
-          <ol className={`mt-9 grid border-t border-borderBlue ${gridCols}`}>
+          {block.title ? <h2 className="font-display text-[clamp(1.75rem,2.8vw,2.5rem)] font-semibold leading-[1.12] tracking-[-0.035em] text-secondary">{block.title}</h2> : null}
+          <ol className={`mt-6 grid border-t border-borderBlue ${gridCols}`}>
             {block.items.map((item, index) => {
               const safeLinkTarget = normalizePublicNavigationTarget(item.link?.target);
               const content = (
                 <>
                   <span className="font-display text-2xl font-semibold tabular-nums text-primary">{String(index + 1).padStart(2, '0')}</span>
-                  <h3 className="mt-5 font-display text-lg font-semibold leading-snug text-secondary">{item.title}</h3>
+                  <h3 className="mt-3 font-display text-lg font-semibold leading-snug text-secondary">{item.title}</h3>
                   {item.description ? <p className="mt-3 text-[15px] leading-relaxed text-body">{item.description}</p> : null}
                   {safeLinkTarget ? <span className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-primary">{item.link?.label || 'Xem chi tiết'} <span aria-hidden="true" className="ml-2">→</span></span> : null}
                 </>
               );
               return (
-                <li className="border-b border-borderBlue px-0 py-6 sm:px-5 lg:border-l lg:border-b-0 lg:first:border-l-0 lg:first:pl-0" key={index}>
+                <li className="border-b border-borderBlue px-0 py-4 sm:px-5 lg:border-l lg:border-b-0 lg:first:border-l-0 lg:first:pl-0" key={index}>
                   {safeLinkTarget ? <Link className={`group block h-full ${FOCUS_RING}`} href={safeLinkTarget}>{content}</Link> : content}
                 </li>
               );

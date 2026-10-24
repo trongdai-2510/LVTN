@@ -5,6 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState
 } from 'react';
@@ -18,7 +19,8 @@ import {
   usePublicProductSearchAutocomplete
 } from '@/features/product-search/public-product-search';
 import { MAX_PUBLIC_PRODUCT_SEARCH_QUERY_LENGTH } from '@/features/product-search/publicProductSearchConstants';
-import { filterVisibleMenuItems, resolvePublicMenuHref } from '@/features/site-shell/site-shell.mapper';
+import { getHeaderItems } from '@/features/site-shell/headerItems';
+import { filterVisibleMenuItems, resolvePublicMenuHref, resolvePublicMenuLinkTarget } from '@/features/site-shell/site-shell.mapper';
 import {
   getPublicCompanyLegalName,
   getPublicCompanyName,
@@ -110,15 +112,6 @@ const fallbackHeaderItems: PublicMenuItemNode[] = [
   }
 ];
 
-const canonicalHeaderOrder = fallbackHeaderItems.map((item) => item.link_target);
-
-const mobileCatalogueLinks = [
-  { href: '/san-pham', label: 'Danh mục sản phẩm', description: 'Đi theo nhóm thiết bị' },
-  { href: '/san-pham/danh-sach', label: 'Tra cứu sản phẩm', description: 'Tìm theo tên, mã, thương hiệu' },
-  { href: '/doi-tac-thuong-hieu', label: 'Thương hiệu', description: 'Xem hãng và sản phẩm' },
-  { href: '/ho-so-nang-luc', label: 'Hồ sơ năng lực', description: 'Tải tài liệu công ty' }
-];
-
 function normalizePathname(value: string) {
   const cleanPath = value.split(/[?#]/)[0]?.replace(/\/+$/, '');
   return cleanPath || '/';
@@ -133,17 +126,6 @@ function isActiveMenuHref(href: string, pathname: string) {
   }
 
   return currentPath === targetPath || currentPath.startsWith(`${targetPath}/`);
-}
-
-function getCanonicalHeaderItems(items: PublicMenuItemNode[], hasManagedMenu: boolean) {
-  if (!hasManagedMenu) return fallbackHeaderItems;
-
-  return canonicalHeaderOrder.flatMap((href) => {
-    const matchedItem = items.find(
-      (item) => normalizePathname(resolvePublicMenuHref(item)) === href
-    );
-    return matchedItem ? [matchedItem] : [];
-  });
 }
 
 function buildHeaderSearchHref(query: string) {
@@ -174,7 +156,7 @@ function HeaderSearchForm() {
 
   return (
     <form
-      className="relative h-11 w-full max-w-[240px] shrink-0"
+      className="relative h-11 w-full max-w-[208px] shrink-0"
       onSubmit={handleFormSubmit}
       role="search"
     >
@@ -230,7 +212,7 @@ function HeaderSearchForm() {
 
 function HeaderSearchFallback() {
   return (
-    <div className="type-input flex h-11 w-full max-w-[240px] items-center rounded-md border border-borderBlue bg-white px-3 font-normal text-muted/70">
+    <div className="type-input flex h-11 w-full max-w-[208px] items-center rounded-md border border-borderBlue bg-white px-3 font-normal text-muted/70">
       Tìm kiếm...
     </div>
   );
@@ -260,10 +242,99 @@ function SearchIcon() {
   );
 }
 
+function isActiveMenuItem(item: PublicMenuItemNode, pathname: string): boolean {
+  const href = resolvePublicMenuHref(item);
+  return (item.link_type === 'internal' && href !== '#' && isActiveMenuHref(href, pathname)) ||
+    item.children.some((child) => isActiveMenuItem(child, pathname));
+}
+
+function HeaderSubmenuLinks({
+  items,
+  onNavigate
+}: {
+  items: PublicMenuItemNode[];
+  onNavigate?: () => void;
+}) {
+  return (
+    <div className="grid gap-1">
+      {filterVisibleMenuItems(items).slice().sort((a, b) => a.sort_order - b.sort_order).map((item) => {
+        const href = resolvePublicMenuHref(item);
+        return (
+          <div className="min-w-0" key={item.id}>
+            {item.link_type === 'group' || href === '#' ? (
+              <p className="px-3 py-2 text-sm font-semibold text-secondary">{item.title}</p>
+            ) : (
+              <Link
+                className="flex min-h-11 items-center rounded-sm px-3 py-2 text-sm font-medium text-text hover:bg-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                href={href}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  onNavigate?.();
+                }}
+                {...resolvePublicMenuLinkTarget(item)}
+              >
+                {item.title}
+              </Link>
+            )}
+            {item.children.length > 0 ? (
+              <div className="ml-3 border-l border-border pl-2">
+                <HeaderSubmenuLinks items={item.children} onNavigate={onNavigate} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HeaderNavEntry({ item, pathname }: { item: PublicMenuItemNode; pathname: string }) {
+  const isActive = isActiveMenuItem(item, pathname);
+  const navClassName = [
+    'type-nav relative inline-flex h-11 shrink-0 items-center justify-center gap-1 whitespace-nowrap text-center transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary after:absolute after:bottom-1 after:left-1/2 after:h-0.5 after:w-5 after:-translate-x-1/2 after:rounded-full',
+    isActive ? 'text-primary after:bg-primary' : 'text-text after:bg-transparent'
+  ].join(' ');
+
+  if (item.children.length === 0 && item.link_type !== 'group') {
+    return (
+      <Link
+        aria-current={isActive ? 'page' : undefined}
+        className={navClassName}
+        href={resolvePublicMenuHref(item)}
+        {...resolvePublicMenuLinkTarget(item)}
+      >
+        {item.title}
+      </Link>
+    );
+  }
+
+  return (
+    <details
+      className="group relative"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.currentTarget.open = false;
+          event.currentTarget.querySelector('summary')?.focus();
+        }
+      }}
+    >
+      <summary className={`${navClassName} cursor-pointer list-none`}>
+        {item.title}<span aria-hidden="true" className="text-xs">⌄</span>
+      </summary>
+      <div className="absolute left-0 top-full z-50 max-h-[70vh] min-w-56 max-w-80 overflow-y-auto rounded-md border border-border bg-white p-2 shadow-action">
+        <HeaderSubmenuLinks items={[item]} />
+      </div>
+    </details>
+  );
+}
+
 export function SiteHeader({ shell }: SiteHeaderProps) {
   const pathname = usePathname();
-  const headerItems = filterVisibleMenuItems(shell.header_menu?.items ?? []);
-  const visibleHeaderItems = getCanonicalHeaderItems(headerItems, shell.header_menu !== null);
+  const visibleHeaderItems = getHeaderItems(shell.header_menu, fallbackHeaderItems);
+  const [desktopPrimaryCount, setDesktopPrimaryCount] = useState(8);
+  const desktopPrimaryItems = visibleHeaderItems.slice(0, desktopPrimaryCount);
+  const desktopOverflowItems = visibleHeaderItems.slice(desktopPrimaryCount);
+  const desktopOverflowActive = desktopOverflowItems.some((item) => isActiveMenuItem(item, pathname));
   const companyName = getPublicCompanyName(shell.company_info);
   const companyLegalName = getPublicCompanyLegalName(shell.company_info);
   const logoSource = getPublicLogoSource(shell.company_info);
@@ -271,6 +342,42 @@ export function SiteHeader({ shell }: SiteHeaderProps) {
   const closeMobileMenu = useCallback(() => setIsMobileMenuOpen(false), []);
   const drawerRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const desktopNavRef = useRef<HTMLElement>(null);
+  const previousHeaderMenuRef = useRef(shell.header_menu);
+
+  useEffect(() => {
+    if (previousHeaderMenuRef.current !== shell.header_menu) {
+      previousHeaderMenuRef.current = shell.header_menu;
+      setDesktopPrimaryCount(8);
+    }
+  }, [shell.header_menu]);
+
+  useEffect(() => {
+    const nav = desktopNavRef.current;
+    if (!nav) return;
+    let previousWidth: number | null = null;
+    const observer = new ResizeObserver(([entry]) => {
+      const nextWidth = entry.contentRect.width;
+      if (previousWidth !== null && previousWidth !== nextWidth) {
+        setDesktopPrimaryCount(8);
+      }
+      previousWidth = nextWidth;
+    });
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const nav = desktopNavRef.current;
+    if (!nav || nav.getClientRects().length === 0 || desktopPrimaryCount === 0) return;
+    const items = Array.from(nav.children);
+    const navBox = nav.getBoundingClientRect();
+    const firstBox = items[0]?.getBoundingClientRect();
+    const lastBox = items.at(-1)?.getBoundingClientRect();
+    if (firstBox && lastBox && (firstBox.left < navBox.left || lastBox.right > navBox.right)) {
+      setDesktopPrimaryCount((count) => count - 1);
+    }
+  }, [desktopPrimaryCount, shell.header_menu, pathname]);
 
   useEffect(() => {
     closeMobileMenu();
@@ -337,7 +444,7 @@ export function SiteHeader({ shell }: SiteHeaderProps) {
     <>
       <header className="site-header-surface sticky top-0 z-40">
         <Container
-          className="flex min-h-[var(--header-height)] items-center min-[1360px]:grid min-[1360px]:grid-cols-[228px_minmax(0,1fr)_240px] min-[1360px]:gap-x-10"
+          className="flex min-h-[var(--header-height)] items-center justify-between gap-5 min-[1360px]:gap-6"
           size="narrow"
         >
           <button
@@ -345,7 +452,7 @@ export function SiteHeader({ shell }: SiteHeaderProps) {
             aria-controls="public-mobile-navigation"
             aria-expanded={isMobileMenuOpen}
             aria-label={isMobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
-            className="-ml-2 mr-2 flex h-11 w-11 items-center justify-center rounded-md text-text transition-colors hover:bg-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 min-[1360px]:hidden"
+            className="order-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-text transition-colors hover:bg-subtle hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 min-[1360px]:hidden"
             onClick={() => setIsMobileMenuOpen((prev) => !prev)}
             type="button"
           >
@@ -354,36 +461,38 @@ export function SiteHeader({ shell }: SiteHeaderProps) {
 
           <SiteBrandLogo
             ariaLabel={`${companyLegalName} - Trang chủ`}
-            className="flex h-16 shrink-0 items-center min-[1360px]:w-full min-[1360px]:max-w-[228px]"
+            className="order-1 flex h-12 shrink-0 items-center min-[1360px]:h-[54px] min-[1360px]:w-[190px]"
             companyName={companyName}
             imageClassName="block h-full w-auto max-w-full object-contain object-left"
             logoSource={logoSource}
           />
 
-          <nav className="hidden min-w-0 items-center justify-center gap-x-3 justify-self-center min-[1360px]:flex">
-            {visibleHeaderItems.map((item) => {
-              const href = resolvePublicMenuHref(item);
-              const isActive = isActiveMenuHref(href, pathname);
-
-              return (
-                <Link
-                  aria-current={isActive ? 'page' : undefined}
-                  className={[
-                    'type-nav relative inline-flex h-12 shrink-0 items-center justify-center whitespace-nowrap px-1 text-center transition-colors hover:text-primary after:absolute after:bottom-2 after:left-1/2 after:h-0.5 after:w-6 after:-translate-x-1/2 after:rounded-full after:transition-colors',
-                    isActive
-                      ? 'text-primary after:bg-primary'
-                      : 'text-text after:bg-transparent'
-                  ].join(' ')}
-                  href={href}
-                  key={item.id}
-                >
-                  {item.title}
-                </Link>
-              );
-            })}
+          <nav aria-label="Điều hướng chính" className="order-2 hidden min-w-0 flex-1 items-center justify-center gap-x-4 min-[1360px]:flex" ref={desktopNavRef}>
+            {desktopPrimaryItems.map((item) => <HeaderNavEntry item={item} key={item.id} pathname={pathname} />)}
+            {desktopOverflowItems.length > 0 ? (
+              <details
+                className="relative"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.currentTarget.open = false;
+                    event.currentTarget.querySelector('summary')?.focus();
+                  }
+                }}
+              >
+                <summary className={[
+                  'type-nav relative inline-flex h-11 cursor-pointer list-none items-center gap-1 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary after:absolute after:bottom-1 after:left-1/2 after:h-0.5 after:w-5 after:-translate-x-1/2 after:rounded-full',
+                  desktopOverflowActive ? 'text-primary after:bg-primary' : 'text-text after:bg-transparent'
+                ].join(' ')}>
+                  Thêm <span aria-hidden="true" className="text-xs">⌄</span>
+                </summary>
+                <div className="absolute right-0 top-full z-50 max-h-[70vh] min-w-56 max-w-80 overflow-y-auto rounded-md border border-border bg-white p-2 shadow-action">
+                  <HeaderSubmenuLinks items={desktopOverflowItems} />
+                </div>
+              </details>
+            ) : null}
           </nav>
 
-          <div className="hidden h-12 shrink-0 items-center justify-end justify-self-end min-[1360px]:flex">
+          <div className="order-3 hidden w-[208px] shrink-0 items-center justify-end min-[1360px]:flex">
             <Suspense fallback={<HeaderSearchFallback />}>
               <HeaderSearchForm />
             </Suspense>
@@ -439,13 +548,29 @@ export function SiteHeader({ shell }: SiteHeaderProps) {
             <nav className="flex flex-col gap-1.5">
               {visibleHeaderItems.map((item) => {
                 const href = resolvePublicMenuHref(item);
-                const isActive = isActiveMenuHref(href, pathname);
+                const isActive = isActiveMenuItem(item, pathname);
+
+                if (item.children.length > 0 || item.link_type === 'group') {
+                  return (
+                    <details className="rounded-md" key={item.id}>
+                      <summary className={[
+                        'flex min-h-12 cursor-pointer list-none items-center justify-between rounded-md px-3 text-[15px] font-medium leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                        isActive ? 'bg-primary/10 text-primary' : 'text-text hover:bg-subtle'
+                      ].join(' ')}>
+                        {item.title}<span aria-hidden="true">⌄</span>
+                      </summary>
+                      <div className="pb-2 pl-2">
+                        <HeaderSubmenuLinks items={[item]} onNavigate={closeMobileMenu} />
+                      </div>
+                    </details>
+                  );
+                }
 
                 return (
                   <Link
                     aria-current={isActive ? 'page' : undefined}
                     className={[
-                      'flex min-h-12 items-center rounded-md px-3 text-[15px] font-semibold leading-5 transition-colors',
+                      'flex min-h-12 items-center rounded-md px-3 text-[15px] font-medium leading-5 transition-colors',
                       isActive
                         ? 'bg-primary/10 text-primary'
                         : 'text-text hover:bg-subtle hover:text-primary'
@@ -453,6 +578,7 @@ export function SiteHeader({ shell }: SiteHeaderProps) {
                     href={href}
                     key={item.id}
                     onClick={closeMobileMenu}
+                    {...resolvePublicMenuLinkTarget(item)}
                   >
                     {item.title}
                   </Link>
@@ -460,28 +586,6 @@ export function SiteHeader({ shell }: SiteHeaderProps) {
               })}
             </nav>
 
-            <div className="mt-6 border-t border-border pt-5">
-              <p className="px-3 text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-                Tra cứu nhanh
-              </p>
-              <div className="mt-2 space-y-1.5">
-                {mobileCatalogueLinks.map((item) => (
-                  <Link
-                    className="block min-h-14 rounded-md px-3 py-2.5 transition-colors hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
-                    href={item.href}
-                    key={item.href}
-                    onClick={closeMobileMenu}
-                  >
-                    <span className="block text-[14px] font-bold leading-5 text-secondary">
-                      {item.label}
-                    </span>
-                    <span className="mt-0.5 block text-[12px] leading-4 text-body/70">
-                      {item.description}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </div>
           </div>
 
           <div className="shrink-0 border-t border-border px-4 py-4">
@@ -501,7 +605,7 @@ function getFocusableElements(container: HTMLElement) {
     container.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
     )
-  ).filter((element) => element.tabIndex !== -1 && !element.hasAttribute('disabled'));
+  ).filter((element) => element.tabIndex !== -1 && !element.hasAttribute('disabled') && element.getClientRects().length > 0);
 }
 
 function MobileSearchForm({ onSearch }: { onSearch: () => void }) {

@@ -141,6 +141,10 @@ export function ProductListingClient({
   const lastInitialListingSignatureRef = useRef(initialListingSignature);
   const [listingState, setListingState] = useState<ListingUrlState>(() => initialListingState);
   const [productGroupsResponse, setProductGroupsResponse] = useState(initialProductGroupsResponse);
+  const [failedRequest, setFailedRequest] = useState<{
+    href: string;
+    options: { historyMode?: 'push' | 'replace'; updateHistory: boolean };
+  } | null>(null);
   const [availableChildCategoryCounts, setAvailableChildCategoryCounts] = useState(
     initialAvailableChildCategoryCounts
   );
@@ -366,6 +370,7 @@ export function ProductListingClient({
     setShowPendingFeedback(false);
     setListingState(initialListingState);
     setProductGroupsResponse(initialProductGroupsResponse);
+    setFailedRequest(null);
     setAvailableChildCategoryCounts(initialAvailableChildCategoryCounts);
   }, [
     initialAvailableChildCategoryCounts,
@@ -493,6 +498,7 @@ export function ProductListingClient({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     setPendingHref(canonicalHref);
+    setFailedRequest(null);
 
     try {
       const productQuery = {
@@ -580,6 +586,7 @@ export function ProductListingClient({
     } catch (error) {
       if (!abortController.signal.aborted) {
         console.error('Failed to update product listing filters.', error);
+        setFailedRequest({ href: canonicalHref, options });
       }
     } finally {
       if (abortControllerRef.current === abortController) {
@@ -779,6 +786,18 @@ export function ProductListingClient({
 
               <div className="relative min-h-[400px]" aria-busy={isUpdating}>
                 {showPendingFeedback ? <div className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden rounded-full bg-[#dceafa]" role="status" aria-label="Đang cập nhật sản phẩm"><span className="block h-full w-1/3 animate-pulse bg-primary motion-reduce:animate-none" /></div> : null}
+                {failedRequest ? (
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-sm border border-error/30 bg-white px-4 py-3 text-sm text-secondary" role="alert">
+                    <span>Không cập nhật được kết quả. Danh sách bên dưới là lần tải trước.</span>
+                    <button
+                      className="min-h-11 rounded-sm px-3 font-semibold text-primary hover:bg-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      onClick={() => void loadListingFromHref(failedRequest.href, failedRequest.options)}
+                      type="button"
+                    >
+                      Thử lại
+                    </button>
+                  </div>
+                ) : null}
                 <div>
                   <ProductGroupList
                     columns="catalog"

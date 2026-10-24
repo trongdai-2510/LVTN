@@ -104,15 +104,15 @@
   .type-hero-title {
     font-family: var(--font-display);
     font-size: var(--type-hero-title-size);
-    font-weight: 800;
+    font-weight: 700;
     line-height: var(--type-hero-title-line);
-    letter-spacing: 0;
+    letter-spacing: -0.02em;
   }
 
   .type-display-number {
     font-family: var(--font-display);
     font-size: 92px;
-    font-weight: 800;
+    font-weight: 700;
     line-height: 1;
     letter-spacing: 0;
   }
@@ -145,7 +145,7 @@
   .type-page-title {
     font-family: var(--font-display);
     font-size: var(--type-page-title-size);
-    font-weight: 800;
+    font-weight: 700;
     line-height: var(--type-page-title-line);
     letter-spacing: -0.02em;
   }
@@ -153,7 +153,7 @@
   .type-page-title-compact {
     font-family: var(--font-display);
     font-size: var(--type-page-title-compact-size);
-    font-weight: 800;
+    font-weight: 700;
     line-height: var(--type-page-title-compact-line);
     letter-spacing: -0.02em;
   }
@@ -169,7 +169,7 @@
   .type-card-title-lg {
     font-family: var(--font-display);
     font-size: var(--type-card-title-lg-size);
-    font-weight: 700;
+    font-weight: 600;
     line-height: var(--type-card-title-lg-line);
     letter-spacing: -0.014em;
   }
@@ -177,7 +177,7 @@
   .type-card-title {
     font-family: var(--font-display);
     font-size: var(--type-card-title-size);
-    font-weight: 700;
+    font-weight: 600;
     line-height: var(--type-card-title-line);
     letter-spacing: -0.012em;
   }
@@ -185,7 +185,7 @@
   .type-product-title {
     font-family: var(--font-display);
     font-size: var(--type-product-title-size);
-    font-weight: 700;
+    font-weight: 600;
     line-height: var(--type-product-title-line);
     letter-spacing: -0.012em;
   }
@@ -258,7 +258,7 @@
   .type-nav {
     font-family: var(--font-display);
     font-size: var(--type-nav-size);
-    font-weight: 500;
+    font-weight: 400;
     line-height: var(--type-nav-line);
     letter-spacing: 0;
   }
@@ -306,41 +306,19 @@
   .type-stat {
     font-family: var(--font-display);
     font-size: 36px;
-    font-weight: 800;
+    font-weight: 700;
     line-height: 40px;
     letter-spacing: 0;
   }
 
-  @media (max-width: 1023px) {
+  @media (max-width: 1359px) {
     :root {
-      /* Header is shorter on phones/tablets (<lg). Desktop keeps 96px. */
-      --header-height: 72px;
-    }
-
-    .type-hero-title {
-      font-size: 56px;
-      line-height: 60px;
-    }
-
-    .type-page-title {
-      font-size: 42px;
-      line-height: 46px;
+      /* Keep the mobile header stable while changing viewport widths. */
+      --header-height: 68px;
     }
   }
 
   @media (max-width: 767px) {
-    .type-hero-title,
-    .type-page-title {
-      font-size: 28px;
-      line-height: 34px;
-    }
-
-    .type-page-title-compact,
-    .type-section-title {
-      font-size: 22px;
-      line-height: 28px;
-    }
-
     .type-card-title {
       font-size: 16px;
       line-height: 24px;

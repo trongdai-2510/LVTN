@@ -63,7 +63,7 @@ export function BrandPagePreviewClient() {
 
   useEffect(() => {
     function handleMessage(event: MessageEvent<unknown>) {
-      if (!isAllowedPreviewOrigin(event.origin) || !isPreviewMessage(event.data)) {
+      if (event.source !== window.parent || !isAllowedPreviewOrigin(event.origin) || !isPreviewMessage(event.data)) {
         return;
       }
 

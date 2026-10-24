@@ -21,6 +21,7 @@ import { SiteBrandLogo } from './SiteBrandLogo';
 type SiteFooterProps = {
   shell: PublicSiteShellResponse;
   variant?: 'default' | 'simple' | 'dark';
+  unavailable?: boolean;
 };
 
 type PublicFooterSocialLink = ReturnType<typeof getPublicSocialLinks>[number];
@@ -57,7 +58,17 @@ function getMenuItems(menu: PublicSiteShellResponse['footer_quick_menu']): Publi
   return filterVisibleMenuItems(menu?.items ?? []);
 }
 
-export function SiteFooter({ shell, variant = 'default' }: SiteFooterProps) {
+export function SiteFooter({ shell, variant = 'default', unavailable = false }: SiteFooterProps) {
+  if (unavailable) {
+    return (
+      <footer className="border-t border-borderSoft bg-footer py-8 text-secondary">
+        <Container size="narrow">
+          <p role="status">Thông tin liên hệ tạm thời chưa tải được. Vui lòng thử lại sau.</p>
+        </Container>
+      </footer>
+    );
+  }
+
   const companyInfo = shell.company_info;
   const isDark = variant === 'dark';
   const isSimple = variant === 'simple';
@@ -109,26 +120,6 @@ export function SiteFooter({ shell, variant = 'default' }: SiteFooterProps) {
             />
             <div className={['type-footer-body grid gap-0', isDark ? 'text-blue-100' : 'text-primary'].join(' ')}>
               <p className="font-medium">{companyLegalName}</p>
-              {hotlines.length > 0 ? (
-                hotlines.map((hotline) => (
-                  <a
-                    className="inline-flex min-h-11 w-fit items-center transition hover:underline"
-                    href={`tel:${hotline.replace(/[^+\d]/g, '')}`}
-                    key={hotline}
-                  >
-                    {hotline}
-                  </a>
-                ))
-              ) : (
-                <p>Đang cập nhật</p>
-              )}
-              {emailHref ? (
-                <a className="inline-flex min-h-11 w-fit items-center break-all transition hover:underline" href={emailHref}>
-                  {publicEmail}
-                </a>
-              ) : (
-                <p>{publicEmail}</p>
-              )}
             </div>
             {publicSocialLinks.length > 0 ? (
               <div aria-label="Kênh liên hệ" className="flex flex-wrap gap-2">
@@ -227,7 +218,11 @@ export function SiteFooter({ shell, variant = 'default' }: SiteFooterProps) {
                 >
                   Email
                 </span>
-                {publicEmail}
+                {emailHref ? (
+                  <a className="inline-flex min-h-11 items-center break-all transition hover:text-primary hover:underline" href={emailHref}>
+                    {publicEmail}
+                  </a>
+                ) : publicEmail}
               </p>
               <p>
                 <span
@@ -272,7 +267,7 @@ export function SiteFooter({ shell, variant = 'default' }: SiteFooterProps) {
             isDark ? 'text-slate-400' : 'text-body'
           ].join(' ')}
         >
-          <p>© {currentYear} {companyLegalName}. All rights reserved.</p>
+          <p>© {currentYear} {companyLegalName}. Bảo lưu mọi quyền.</p>
           {legalLinks.length > 0 ? (
             <div className="flex flex-wrap gap-4">
               {legalLinks.map((item) => (

@@ -19,22 +19,8 @@
   }
 }
 
-@keyframes brandTileEnter {
-  from {
-    transform: translateY(10px);
-  }
-
-  to {
-    transform: translateY(0);
-  }
-}
-
 .brand-rise {
   animation: brandRise 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.brand-tile-enter {
-  animation: brandTileEnter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .brand-mono {
@@ -59,8 +45,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .brand-rise,
-  .brand-tile-enter {
+  .brand-rise {
     animation: none;
   }
 }

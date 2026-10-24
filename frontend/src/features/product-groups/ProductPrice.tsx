@@ -30,12 +30,17 @@ export function ProductPrice({ summary }: { summary?: PublicProductPriceSummary 
   if (summary.display_mode === 'from_price') {
     const someVariantsNeedQuote = summary.priced_variant_count < summary.variant_count;
     return (
-      <p
-        className="mb-3 text-sm font-semibold leading-5 text-secondary"
-        data-public-price-summary={summary.display_mode}
-      >
-        {someVariantsNeedQuote ? 'Một số mã sản phẩm có giá' : 'Giá theo từng mã sản phẩm'}
-      </p>
+      <div className="mb-3" data-public-price-summary={summary.display_mode}>
+        <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-xs font-medium text-body/70">Giá từ</span>
+          <strong className="text-lg font-semibold tabular-nums tracking-tight text-secondary">
+            {formatPublicPrice(summary.display_amount)}
+          </strong>
+        </p>
+        <p className="text-xs leading-5 text-body/70">
+          {someVariantsNeedQuote ? 'Một số mã cần báo giá' : 'Xem giá từng mã sản phẩm'}
+        </p>
+      </div>
     );
   }
 

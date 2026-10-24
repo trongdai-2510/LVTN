@@ -9,16 +9,21 @@ import { getPublicProductGroups } from '@/lib/api/public-product-groups';
 import { getPublicProjects } from '@/lib/api/public-projects';
 import { getPublicServices } from '@/lib/api/public-services';
 import { getPublicSiteShell } from '@/lib/api/public-site-shell';
+import { selectHomeBannerSource } from '@/lib/homeBannerSelection';
 import {
   emptyPublicBannersForPlacement,
   getPublicBannersForPlacement
 } from '@/lib/public-banner-placement';
 import { sortProductCategories } from '@/features/product-categories/product-category-tree';
 import type {
+  FeaturedProductsSectionConfig,
   HeroSectionConfig,
   HomeSectionType,
+  ProjectsSectionConfig,
   PublicHomeLayoutResponse,
-  PublicHomeSection
+  PublicHomeSection,
+  ServicesSectionConfig,
+  TrustStripSectionConfig
 } from '@/types/contracts/public-home-page';
 import {
   HomeCompanyOverviewSection,
@@ -32,7 +37,6 @@ import {
   HomeTrustStripSection
 } from '@/features/home/HomeVisualSections';
 
-const HOME_FEATURED_PRODUCT_PAGE_SIZE = 8;
 const HOME_BRAND_PAGE_SIZE = 40;
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -63,56 +67,84 @@ function configOf<T>(section: PublicHomeSection | null): T | undefined {
 }
 
 export default async function HomePage() {
-  const layout = await getPublicHomePage().catch(() => DEFAULT_HOME_LAYOUT);
+  const layout = await getPublicHomePage();
 
   const heroSection = findSection(layout, 'hero');
   const heroConfig = configOf<HeroSectionConfig>(heroSection);
-  const heroFetch =
-    heroConfig?.mode === 'manual' && heroConfig.banner_ids.length > 0
-      ? getPublicBanners({ ids: heroConfig.banner_ids })
-      : getPublicBannersForPlacement('HOME_HERO');
+  const heroSource = selectHomeBannerSource(heroConfig);
+  let heroFetch;
+  switch (heroSource.mode) {
+    case 'ids':
+      heroFetch = getPublicBanners({ ids: heroSource.ids });
+      break;
+    case 'position':
+      heroFetch = getPublicBanners({ position: heroSource.position });
+      break;
+    case 'none':
+      heroFetch = Promise.resolve(emptyPublicBannersForPlacement('HOME_HERO'));
+      break;
+    default:
+      heroFetch = getPublicBannersForPlacement('HOME_HERO');
+  }
 
   const companyOverviewSection = findSection(layout, 'company_overview');
   const companyOverviewSlug =
     configOf<{ page_content_slug: string }>(companyOverviewSection)?.page_content_slug ||
     'gioi-thieu';
+  const featuredConfig = configOf<FeaturedProductsSectionConfig>(findSection(layout, 'featured_products'));
+  const servicesConfig = configOf<ServicesSectionConfig>(findSection(layout, 'services'));
+  const projectsConfig = configOf<ProjectsSectionConfig>(findSection(layout, 'projects'));
+  const trustStripSection = findSection(layout, 'trust_strip');
+  const autoTrustEnabled = trustStripSection?.enabled && configOf<TrustStripSectionConfig>(trustStripSection)?.mode !== 'manual';
+  const featuredIds = featuredConfig?.mode === 'manual' ? featuredConfig.product_group_ids : null;
+  const serviceIds = servicesConfig?.mode === 'manual' ? servicesConfig.service_ids : null;
+  const projectIds = projectsConfig?.mode === 'manual' ? projectsConfig.project_ids : null;
 
   const [
-    categoriesResponse,
-    productGroupsResponse,
+    categoriesResult,
+    productGroupsResult,
     servicesResponse,
     projectsResponse,
     brandsResponse,
     heroBannersResponse,
     companyAboutPage,
-    shell
+    shell,
+    manualServiceTotal,
+    manualProjectTotal
   ] = await Promise.all([
-    getPublicProductCategories().catch(() => ({ items: [] })),
-    getPublicProductGroups({ page: 1, page_size: HOME_FEATURED_PRODUCT_PAGE_SIZE, sort: 'popular' }).catch(() => ({
-      items: [],
-      pagination: { page: 1, page_size: HOME_FEATURED_PRODUCT_PAGE_SIZE, total: 0, page_count: 1 },
-      filters: {
-        q: null,
-        category_id: null,
-        brand_id: null,
-        brands: null,
-        status: null,
-        sort: null,
-        spec_filters: []
-      },
-      facets: {
-        brands: [],
-        status: [],
-        child_categories: [],
-        specs: []
-      }
-    })),
-    getPublicServices({ page: 1, page_size: 4 }).catch(() => ({
+    getPublicProductCategories()
+      .then((response) => ({ response, unavailable: false }))
+      .catch(() => ({ response: null, unavailable: true })),
+    (featuredIds?.length === 0
+      ? Promise.resolve({ response: null, unavailable: false })
+      : getPublicProductGroups({
+          ids: featuredIds?.join(','),
+          page: 1,
+          page_size: featuredIds ? featuredIds.length : (featuredConfig?.item_limit ?? 8),
+          sort: featuredConfig?.sort ?? 'popular'
+        })
+          .then((response) => ({ response, unavailable: false }))
+          .catch(() => ({ response: null, unavailable: true }))),
+    (serviceIds?.length === 0
+      ? Promise.resolve({ items: [], pagination: { page: 1, page_size: 1, total: 0, page_count: 1 }, filters: { q: null } })
+      : getPublicServices({
+          ids: serviceIds?.join(','),
+          page: 1,
+          page_size: serviceIds ? serviceIds.length : (servicesConfig?.item_limit ?? 4)
+        })
+    ).catch(() => ({
       items: [],
       pagination: { page: 1, page_size: 4, total: 0, page_count: 1 },
       filters: { q: null }
     })),
-    getPublicProjects({ page: 1, page_size: 12 }).catch(() => ({
+    (projectIds?.length === 0
+      ? Promise.resolve({ items: [], pagination: { page: 1, page_size: 1, total: 0, page_count: 1 }, filters: { q: null } })
+      : getPublicProjects({
+          ids: projectIds?.join(','),
+          page: 1,
+          page_size: projectIds ? projectIds.length : (projectsConfig?.item_limit ?? 12)
+        })
+    ).catch(() => ({
       items: [],
       pagination: { page: 1, page_size: 12, total: 0, page_count: 1 },
       filters: { q: null }
@@ -133,10 +165,16 @@ export default async function HomePage() {
       footer_quick_menu: null,
       footer_support_menu: null,
       footer_legal_menu: null
-    }))
+    })),
+    autoTrustEnabled && serviceIds !== null
+      ? getPublicServices({ page: 1, page_size: 1 }).then((response) => response.pagination.total).catch(() => 0)
+      : Promise.resolve(null),
+    autoTrustEnabled && projectIds !== null
+      ? getPublicProjects({ page: 1, page_size: 1 }).then((response) => response.pagination.total).catch(() => 0)
+      : Promise.resolve(null)
   ]);
   const rootCategories = sortProductCategories(
-    categoriesResponse.items.filter((category) => category.parent_id === null)
+    (categoriesResult.response?.items ?? []).filter((category) => category.parent_id === null)
   );
 
   const visibleSections = layout.sections
@@ -161,6 +199,7 @@ export default async function HomePage() {
               <HomeProductCategoriesSection
                 key={section.id}
                 categories={rootCategories}
+                unavailable={categoriesResult.unavailable}
                 titleOverride={section.title_override}
                 config={configOf(section)}
               />
@@ -180,7 +219,8 @@ export default async function HomePage() {
               <HomeFeaturedProductsSection
                 brands={brandsResponse.items}
                 key={section.id}
-                featuredProducts={productGroupsResponse.items}
+                featuredProducts={productGroupsResult.response?.items ?? []}
+                unavailable={productGroupsResult.unavailable}
                 titleOverride={section.title_override}
                 config={configOf(section)}
               />
@@ -214,9 +254,9 @@ export default async function HomePage() {
             return (
               <HomeTrustStripSection
                 key={section.id}
-                brands={brandsResponse.items}
-                projects={projectsResponse.items}
-                services={servicesResponse.items}
+                brandCount={brandsResponse.pagination.total}
+                projectCount={projectIds !== null ? (manualProjectTotal ?? 0) : projectsResponse.pagination.total}
+                serviceCount={serviceIds !== null ? (manualServiceTotal ?? 0) : servicesResponse.pagination.total}
                 config={configOf(section)}
               />
             );

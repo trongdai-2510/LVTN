@@ -22,18 +22,18 @@ export function Button({
       ? 'border border-border bg-white text-primary hover:border-primary hover:bg-subtle'
       : variant === 'ghost'
         ? 'bg-transparent text-primary hover:bg-subtle'
-        : 'bg-primaryStrong text-white shadow-action hover:bg-primary';
+        : 'bg-primary text-white hover:bg-primaryStrong';
 
   const sizeClassName =
     size === 'sm'
-      ? 'type-button min-h-11 px-4 md:h-10 md:min-h-0'
+      ? 'type-button min-h-11 px-4'
       : 'type-button h-12 px-6';
 
   return (
     <button
       type={type}
       className={[
-        'inline-flex items-center justify-center rounded-xs transition disabled:cursor-not-allowed disabled:opacity-60',
+        'inline-flex items-center justify-center rounded-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-60 disabled:active:brightness-100 motion-reduce:transition-none',
         variantClassName,
         sizeClassName,
         fullWidth ? 'w-full' : '',

@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import type { ComponentType, ReactNode, SVGProps } from 'react';
+import type { ComponentType, SVGProps } from 'react';
 
 import { SanitizedHtmlContent } from '@/components/content/SanitizedHtmlContent';
 import { Container } from '@/components/ui/Container';
@@ -21,20 +21,6 @@ type ServiceDetailPageProps = {
 };
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
-
-type ServiceExperienceProfile = {
-  eyebrow: string;
-  primaryCta: string;
-  briefTitle: string;
-  flowHeading: string;
-  situationTitle: string;
-  approachTitle: string;
-  outcomeTitle: string;
-  detailTitle: string;
-  detailLead: string;
-  relatedTitle: string;
-  relatedIntro: string;
-};
 
 const SURFACE = 'bg-[oklch(0.995_0.004_248)]';
 const SURFACE_ALT = 'bg-[oklch(0.972_0.011_246)]';
@@ -121,20 +107,6 @@ const ICON_BY_KEY: Record<string, IconComponent> = {
   custom: Briefcase
 };
 
-const DEFAULT_PROFILE: ServiceExperienceProfile = {
-  eyebrow: 'Dịch vụ kỹ thuật',
-  primaryCta: 'Gửi yêu cầu tư vấn',
-  briefTitle: 'Tóm tắt dịch vụ',
-  flowHeading: 'Từ nhu cầu ban đầu đến hướng xử lý rõ ràng.',
-  situationTitle: 'Tình huống phù hợp',
-  approachTitle: 'Cách Song Thanh hỗ trợ',
-  outcomeTitle: 'Kết quả khách nhận được',
-  detailTitle: 'Nội dung trao đổi chi tiết',
-  detailLead: 'Chuẩn bị đúng thông tin giúp Song Thanh phản hồi nhanh hơn và bám sát nhu cầu thực tế hơn.',
-  relatedTitle: 'Nhóm sản phẩm liên quan',
-  relatedIntro: 'Các nhóm sản phẩm được liên kết với dịch vụ này để khách tham khảo thêm.'
-};
-
 function getServiceIcon(iconKey: string | null | undefined): IconComponent {
   if (!iconKey) return Briefcase;
   return ICON_BY_KEY[iconKey] ?? Briefcase;
@@ -159,20 +131,6 @@ function splitTextItems(value: string | null | undefined) {
 
 function getOneLine(value: string | null | undefined) {
   return value?.trim() || '';
-}
-
-function stripHtml(value: string | null | undefined) {
-  return (value ?? '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function truncateText(value: string, maxLength: number) {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength).replace(/\s+\S*$/, '')}...`;
 }
 
 function ServiceVisual({
@@ -227,24 +185,6 @@ function RelatedProductImage({
   );
 }
 
-function FlowCard({
-  number,
-  title,
-  children
-}: {
-  number: string;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <article className="h-full border-t border-borderBlue py-6 lg:pr-6">
-      <span className="font-display text-2xl font-semibold tabular-nums text-primary">{number}</span>
-      <h3 className="mt-5 font-display text-xl font-semibold leading-snug text-secondary">{title}</h3>
-      <div className="mt-4">{children}</div>
-    </article>
-  );
-}
-
 function TextChecklist({ items }: { items: string[] }) {
   return (
     <ul className="space-y-3">
@@ -260,38 +200,26 @@ function TextChecklist({ items }: { items: string[] }) {
 
 export function ServiceDetailPage({ detail, otherServices, companyInfo }: ServiceDetailPageProps) {
   const service = detail.service;
-  const profile = DEFAULT_PROFILE;
   const ServiceIcon = getServiceIcon(service.icon_key);
   const imageSource = shouldUseServiceVisual(service.image_file)
     ? resolvePublicFileSource(service.image_file)
     : null;
   const hotline = getPublicPrimaryHotline(companyInfo);
   const hotlineHref = normalizeHotlineHref(hotline);
-  const overview = getOneLine(service.description);
+  const summary = getOneLine(service.subtitle) || getOneLine(service.description);
   const whenItems = splitTextItems(service.when_to_contact);
   const deliverables = service.deliverables.filter((item) => item.trim().length > 0);
-  const detailPlainText = stripHtml(service.content_html);
-  const detailPreview = truncateText(detailPlainText, 220);
-  const hasServiceFlow = overview || whenItems.length > 0 || deliverables.length > 0 || detailPreview;
+  const hasServiceFacts = whenItems.length > 0 || deliverables.length > 0;
   const contactHref = `/lien-he?dich-vu=${encodeURIComponent(service.slug)}`;
   const filteredOtherServices = otherServices
     .filter((item) => item.slug !== service.slug)
     .slice(0, 3);
   const heroSupport = (
-    <div className={imageSource ? '' : 'border-l-2 border-primary/45 pl-6 sm:pl-8'}>
-      {service.subtitle ? (
-        <p className="max-w-[58ch] text-[18px] font-semibold leading-[1.55] text-primaryStrong">
-          {service.subtitle}
-        </p>
-      ) : null}
-      {overview ? (
-        <p className="mt-4 max-w-[64ch] text-[16px] leading-[1.65] text-body">
-          {overview}
-        </p>
-      ) : null}
+    <div>
+      {summary ? <p className="max-w-[64ch] text-[18px] font-medium leading-[1.55] text-body">{summary}</p> : null}
       <div className="mt-7 flex flex-wrap gap-3">
         <Link className={PRIMARY_BUTTON} href={contactHref}>
-          {profile.primaryCta}
+          Gửi yêu cầu tư vấn
           <ArrowRight className="ml-2 h-4 w-4" />
         </Link>
         {hotline && hotlineHref ? (
@@ -322,9 +250,9 @@ export function ServiceDetailPage({ detail, otherServices, companyInfo }: Servic
 
           <div className={`mt-8 grid gap-8 lg:gap-12 ${imageSource ? 'lg:grid-cols-[minmax(0,0.95fr)_minmax(430px,1.05fr)] lg:items-center' : 'lg:grid-cols-[minmax(0,1fr)_minmax(0,0.82fr)] lg:items-end'}`} data-service-hero-layout={imageSource ? 'image' : 'text'}>
             <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-xs border border-borderBlue bg-[oklch(0.99_0.006_248)] px-3 py-2 text-primaryStrong">
+              <div className="inline-flex items-center gap-2 text-primaryStrong">
                 <ServiceIcon className="h-4 w-4" />
-                <span className="type-eyebrow text-primaryStrong">{profile.eyebrow}</span>
+                <span className="type-eyebrow text-primaryStrong">Dịch vụ kỹ thuật</span>
               </div>
               <h1 className="mt-5 max-w-[12ch] break-words font-display text-[34px] font-extrabold leading-[1.08] text-secondary sm:max-w-[16ch] sm:text-[46px] lg:text-[58px]">
                 {service.title}
@@ -336,39 +264,21 @@ export function ServiceDetailPage({ detail, otherServices, companyInfo }: Servic
         </Container>
       </section>
 
-      {hasServiceFlow ? (
-         <section className="bg-subtle/55">
-           <Container className="py-14 sm:py-16 lg:py-20" size="wide">
-             <div className="max-w-3xl">
-               <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">{profile.briefTitle}</p>
-               <h2 className="mt-4 text-balance font-display text-[clamp(2rem,3.2vw,3rem)] font-semibold leading-[1.12] tracking-[-0.035em] text-secondary">
-                 {profile.flowHeading}
-               </h2>
-             </div>
-
-             <div className="mt-9 grid gap-5 md:grid-cols-3 lg:gap-8">
-              <FlowCard number="01" title={profile.situationTitle}>
-                {whenItems.length > 0 ? (
-                  <TextChecklist items={whenItems} />
-                ) : overview ? (
-                  <p className="text-[15px] leading-[1.65] text-body">{overview}</p>
-                ) : null}
-              </FlowCard>
-
-              <FlowCard number="02" title={profile.approachTitle}>
-                <p className="text-[15px] leading-[1.65] text-body">
-                  {detailPreview || overview || service.subtitle}
-                </p>
-              </FlowCard>
-
-              <FlowCard number="03" title={profile.outcomeTitle}>
-                {deliverables.length > 0 ? (
-                  <TextChecklist items={deliverables} />
-                ) : service.typical_duration ? (
-                  <p className="text-[15px] leading-[1.65] text-body">{service.typical_duration}</p>
-                ) : null}
-              </FlowCard>
-            </div>
+      {hasServiceFacts ? (
+        <section className="bg-subtle/55">
+          <Container className="grid gap-8 py-10 sm:py-12 lg:grid-cols-2 lg:gap-12" size="wide">
+            {whenItems.length > 0 ? (
+              <div>
+                <h2 className="font-display text-xl font-semibold text-secondary">Tình huống phù hợp</h2>
+                <div className="mt-4"><TextChecklist items={whenItems} /></div>
+              </div>
+            ) : null}
+            {deliverables.length > 0 ? (
+              <div>
+                <h2 className="font-display text-xl font-semibold text-secondary">Kết quả khách nhận được</h2>
+                <div className="mt-4"><TextChecklist items={deliverables} /></div>
+              </div>
+            ) : null}
           </Container>
         </section>
       ) : null}
@@ -377,13 +287,9 @@ export function ServiceDetailPage({ detail, otherServices, companyInfo }: Servic
         <section className={SURFACE} data-service-detail-section="true">
           <Container className="grid gap-8 px-6 py-12 lg:grid-cols-[minmax(260px,0.42fr)_minmax(0,1fr)] lg:items-start lg:px-8 lg:py-16" size="wide">
             <div className="max-w-xl">
-              <p className="type-eyebrow text-primary">Chi tiết trao đổi</p>
-              <h2 className="mt-3 max-w-[18ch] font-display text-[28px] font-extrabold leading-[1.16] text-secondary lg:text-[36px]">
-                {profile.detailTitle}
+              <h2 className="max-w-[18ch] font-display text-[28px] font-extrabold leading-[1.16] text-secondary lg:text-[36px]">
+                Nội dung dịch vụ
               </h2>
-              <p className="mt-4 max-w-[42ch] text-[15px] leading-[1.65] text-body">
-                {profile.detailLead}
-              </p>
             </div>
             <div className="min-w-0 self-start rounded-sm border border-borderBlue bg-[oklch(0.995_0.004_248)] px-5 py-5 shadow-sm lg:px-7 lg:py-6">
               <div className="prose-content max-w-[74ch] text-[17px] leading-[1.75] text-body">
@@ -408,14 +314,10 @@ export function ServiceDetailPage({ detail, otherServices, companyInfo }: Servic
       {detail.related_product_groups.length > 0 ? (
         <section className={SURFACE_ALT}>
           <Container className="px-6 py-14 lg:px-8 lg:py-20" size="wide">
-            <div className="grid gap-4 md:grid-cols-[minmax(0,0.72fr)_minmax(0,0.7fr)] md:items-end">
-              <div>
-              <p className="type-eyebrow text-primary">Sản phẩm liên quan</p>
-              <h2 className="mt-3 font-display text-[28px] font-extrabold leading-[1.18] text-secondary">
-                  {profile.relatedTitle}
+            <div>
+              <h2 className="font-display text-[28px] font-extrabold leading-[1.18] text-secondary">
+                Sản phẩm liên quan
               </h2>
-              </div>
-              <p className="text-[15px] leading-[1.6] text-body">{profile.relatedIntro}</p>
             </div>
              <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
               {detail.related_product_groups.map((item) => {
@@ -456,9 +358,8 @@ export function ServiceDetailPage({ detail, otherServices, companyInfo }: Servic
           <Container className="px-6 py-14 lg:px-8 lg:py-20" size="wide">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <p className="type-eyebrow text-primary">Dịch vụ khác</p>
-                <h2 className="mt-3 font-display text-[28px] font-extrabold leading-[1.18] text-secondary">
-                  Chọn hướng hỗ trợ khác nếu nhu cầu chưa đúng.
+                <h2 className="font-display text-[28px] font-extrabold leading-[1.18] text-secondary">
+                  Dịch vụ khác
                 </h2>
               </div>
               <Link className={`type-button text-primaryStrong transition-colors hover:text-primary ${FOCUS_RING}`} href="/dich-vu">

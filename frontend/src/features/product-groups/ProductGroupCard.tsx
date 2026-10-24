@@ -47,7 +47,7 @@ export function ProductGroupCard({
   const hasThumbnail = Boolean(thumbnailSource) && !imageHidden;
   const isHomeFeatured = variant === 'homeFeatured';
   const compact = !isHomeFeatured;
-  const mobileRow = compact && compactMobile;
+  const mobileRow = compact && compactMobile && hasThumbnail;
   const highlightSpecs = productGroup.highlight_specs.slice(0, isHomeFeatured ? 3 : 2);
   const brandLabel = productGroup.brand_name?.trim() || 'Đang cập nhật';
   const hasBrandLogo = Boolean(brandLogoSource) && !brandLogoHidden;
@@ -59,7 +59,7 @@ export function ProductGroupCard({
     'motion-reduce:transition-none motion-reduce:hover:translate-y-0',
     mobileRow ? 'max-sm:grid max-sm:grid-cols-[96px_minmax(0,1fr)]' : '',
     isHomeFeatured
-      ? 'min-h-[438px] overflow-hidden rounded-sm border border-borderSoft/70 transition duration-200 ease-out hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-[0_12px_28px_rgba(21,72,118,0.1)] sm:min-h-[500px]'
+      ? `${hasThumbnail ? 'min-h-[438px] sm:min-h-[500px]' : 'min-h-[300px] sm:min-h-[340px]'} overflow-hidden rounded-sm border border-borderSoft/70 transition duration-200 ease-out hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-[0_12px_28px_rgba(21,72,118,0.1)]`
       : 'overflow-hidden rounded-sm border border-borderSoft/75 transition duration-200 ease-out hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_14px_32px_rgba(15,52,96,0.08)]'
   ].join(' ');
   const mediaFrameClassName = [
@@ -82,7 +82,7 @@ export function ProductGroupCard({
 
   return (
     <article className={articleClassName} data-product-card="true">
-      <div
+      {hasThumbnail && thumbnailSource ? <div
         className={[
           'relative',
           isHomeFeatured ? 'border-b border-borderSoft/40' : '',
@@ -96,26 +96,18 @@ export function ProductGroupCard({
           href={detailHref}
         >
           <div className={mediaFrameClassName}>
-            {hasThumbnail && thumbnailSource ? (
-              <Image
-                alt={productGroup.name}
-                className={imageClassName}
-                fill
-                onError={() => setImageHidden(true)}
-                priority={priority}
-                sizes={imageSizes}
-                src={thumbnailSource}
-              />
-            ) : (
-              <div className="relative flex h-full w-full items-center justify-center">
-                <span className="type-caption inline-flex rounded-xs border border-borderSoft/60 bg-white px-3 py-1 font-bold text-primary">
-                  Hình ảnh đang cập nhật
-                </span>
-              </div>
-            )}
+            <Image
+              alt={productGroup.name}
+              className={imageClassName}
+              fill
+              onError={() => setImageHidden(true)}
+              priority={priority}
+              sizes={imageSizes}
+              src={thumbnailSource}
+            />
           </div>
         </Link>
-      </div>
+      </div> : null}
 
       <div className={bodyClassName}>
         <div className={[
@@ -157,7 +149,7 @@ export function ProductGroupCard({
         ].join(' ')} href={detailHref}>
           <Heading
             className={[
-              'line-clamp-2 font-display font-bold text-secondary transition group-hover/card:text-primary',
+              'line-clamp-2 font-display font-semibold text-secondary transition group-hover/card:text-primary',
               compact
                 ? 'min-h-[44px] text-[16px] leading-[22px] sm:text-[17px] sm:leading-[23px]'
                 : 'min-h-[52px] text-[18px] leading-[26px] sm:text-[19px]',

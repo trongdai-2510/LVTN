@@ -30,11 +30,7 @@ export default async function ServicesRoutePage() {
   if (!pageContent) notFound();
 
   const [servicesResponse, heroBannersResponse, shell] = await Promise.all([
-    getPublicServices({ page: 1, page_size: 40 }).catch(() => ({
-      items: [],
-      pagination: { page: 1, page_size: 40, total: 0, page_count: 1 },
-      filters: { q: null }
-    })),
+    getPublicServices({ page: 1, page_size: 40 }),
     getPublicBannersForPlacement('SERVICES_HERO').catch(() =>
       emptyPublicBannersForPlacement('SERVICES_HERO')
     ),

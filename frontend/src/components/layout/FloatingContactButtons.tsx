@@ -129,6 +129,7 @@ function FloatingActionButton({
 export function FloatingContactButtons({ shell }: FloatingContactButtonsProps) {
   const { is_quote_modal_open, openQuoteRequest, quote_request_count } = useSiteShell();
   const [isOpen, setIsOpen] = useState(false);
+  const [footerVisible, setFooterVisible] = useState(false);
   const panelId = useId();
   const dockRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -175,6 +176,17 @@ export function FloatingContactButtons({ shell }: FloatingContactButtonsProps) {
   const socialActions = actions.filter((action) => action.kind === 'social');
 
   useEffect(() => {
+    const footer = document.querySelector('footer');
+    if (!footer) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      setFooterVisible(entry.isIntersecting);
+      if (entry.isIntersecting) setIsOpen(false);
+    });
+    observer.observe(footer);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     if (!isOpen) return;
 
     const focusFrame = openWithKeyboardRef.current
@@ -208,7 +220,7 @@ export function FloatingContactButtons({ shell }: FloatingContactButtonsProps) {
   }
 
   return (
-    <div className={is_quote_modal_open ? 'hidden' : ''} ref={dockRef}>
+    <div className={is_quote_modal_open || footerVisible ? 'hidden' : ''} ref={dockRef}>
       <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-40 w-[calc(100vw-2rem)] max-w-[300px]">
         <div
           ref={panelRef}
