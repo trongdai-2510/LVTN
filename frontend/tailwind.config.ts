@@ -34,7 +34,6 @@ const config: Config = {
       fontFamily: {
         sans: [
           'var(--font-body)',
-          'Inter',
           'Be Vietnam Pro',
           '-apple-system',
           'BlinkMacSystemFont',
@@ -44,15 +43,14 @@ const config: Config = {
         ],
         display: [
           'var(--font-display)',
-          'Manrope',
-          'Inter',
+          'Be Vietnam Pro',
           'system-ui',
           'sans-serif'
         ]
       },
       fontSize: {
-        hero: ['var(--type-hero-title-size)', { lineHeight: 'var(--type-hero-title-line)', fontWeight: '800' }],
-        page: ['var(--type-page-title-size)', { lineHeight: 'var(--type-page-title-line)', fontWeight: '800' }],
+        hero: ['var(--type-hero-title-size)', { lineHeight: 'var(--type-hero-title-line)', fontWeight: '700' }],
+        page: ['var(--type-page-title-size)', { lineHeight: 'var(--type-page-title-line)', fontWeight: '700' }],
         section: ['var(--type-section-title-size)', { lineHeight: 'var(--type-section-title-line)', fontWeight: '700' }],
         body: ['var(--type-body-size)', { lineHeight: 'var(--type-body-line)', fontWeight: '400' }],
         caption: ['var(--type-caption-size)', { lineHeight: 'var(--type-caption-line)', fontWeight: '500' }]
