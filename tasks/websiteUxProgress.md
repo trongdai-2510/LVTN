@@ -13,6 +13,7 @@ Tài liệu này chỉ ghi việc đã làm và bằng chứng kiểm tra trên 
 | M6 | Biểu mẫu, mobile, accessibility | **Hoàn thành trong browser local** | Ba form qua kiểm tra gửi trùng/lỗi/thử lại, keyboard modal/menu, touch giả lập, axe chín route và stress CSS zoom. Thiết bị thật, text zoom theo trình duyệt và kiểm tra người dùng thuộc M7. |
 | M7 | QA, hiệu năng, phát hành | **QA local hoàn thành; chưa nghiệm thu phát hành** | Typecheck/test/build, 20 lượt smoke route và kiểm tra ảnh/network local đạt. Chưa có staging/VPS để đo Core Web Vitals thực tế, thử admin thật → website, thiết bị thật và phát hành. |
 | M8 | Cải tiến bố cục trang chủ theo phản hồi | **Hoàn thành local** | Danh mục dễ xem ảnh hơn; dịch vụ chuyển sang mục nổi bật và danh sách; dự án có ảnh lớn hơn; số liệu và liên hệ gọn hơn. Đã kiểm tra sáu viewport, carousel dự án, 32 test. Các trang còn lại cần tiếp tục đánh giá bằng phản hồi sử dụng thực tế. |
+| M9 | Danh bạ thương hiệu | **Hoàn thành local** | Thẻ mobile gọn hơn, tìm theo tên hãng kể cả khi bỏ dấu; giữ nguyên 18 hãng công khai và liên kết hồ sơ. Kiểm tra 320/390/768/1440px, 32 test và thao tác bàn phím. Chưa có nghiệm thu trên thiết bị thật. |
 
 ## M0 — bằng chứng local
 
@@ -105,3 +106,9 @@ Tài liệu này chỉ ghi việc đã làm và bằng chứng kiểm tra trên 
 - Danh mục trang chủ dùng ảnh sản phẩm ở chế độ `contain` và ba thẻ rộng hơn; sản phẩm nổi bật cũng hiện ba thẻ rộng hơn. Dịch vụ đầu tiên trở thành mục nổi bật theo đúng thứ tự CMS, các mục còn lại thành danh sách dễ quét; ảnh dịch vụ có chữ sẵn được hiển thị nguyên vẹn, không đè thêm chữ lên ảnh. Tiêu đề dịch vụ nhận `title_override` hiện có của CMS.
 - Dự án hiện hai mục rộng hơn ở desktop, giữ carousel và autoscroll cấu hình; metadata khách hàng/địa điểm chỉ lấy từ bản ghi công khai. Dải số liệu giảm chiều cao và bỏ cụm trang trí; hotline/email tại CTA có liên kết gọi/gửi thư.
 - Browser local ở 320/390/768/1024/1440/2560 px đều trả 200, đúng một H1, không tràn ngang hoặc lỗi JavaScript. Carousel dự án chuyển từ mục 0 sang 1 khi bấm. Frontend test 32/32 đạt. Mốc này chỉ xác nhận bố cục trang chủ trong môi trường local; M7 vẫn chờ các điều kiện nghiệm thu phát hành.
+
+## M9 — bằng chứng local
+
+- Dữ liệu công khai hiện có 18 thương hiệu. Ở 390px, danh bạ trước sửa dài 6.098px, thẻ đầu cao 220px; sau sửa dài 3.856px, thẻ đầu cao 98px. Trên mobile mỗi hàng có logo, tên và lối mở hồ sơ; desktop giữ bố cục lưới bốn cột. Thương hiệu thiếu logo vẫn hiện tên đúng một lần trong phần nhìn thấy.
+- Tìm kiếm chỉ lọc danh sách 18 thương hiệu đã công khai trong trình duyệt; không thêm endpoint, không sửa dữ liệu hoặc thứ tự CMS. Tìm `cadivi` ra đúng liên kết `/doi-tac-thuong-hieu/cadivi`; tìm `de nhat` ra `Đệ Nhất`; truy vấn không có kết quả có thông báo rõ. Bàn phím đi từ ô tìm kiếm sang thẻ và Enter mở trang chi tiết.
+- Browser trên bản build local ở 320/390/768/1440px đều trả 200, có một H1, không tràn ngang/lỗi JavaScript; cuộn qua 18 thẻ không có ảnh lỗi. Axe ở 390px không báo vi phạm WCAG 2 A/AA hoặc 2.1 A/AA trong phạm vi quét tự động; hai mục cần kiểm tra thủ công. Frontend typecheck, 32/32 test và production build đạt. Chưa nghiệm thu trên thiết bị thật.
