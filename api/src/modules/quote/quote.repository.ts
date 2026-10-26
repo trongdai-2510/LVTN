@@ -169,6 +169,9 @@ export class QuoteRepository {
           .forUpdate()
           .first();
         if (!assignee) return 'assignee_not_found' as const;
+        if (!(await this.logicUsers.canProcessRequests(
+          assignedTo, 'quote.read', 'quote.update_status', trx
+        ))) return 'assignee_not_eligible' as const;
       }
       await trx(QUOTE_REQUEST_TABLE).where({ id }).update({ assigned_to: assignedTo });
       return 'updated' as const;
@@ -213,7 +216,11 @@ export class QuoteRepository {
   }
 
   async listAssigneeOptions(): Promise<QuoteAssigneeOption[]> {
-    return this.logicUsers.listAssignableUsers();
+    return this.logicUsers.listAssignableUsers('quote.read', 'quote.update_status');
+  }
+
+  async listAssigneeFilterOptions(): Promise<QuoteAssigneeOption[]> {
+    return this.logicUsers.listActiveUsers();
   }
 
   private async lockQuote(trx: Knex.Transaction, id: string) {

@@ -248,7 +248,7 @@ Nguon quyet dinh la trao doi hien tai va runtime, khong phai docs cu. Moi tai kh
 
 ### Slice D: UX cum He thong va danh sach Trang noi dung
 
-- Audit cong viec thuc te, loading/error/empty, focus, mobile va vai tro chi doc truoc khi sua. Dung PRODUCT.md va UI token hien co; thiet ke lai phan danh sach va thao tac theo muc do uu tien, khong che nut bang CSS don thuan.
+- Audit cong viec thuc te, loading/error/empty, focus, mobile va vai tro chi doc truoc khi sua. Doi chieu AUDIT.md va UI token hien co; thiet ke lai phan danh sach va thao tac theo muc do uu tien, khong che nut bang CSS don thuan.
 - Gate: duong viec chinh tren desktop/mobile, keyboard, screen reader, browser console/network sach; khong bien doi workflow khi doi giao dien.
 
 ### Checkpoint cuoi dot

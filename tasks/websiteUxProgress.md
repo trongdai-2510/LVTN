@@ -12,6 +12,7 @@ Tài liệu này chỉ ghi việc đã làm và bằng chứng kiểm tra trên 
 | M5 | Trang nội dung | **Hoàn thành local với CMS giả lập** | Route danh sách/chi tiết, block CMS hiện có và ba kiểu block giả lập, thứ tự/ẩn section, thẻ thiếu logo đã qua kiểm tra local. Kiểm tra thao tác admin thật → website thuộc M7. |
 | M6 | Biểu mẫu, mobile, accessibility | **Hoàn thành trong browser local** | Ba form qua kiểm tra gửi trùng/lỗi/thử lại, keyboard modal/menu, touch giả lập, axe chín route và stress CSS zoom. Thiết bị thật, text zoom theo trình duyệt và kiểm tra người dùng thuộc M7. |
 | M7 | QA, hiệu năng, phát hành | **QA local hoàn thành; chưa nghiệm thu phát hành** | Typecheck/test/build, 20 lượt smoke route và kiểm tra ảnh/network local đạt. Chưa có staging/VPS để đo Core Web Vitals thực tế, thử admin thật → website, thiết bị thật và phát hành. |
+| M8 | Cải tiến bố cục trang chủ theo phản hồi | **Hoàn thành local** | Danh mục dễ xem ảnh hơn; dịch vụ chuyển sang mục nổi bật và danh sách; dự án có ảnh lớn hơn; số liệu và liên hệ gọn hơn. Đã kiểm tra sáu viewport, carousel dự án, 32 test. Các trang còn lại cần tiếp tục đánh giá bằng phản hồi sử dụng thực tế. |
 
 ## M0 — bằng chứng local
 
@@ -96,3 +97,11 @@ Tài liệu này chỉ ghi việc đã làm và bằng chứng kiểm tra trên 
 - Sau chỉnh block CMS và thẻ thương hiệu thiếu logo: frontend typecheck, build, 32/32 test và kiểm tra diff đạt. Bản production local đang chạy ở cổng 3000.
 - Lượt QA cuối trên bản production local: 10 route chính ở 390 và 1440px (20 lượt) đều HTTP 200, đúng một H1, không tràn ngang hoặc lỗi JavaScript. Cuộn hết trang chủ, dự án, danh bạ thương hiệu và PDP ở 390px để kích hoạt ảnh lazy: không có request lỗi HTTP, request thất bại hoặc ảnh `naturalWidth=0`. API `/health` vẫn trả `ok`; `git diff --check` toàn worktree đạt.
 - M7 chỉ hoàn thành phần QA local. Do chưa có staging/VPS và sản phẩm giá công khai thật, chưa kiểm thử thao tác chỉnh/duyệt/xuất bản từ admin đến website với dữ liệu thật, chưa đo Core Web Vitals thực tế, chưa thử text zoom trên thiết bị/trình duyệt thật và chưa phát hành.
+
+## M8 — bằng chứng local
+
+- Phản hồi người dùng: các lượt M1–M7 cải thiện luồng dữ liệu, responsive và độ ổn định nhưng hình thức trang chủ thay đổi chưa đủ rõ. Ảnh runtime trước lượt này cho thấy nhiều khối thẻ đều nhau, nội dung dịch vụ/dự án chưa có nhịp ưu tiên và dải số liệu/form chiếm nhiều chiều cao.
+- Giữ nguyên `layout.sections` từ CMS: thứ tự, tiêu đề ghi đè, trạng thái bật/tắt, chọn tay/tự động, ảnh công khai, giới hạn mục, banner, autoscroll dự án và form báo giá. Không đổi quyền quản trị, endpoint hoặc dữ liệu.
+- Danh mục trang chủ dùng ảnh sản phẩm ở chế độ `contain` và ba thẻ rộng hơn; sản phẩm nổi bật cũng hiện ba thẻ rộng hơn. Dịch vụ đầu tiên trở thành mục nổi bật theo đúng thứ tự CMS, các mục còn lại thành danh sách dễ quét; ảnh dịch vụ có chữ sẵn được hiển thị nguyên vẹn, không đè thêm chữ lên ảnh. Tiêu đề dịch vụ nhận `title_override` hiện có của CMS.
+- Dự án hiện hai mục rộng hơn ở desktop, giữ carousel và autoscroll cấu hình; metadata khách hàng/địa điểm chỉ lấy từ bản ghi công khai. Dải số liệu giảm chiều cao và bỏ cụm trang trí; hotline/email tại CTA có liên kết gọi/gửi thư.
+- Browser local ở 320/390/768/1024/1440/2560 px đều trả 200, đúng một H1, không tràn ngang hoặc lỗi JavaScript. Carousel dự án chuyển từ mục 0 sang 1 khi bấm. Frontend test 32/32 đạt. Mốc này chỉ xác nhận bố cục trang chủ trong môi trường local; M7 vẫn chờ các điều kiện nghiệm thu phát hành.

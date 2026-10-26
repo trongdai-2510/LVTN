@@ -4,6 +4,8 @@ Backend NestJS + Knex + PostgreSQL cho website và trang quản trị Song Thanh
 
 ## Chạy cục bộ
 
+Chỉ chạy `seed:run` khi khởi tạo database mới và đã kiểm tra biến `SUPER_ADMIN_PASSWORD` trong `.env`. Không chạy seed trên database đang sử dụng để tránh thay đổi dữ liệu nền/tài khoản.
+
 ```powershell
 npm.cmd ci
 Copy-Item ..\.env.example .env

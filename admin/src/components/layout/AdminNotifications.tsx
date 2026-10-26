@@ -106,34 +106,38 @@ export function AdminNotifications({
     <div ref={rootRef} className="relative">
       <button
         type="button"
-        className="relative flex h-11 w-11 items-center justify-center rounded-sm text-slate-600 transition hover:bg-muted hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+        className={`relative flex h-11 w-11 items-center justify-center rounded-xl border transition-[background-color,border-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-[#dcecff] ${open ? 'border-primary bg-primary text-primary-foreground shadow-[0_3px_8px_rgba(20,95,159,0.18)]' : 'border-[#d7e4f0] bg-[#eef5fb] text-primary hover:border-[#a9cce7] hover:bg-[#e1effa]'}`}
         aria-label={total > 0 ? `${total} thông báo mới` : 'Thông báo'}
         aria-expanded={open}
+        aria-controls={open ? 'admin-notifications-panel' : undefined}
         onClick={() => {
           setOpen((value) => !value);
           void loadNotifications();
         }}
       >
-        <BellRing className="h-4 w-4" />
+        <BellRing className="h-5 w-5" />
         {total > 0 ? (
-          <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white">
+          <span className="absolute right-0.5 top-0.5 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-panel bg-red-600 px-0.5 text-[10px] font-bold leading-[14px] text-white">
             {countLabel}
           </span>
         ) : null}
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-11 z-50 w-[min(380px,calc(100vw-24px))] overflow-hidden rounded-sm border border-border bg-panel shadow-xl">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div id="admin-notifications-panel" role="region" aria-label="Thông báo" className="absolute right-0 top-[calc(100%+10px)] z-50 w-[min(380px,calc(100vw-24px))] overflow-hidden rounded-xl border border-[#d7e4f0] bg-panel shadow-[0_18px_44px_rgba(16,35,55,0.16)]">
+          <div className="flex items-center justify-between gap-3 border-b border-border bg-[#f5f9fd] px-4 py-3.5">
             <div>
-              <h2 className="text-sm font-semibold text-text">Thông báo</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-text">Thông báo</h2>
+                {total > 0 ? <span className="rounded-full bg-[#deebf7] px-2 py-0.5 text-[11px] font-semibold text-primary">{countLabel} mới</span> : null}
+              </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 Liên hệ và yêu cầu báo giá mới
               </p>
             </div>
             <button
               type="button"
-              className="text-xs font-semibold text-primary hover:underline"
+              className="shrink-0 rounded-md border border-[#c9deef] bg-white px-2.5 py-1.5 text-xs font-semibold text-primary transition hover:border-[#9fc4e2] hover:bg-[#eaf4fc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               onClick={() => void loadNotifications()}
             >
               Làm mới
@@ -156,10 +160,10 @@ export function AdminNotifications({
                   <Link
                     key={`${item.kind}-${item.id}`}
                     href={`/${isQuote ? 'quotes' : 'contacts'}/${encodeURIComponent(item.id)}`}
-                    className="flex gap-3 px-4 py-3 transition hover:bg-muted"
+                    className="flex gap-3 px-4 py-3.5 transition hover:bg-[#f5f9fd] focus-visible:outline-none focus-visible:bg-[#f5f9fd]"
                     onClick={() => setOpen(false)}
                   >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-border bg-muted text-primary">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#d7e6f3] bg-[#eef5fb] text-primary">
                       {isQuote ? <FileText className="h-4 w-4" /> : <MessageSquare className="h-4 w-4" />}
                     </span>
                     <span className="min-w-0 flex-1">

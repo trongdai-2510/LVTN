@@ -63,7 +63,7 @@ export class QuoteService {
 
     return {
       items: result.items,
-      assignee_options: await this.quoteRepository.listAssigneeOptions(),
+      assignee_options: await this.quoteRepository.listAssigneeFilterOptions(),
       pagination: createPaginationMeta({ page: pagination.page, pageSize: pagination.pageSize, total: result.total }),
       filters: {
         q: filters.q,
@@ -99,6 +99,9 @@ export class QuoteService {
     const outcome = await this.quoteRepository.updateAssignee(id, assignedTo);
     if (outcome === 'assignee_not_found') {
       throw this.notFound('Assignee was not found.');
+    }
+    if (outcome === 'assignee_not_eligible') {
+      throw this.conflict('Người này cần quyền xem và cập nhật trạng thái báo giá để được phân công.');
     }
     this.assertActiveMutationOutcome(outcome);
     return this.getQuoteDetail(id);

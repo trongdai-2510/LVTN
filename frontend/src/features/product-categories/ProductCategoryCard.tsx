@@ -10,9 +10,10 @@ import { getPublicProductCategorySlug } from './product-category-tree';
 
 type ProductCategoryCardProps = {
   category: PublicProductCategory;
+  variant?: 'default' | 'home';
 };
 
-export function ProductCategoryCard({ category }: ProductCategoryCardProps) {
+export function ProductCategoryCard({ category, variant = 'default' }: ProductCategoryCardProps) {
   const listingHref = buildProductListingHref(
     category.parent_id
       ? { categorySlugs: [getPublicProductCategorySlug(category)] }
@@ -22,12 +23,12 @@ export function ProductCategoryCard({ category }: ProductCategoryCardProps) {
 
   return (
     <Link className="group block h-full" href={listingHref}>
-      <Card className="h-full overflow-hidden p-0 transition-[transform,border-color,box-shadow] duration-300 ease-out group-hover:-translate-y-0.5 group-hover:border-primary group-hover:shadow-soft motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+      <Card className={`h-full overflow-hidden p-0 transition-[transform,border-color,box-shadow] duration-300 ease-out group-hover:-translate-y-0.5 group-hover:border-primary motion-reduce:transition-none motion-reduce:group-hover:translate-y-0 ${variant === 'home' ? 'border-borderBlue shadow-none group-hover:shadow-soft' : 'group-hover:shadow-soft'}`}>
         {imageSource ? (
-          <div className="relative h-[152px] w-full overflow-hidden">
+          <div className={`relative w-full overflow-hidden ${variant === 'home' ? 'h-[190px] bg-[#f9fbff] sm:h-[220px]' : 'h-[152px]'}`}>
             <Image
               alt={category.name}
-              className="object-cover transition-transform duration-500 ease-out group-hover:scale-[1.035] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
+              className={`${variant === 'home' ? 'object-contain p-5' : 'object-cover'} transition-transform duration-500 ease-out group-hover:scale-[1.035] motion-reduce:transition-none motion-reduce:group-hover:scale-100`}
               fill
               sizes="(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
               src={imageSource}
@@ -41,15 +42,15 @@ export function ProductCategoryCard({ category }: ProductCategoryCardProps) {
             </h3>
           </div>
         )}
-        <div className="space-y-3 p-5">
+        <div className={`space-y-3 ${variant === 'home' ? 'p-5 sm:p-6' : 'p-5'}`}>
           {imageSource ? <h3 className="type-product-title line-clamp-2 text-secondary">{category.name}</h3> : null}
           {category.description ? (
             <p className="type-body-sm line-clamp-2 text-body">{category.description}</p>
           ) : (
             <p className="type-body-sm text-body">Xem các nhóm sản phẩm thuộc danh mục này.</p>
           )}
-          <span className="type-label inline-flex font-bold uppercase text-primary">
-            Xem danh sách
+          <span className={variant === 'home' ? 'type-button inline-flex items-center gap-2 text-primary' : 'type-label inline-flex font-bold uppercase text-primary'}>
+            {variant === 'home' ? <>Xem sản phẩm <span aria-hidden>→</span></> : 'Xem danh sách'}
           </span>
         </div>
       </Card>

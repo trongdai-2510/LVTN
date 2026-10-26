@@ -57,12 +57,7 @@ API:
 http://localhost:4000
 ```
 
-Default seeded login:
-
-```txt
-admin@songthanh.local
-ChangeMe123!
-```
+Tài khoản quản trị khởi tạo lấy từ các biến `SUPER_ADMIN_*` trong `api/.env` khi chạy seed trên database mới. Không dùng mật khẩu mặc định của seed cho môi trường bàn giao.
 
 End-user smoke QA:
 

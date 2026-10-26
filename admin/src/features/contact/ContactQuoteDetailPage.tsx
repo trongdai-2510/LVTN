@@ -49,7 +49,7 @@ const CONTACT_STATUSES = [
   { value: 'in_progress', label: 'Đang xử lý' },
   { value: 'done',        label: 'Đã xong' },
   { value: 'spam',        label: 'Spam' },
-  { value: 'invalid',     label: 'Không phù hợp' },
+  { value: 'invalid',     label: 'Không hợp lệ' },
 ];
 
 const QUOTE_STATUSES = [
@@ -57,7 +57,7 @@ const QUOTE_STATUSES = [
   { value: 'in_progress', label: 'Đang xử lý' },
   { value: 'done',        label: 'Đã xong' },
   { value: 'spam',        label: 'Spam' },
-  { value: 'invalid',     label: 'Không phù hợp' },
+  { value: 'invalid',     label: 'Không hợp lệ' },
 ];
 
 const copy = {
@@ -118,25 +118,33 @@ export function ContactQuoteDetailPage({
     return authStore.subscribe(setAuthState);
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    setActionError('');
+  const showDetail = useCallback((result: unknown) => {
+    const entity = extractEntity(result, type);
+    setData(result);
+    setStatusDraft(getString(entity, ['status']));
+    setAssigneeDraft(entity.assigned_to != null ? String(entity.assigned_to) : '');
+    setAssigneeOptions(extractAssigneeOptions(result));
+  }, [type]);
+
+  const load = useCallback(async (refresh = false) => {
+    if (!refresh) {
+      setLoading(true);
+      setError('');
+      setActionError('');
+    }
     try {
       const result = await apiClient.get<unknown>(detailPath);
-      const entity = extractEntity(result, type);
-      setData(result);
-      setStatusDraft(getString(entity, ['status']));
-      setAssigneeDraft(entity.assigned_to != null ? String(entity.assigned_to) : '');
-      setAssigneeOptions(extractAssigneeOptions(result));
+      showDetail(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không tải được yêu cầu.');
+      const message = err instanceof Error ? err.message : 'Không tải được yêu cầu.';
+      if (refresh) setActionError(message);
+      else setError(message);
     } finally {
-      setLoading(false);
+      if (!refresh) setLoading(false);
     }
-  }, [detailPath, type]);
+  }, [detailPath, showDetail]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const permissions     = authState.permissions;
   const canUpdateStatus = permissions.includes(text.statusPermission);
@@ -155,6 +163,11 @@ export function ContactQuoteDetailPage({
   const customerId    = getString(entity, ['customer_id']);
   const isDone        = currentStatus === 'done';
   const isArchived    = Boolean(entity.deleted_at);
+  const assigneeId    = entity.assigned_to != null ? String(entity.assigned_to) : '';
+  const assigneeIsAvailable = assigneeOptions.some((option) => String(option.id) === assigneeId);
+  const assigneeLabel = getString(entity, ['assigned_to_label']) ||
+    assigneeOptions.find((option) => String(option.id) === assigneeId)?.label ||
+    (assigneeId ? 'Người phụ trách không còn trong hệ thống' : 'Chưa giao');
   const messageText   = getString(entity, ['message', 'content', 'body']);
   const projectName = getString(entity, ['project_name']);
   const projectContext = getString(entity, ['project_context']);
@@ -165,6 +178,15 @@ export function ContactQuoteDetailPage({
   const hasProjectBrief = Boolean(
     projectName || projectContext || projectRequirements.length > 0
   );
+  const allowedActions = [
+    canUpdateStatus && 'đổi trạng thái',
+    canAssign && 'phân công',
+    canCreateNote && 'ghi chú',
+    canArchive && 'lưu trữ'
+  ].filter(Boolean).join(' · ');
+  const permissionSummary = isArchived
+    ? canRestore ? 'Đã lưu trữ · Bạn có thể khôi phục yêu cầu.' : 'Đã lưu trữ · Bạn chỉ có thể xem yêu cầu.'
+    : `Quyền của bạn: ${allowedActions || 'chỉ xem yêu cầu'}.`;
 
   async function applyStatus(nextStatus: string) {
     if (!nextStatus) return;
@@ -175,7 +197,7 @@ export function ContactQuoteDetailPage({
 
     // A select can emit consecutive changes before React has rendered the
     // disabled state. Keep draining the latest intent, including changes that
-    // arrive while the previous result is being reloaded from the API.
+    // arrive while the previous API request is still pending.
     if (statusSavingRef.current) {
       return;
     }
@@ -189,19 +211,18 @@ export function ContactQuoteDetailPage({
         const queuedStatus = queuedStatusRef.current;
         queuedStatusRef.current = null;
         if (queuedStatus && queuedStatus !== lastPersistedStatus) {
-          await apiClient.put(`${detailPath}/status`, { status: queuedStatus });
+          const result = await apiClient.put<unknown>(`${detailPath}/status`, { status: queuedStatus });
+          showDetail(result);
           lastPersistedStatus = queuedStatus;
           continue;
         }
 
-        await load();
-        if (!queuedStatusRef.current) {
-          break;
-        }
+        break;
       }
     } catch (err) {
       queuedStatusRef.current = null;
-      await load();
+      setStatusDraft(lastPersistedStatus);
+      await load(true);
       setActionError(err instanceof Error ? err.message : 'Không cập nhật được trạng thái.');
     } finally {
       statusSavingRef.current = false;
@@ -215,9 +236,10 @@ export function ContactQuoteDetailPage({
     setAssigneeSaving(true);
     setActionError('');
     try {
-      await apiClient.put(`${detailPath}/assignee`, { assigned_to: nextValue ? Number(nextValue) : null });
-      await load();
+      const result = await apiClient.put<unknown>(`${detailPath}/assignee`, { assigned_to: nextValue ? Number(nextValue) : null });
+      showDetail(result);
     } catch (err) {
+      setAssigneeDraft(currentStr);
       setActionError(err instanceof Error ? err.message : 'Không phân công được.');
     } finally {
       setAssigneeSaving(false);
@@ -230,9 +252,9 @@ export function ContactQuoteDetailPage({
     setNoteSaving(true);
     setActionError('');
     try {
-      await apiClient.post(`${detailPath}/internal-notes`, { note_text: note });
+      const result = await apiClient.post<unknown>(`${detailPath}/internal-notes`, { note_text: note });
+      showDetail(result);
       setNoteDraft('');
-      await load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Không thêm được ghi chú.');
     } finally {
@@ -258,8 +280,8 @@ export function ContactQuoteDetailPage({
     setArchiving(true);
     setActionError('');
     try {
-      await apiClient.post(`${detailPath}/restore`);
-      await load();
+      const result = await apiClient.post<unknown>(`${detailPath}/restore`);
+      showDetail(result);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Không khôi phục được yêu cầu.');
     } finally {
@@ -294,14 +316,14 @@ export function ContactQuoteDetailPage({
         </div>
 
         {/* Nút hành động chính */}
-        {isQuote && !isDone && !isArchived && canUpdateStatus && (
+        {!isDone && !isArchived && canUpdateStatus && ['new', 'in_progress'].includes(currentStatus) && (
           <Button
             type="button"
             disabled={statusSaving}
             onClick={() => applyStatus('done')}
           >
             <CheckCircle2 className="mr-1.5 h-4 w-4" />
-            {statusSaving ? 'Đang lưu...' : 'Đánh dấu xong'}
+            {statusSaving ? 'Đang lưu...' : 'Đánh dấu đã xong'}
           </Button>
         )}
       </div>
@@ -374,78 +396,94 @@ export function ContactQuoteDetailPage({
         {/* ── Cột phải: sidebar gọn ── */}
         <div className="space-y-4">
 
-          {/* Trạng thái & ghi chú — gộp 1 card */}
-          <Card className="overflow-hidden">
+          {/* Các thao tác xử lý hiện có, theo quyền của vai trò */}
+          <Card className="overflow-hidden border-[#c7d9e8]">
+            <div className="border-b border-[#d4e3ef] bg-[#eef5fb] px-4 py-3">
+              <div className="flex items-center gap-2 text-primary">
+                <ClipboardList className="h-4 w-4" />
+                <h2 className="text-sm font-semibold text-text">Xử lý yêu cầu</h2>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-slate-700">{permissionSummary}</p>
+            </div>
 
             {/* Trạng thái */}
             <div className="p-4">
-              <p className="mb-2 text-xs font-semibold text-muted-foreground">Trạng thái</p>
+              <p className="mb-2 text-sm font-semibold text-text">Trạng thái xử lý</p>
               {canUpdateStatus && !isArchived ? (
-                <Select
-                  aria-label="Trạng thái"
-                  value={statusDraft}
-                  disabled={statusSaving}
-                  onChange={(e) => {
-                    setStatusDraft(e.target.value);
-                    void applyStatus(e.target.value);
-                  }}
-                >
-                  {statusOptions.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </Select>
+                <>
+                  <Select
+                    aria-label="Trạng thái"
+                    className="border-[#b9cddd] bg-white font-medium"
+                    value={statusDraft}
+                    disabled={statusSaving}
+                    onChange={(e) => {
+                      setStatusDraft(e.target.value);
+                      void applyStatus(e.target.value);
+                    }}
+                  >
+                    {statusOptions.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </Select>
+                  <p className="mt-2 text-xs text-slate-600">Chọn trạng thái để lưu ngay.</p>
+                </>
               ) : (
                 <>
-                  <p className="text-sm text-text">{statusLabel(currentStatus)}</p>
+                  <p className="text-sm font-medium text-text">{statusLabel(currentStatus)}</p>
                   {!isArchived && !canUpdateStatus ? (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Vai trò hiện tại chỉ có quyền xem, không thể cập nhật trạng thái.
+                    <p className="mt-1 text-xs text-slate-600">
+                      Bạn có thể xem nhưng không có quyền đổi trạng thái.
                     </p>
                   ) : null}
                 </>
               )}
-              {statusSaving && <p className="mt-1 text-xs text-muted-foreground">Đang lưu...</p>}
+              {statusSaving && <p className="mt-2 text-xs font-medium text-primary">Đang lưu trạng thái...</p>}
             </div>
 
-            {/* Người phụ trách — chỉ khi có options */}
-            {(assigneeOptions.length > 0 || Boolean(entity.assigned_to)) && (
-              <div className="border-t border-border p-4">
-                <p className="mb-2 text-xs font-semibold text-muted-foreground">Người phụ trách</p>
-                {canAssign && !isArchived && assigneeOptions.length > 0 ? (
-                  <Select
-                    aria-label="Người phụ trách"
-                    value={assigneeDraft}
-                    disabled={assigneeSaving}
-                    onChange={(e) => {
-                      setAssigneeDraft(e.target.value);
-                      void updateAssignee(e.target.value);
-                    }}
-                  >
-                    <option value="">— Chưa giao —</option>
-                    {assigneeOptions.map((opt) => (
-                      <option key={opt.id} value={String(opt.id)}>{opt.label}</option>
-                    ))}
-                  </Select>
-                ) : (
-                  <>
-                    <p className="text-sm text-text">
-                      {entity.assigned_to
-                        ? formatValue(assigneeOptions.find((o) => String(o.id) === String(entity.assigned_to))?.label ?? entity.assigned_to)
-                        : 'Chưa giao'}
+            {/* Người phụ trách */}
+            <div className="border-t border-border p-4">
+              <p className="mb-2 text-sm font-semibold text-text">Người phụ trách</p>
+              {canAssign && !isArchived && assigneeOptions.length > 0 ? (
+                <Select
+                  aria-label="Người phụ trách"
+                  className="border-[#b9cddd] bg-white font-medium"
+                  value={assigneeDraft}
+                  disabled={assigneeSaving}
+                  onChange={(e) => {
+                    setAssigneeDraft(e.target.value);
+                    void updateAssignee(e.target.value);
+                  }}
+                >
+                  <option value="">— Chưa giao —</option>
+                  {assigneeId && !assigneeIsAvailable ? (
+                    <option value={assigneeId}>{assigneeLabel} (không còn đủ điều kiện nhận việc)</option>
+                  ) : null}
+                  {assigneeOptions.map((opt) => (
+                    <option key={opt.id} value={String(opt.id)}>{opt.label}</option>
+                  ))}
+                </Select>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-text">{assigneeLabel}</p>
+                  {!isArchived && !canAssign ? (
+                    <p className="mt-1 text-xs text-slate-600">
+                      Bạn có thể xem nhưng không có quyền phân công.
                     </p>
-                    {!isArchived && !canAssign ? (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Vai trò hiện tại không có quyền phân công người phụ trách.
-                      </p>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            )}
+                  ) : null}
+                  {!isArchived && canAssign && assigneeOptions.length === 0 ? (
+                    <p className="mt-1 text-xs text-slate-600">Chưa có tài khoản đủ quyền để nhận việc.</p>
+                  ) : null}
+                </>
+              )}
+              <p className="mt-2 text-xs leading-5 text-slate-600">
+                Chỉ tài khoản có quyền xem và đổi trạng thái mới nhận việc. Người được giao hiển thị trên danh sách để theo dõi.
+              </p>
+              {assigneeSaving && <p className="mt-1 text-xs font-medium text-primary">Đang lưu phân công...</p>}
+            </div>
 
             {/* Ghi chú nội bộ */}
             <div className="border-t border-border p-4">
-              <p className="mb-3 text-xs font-semibold text-muted-foreground">Ghi chú nội bộ</p>
+              <p className="mb-3 text-sm font-semibold text-text">Ghi chú nội bộ</p>
 
               {notes.length > 0 && (
                 <div className="mb-3 space-y-3">
@@ -488,21 +526,23 @@ export function ContactQuoteDetailPage({
                   />
                   <Button
                     type="button"
-                    variant="secondary"
                     size="sm"
-                    className="w-full"
+                    className="w-full font-semibold disabled:bg-slate-200 disabled:text-slate-600 disabled:opacity-100"
                     disabled={noteSaving || !noteDraft.trim()}
                     onClick={() => void createNote()}
                   >
                     <Send className="mr-1.5 h-3 w-3" />
                     {noteSaving ? 'Đang gửi...' : 'Gửi ghi chú'}
                   </Button>
+                  {!noteDraft.trim() && !noteSaving ? (
+                    <p className="text-xs text-slate-600">Nhập ghi chú để bật nút gửi.</p>
+                  ) : null}
                 </div>
               ) : (
                 <>
                   {!isArchived && !canCreateNote ? (
-                    <p className="text-xs text-muted-foreground">
-                      Vai trò hiện tại không có quyền thêm ghi chú nội bộ.
+                    <p className="text-xs text-slate-600">
+                      Bạn có thể xem nhưng không có quyền thêm ghi chú nội bộ.
                     </p>
                   ) : null}
                   {notes.length === 0 && (
@@ -518,23 +558,27 @@ export function ContactQuoteDetailPage({
                 Gửi lúc {formatDate(entity.created_at)}
               </p>
               {canArchive && !isArchived && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setConfirmArchive(true)}
-                  className="mt-2 inline-flex min-h-11 items-center rounded-sm px-1 text-[12px] text-muted-foreground underline-offset-2 hover:text-red-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 md:min-h-8"
+                  className="mt-3 w-full border-slate-300 font-semibold text-slate-700"
                 >
                   Lưu trữ yêu cầu
-                </button>
+                </Button>
               )}
               {canRestore && isArchived && (
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   disabled={archiving}
                   onClick={handleRestore}
-                  className="mt-2 text-[12px] font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                  className="mt-3 w-full border-slate-300 font-semibold text-primary"
                 >
                   {archiving ? 'Đang khôi phục...' : 'Khôi phục yêu cầu'}
-                </button>
+                </Button>
               )}
             </div>
           </Card>
@@ -869,7 +913,7 @@ function statusLabel(value: unknown): string {
     in_progress: 'Đang xử lý',
     done:        'Đã xong',
     spam:        'Spam',
-    invalid:     'Không phù hợp',
+    invalid:     'Không hợp lệ',
     archived:    'Đã lưu trữ',
   };
   return map[String(value || '')] ?? formatValue(value);

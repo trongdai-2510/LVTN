@@ -27,13 +27,13 @@ type PermanentDeleteTarget = { id: string; name: string };
 const copy = {
   contact: {
     title: 'Liên hệ',
-    subtitle: 'Tin nhắn từ khách hàng qua form liên hệ. Cập nhật trạng thái và ghi chú xử lý.',
+    subtitle: 'Tin nhắn từ khách hàng qua form liên hệ. Phân công, cập nhật trạng thái và ghi chú xử lý.',
     search: 'Tìm theo tên khách, công ty, email, số điện thoại...',
     primaryLabel: 'Khách liên hệ'
   },
   quote: {
     title: 'Yêu cầu báo giá',
-    subtitle: 'Yêu cầu báo giá từ khách hàng — xem sản phẩm yêu cầu, cập nhật trạng thái và ghi chú.',
+    subtitle: 'Yêu cầu báo giá từ khách hàng — xem sản phẩm, phân công, cập nhật trạng thái và ghi chú.',
     search: 'Tìm theo tên khách, công ty, email, số điện thoại...',
     primaryLabel: 'Khách yêu cầu'
   }
@@ -296,7 +296,7 @@ export function ContactQuoteListPage({
               {assigneeOptions.length > 0 && (
                 <label className="block min-w-[160px]">
                   <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                    Người phụ trách
+                    Lọc người phụ trách
                   </span>
                   <Select
                     value={assigneeFilter}
@@ -382,9 +382,9 @@ export function ContactQuoteListPage({
                   !isNew && !isDone && !isNaN(createdAt.getTime()) &&
                   Date.now() - createdAt.getTime() > 48 * 60 * 60 * 1000;
                 const preview = formatValue(item.subject || item.message);
-                const assignee = assigneeOptions.find(
-                  (o) => String(o.id) === String(item.assigned_to)
-                )?.label ?? null;
+                const assignee = typeof item.assigned_to_label === 'string' && item.assigned_to_label.trim()
+                  ? item.assigned_to_label
+                  : item.assigned_to != null ? 'Người phụ trách không còn trong hệ thống' : null;
 
                 return (
                   <InboxRow
@@ -524,8 +524,8 @@ function InboxRow({
       {/* Meta */}
       <div className="ml-auto shrink-0 text-right">
         <div className="text-[11px] text-muted-foreground">{formatDate(createdAt)}</div>
-        <div className="mt-0.5 text-[11px] text-muted-foreground">
-          {assignee ?? 'Chưa có người xử lý'}
+        <div className="mt-0.5 text-[11px] font-medium text-slate-700">
+          Phụ trách: {assignee ?? 'Chưa giao'}
         </div>
       </div>
       </Link>

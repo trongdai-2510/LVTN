@@ -60,7 +60,7 @@ export class ContactService {
 
     return {
       items: result.items,
-      assignee_options: await this.contactRepository.listAssigneeOptions(),
+      assignee_options: await this.contactRepository.listAssigneeFilterOptions(),
       pagination: createPaginationMeta({ page: pagination.page, pageSize: pagination.pageSize, total: result.total }),
       filters: {
         q: filters.q,
@@ -94,6 +94,9 @@ export class ContactService {
     const outcome = await this.contactRepository.updateAssignee(id, assignedTo);
     if (outcome === 'assignee_not_found') {
       throw this.notFound('Assignee was not found.');
+    }
+    if (outcome === 'assignee_not_eligible') {
+      throw this.conflict('Người này cần quyền xem và cập nhật trạng thái liên hệ để được phân công.');
     }
     this.assertActiveMutationOutcome(outcome);
     return this.getContactDetail(id);

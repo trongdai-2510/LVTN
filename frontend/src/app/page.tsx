@@ -230,6 +230,7 @@ export default async function HomePage() {
               <HomeServicesSection
                 key={section.id}
                 services={servicesResponse.items}
+                titleOverride={section.title_override}
                 config={configOf(section)}
               />
             );

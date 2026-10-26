@@ -2,6 +2,8 @@
 
 Website giới thiệu sản phẩm, thương hiệu, dịch vụ và dự án của Song Thanh, kèm giao diện quản trị nội dung và API riêng. Đây là repository phục vụ LVTN; hành vi đang chạy và kiểm thử hiện tại là cơ sở để đối chiếu, không dùng tài liệu cũ đã bị xóa làm đặc tả.
 
+Bắt đầu từ [PROJECT.md](PROJECT.md) để đọc bản đồ chi tiết toàn hệ thống, rồi [AUDIT.md](AUDIT.md) để xem số liệu kiểm kê, bằng chứng kiểm thử, rủi ro và các điểm cần xác nhận trước khi viết khóa luận. Đây là tài liệu hiện trạng, chưa phải đặc tả nghiệp vụ được duyệt. Các biên bản trong `tasks/` ghi lại từng đợt kiểm thử; các bản thảo trong `docs/` và `tasks/deXuat*.md` chưa thay thế code/runtime hiện tại.
+
 ## Mã nguồn nằm ở đâu?
 
 | Thư mục | Vai trò | Điểm bắt đầu |

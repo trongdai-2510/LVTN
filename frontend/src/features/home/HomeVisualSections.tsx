@@ -101,7 +101,7 @@ export function HomeProductCategoriesSection({
   const ids = config?.category_ids ?? [];
   const visibleCategories = applyListMode(categories, mode, ids, itemLimit);
   return (
-    <section className="bg-subtle py-12 lg:py-20">
+    <section className="bg-subtle py-14 lg:py-20">
       <Container className="space-y-7 lg:space-y-10" size="narrow">
         <div className="flex flex-wrap items-end justify-between gap-5">
           <div className="max-w-3xl">
@@ -112,9 +112,9 @@ export function HomeProductCategoriesSection({
           </Link>
         </div>
         {visibleCategories.length > 0 ? (
-          <HomeCarousel ariaLabel={title} desktopVisibleCount={4} loop>
+          <HomeCarousel ariaLabel={title} desktopVisibleCount={3} loop>
             {visibleCategories.map((category) => (
-              <ProductCategoryCard category={category} key={category.id} />
+              <ProductCategoryCard category={category} key={category.id} variant="home" />
             ))}
           </HomeCarousel>
         ) : (
@@ -179,14 +179,14 @@ export function HomeCompanyOverviewSection({
             <h2 className="type-section-title text-secondary">{heading}</h2>
             {summary ? <p className="type-body max-w-[60ch] text-body">{summary}</p> : null}
           </div>
-          <ul className="grid gap-3 sm:grid-cols-3">
-            <li className="rounded-sm border border-borderBlue bg-white px-4 py-3">
+          <ul className="grid divide-y divide-borderBlue border-y border-borderBlue sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            <li className="py-3 sm:px-4 sm:first:pl-0">
               <p className="type-caption font-semibold uppercase tracking-[0.08em] text-primary">Hotline</p>
               {hotlineHref ? (
                 <div className="mt-1 grid gap-1">
                   {publicHotlines.map((hotline) => (
                     <a
-                      className="inline-flex min-h-11 items-center break-words font-mono text-[15px] font-bold leading-[1.35] text-secondary transition-colors hover:text-primary"
+                      className="inline-flex min-h-11 items-center break-words text-[15px] font-medium leading-[1.35] text-secondary transition-colors hover:text-primary"
                       href={`tel:${hotline.replace(/[^\d+]/g, '')}`}
                       key={hotline}
                     >
@@ -195,25 +195,25 @@ export function HomeCompanyOverviewSection({
                   ))}
                 </div>
               ) : (
-                <p className="mt-1 break-words font-mono text-[15px] font-bold leading-[1.35] text-secondary">{publicHotline}</p>
+                <p className="mt-1 break-words text-[15px] font-medium leading-[1.35] text-secondary">{publicHotline}</p>
               )}
             </li>
-            <li className="rounded-sm border border-borderBlue bg-white px-4 py-3">
+            <li className="py-3 sm:px-4">
               <p className="type-caption font-semibold uppercase tracking-[0.08em] text-primary">Email</p>
               {emailHref ? (
                 <a
-                  className="mt-1 inline-flex min-h-11 items-center break-all text-[13px] font-semibold leading-[1.4] text-secondary transition-colors hover:text-primary"
+                  className="mt-1 inline-flex min-h-11 items-center break-all text-[13px] font-medium leading-[1.4] text-secondary transition-colors hover:text-primary"
                   href={emailHref}
                 >
                   {publicEmail}
                 </a>
               ) : (
-                <p className="mt-1 break-all text-[13px] font-semibold leading-[1.4] text-secondary">{publicEmail}</p>
+                <p className="mt-1 break-all text-[13px] font-medium leading-[1.4] text-secondary">{publicEmail}</p>
               )}
             </li>
-            <li className="rounded-sm border border-borderBlue bg-white px-4 py-3">
+            <li className="py-3 sm:px-4">
               <p className="type-caption font-semibold uppercase tracking-[0.08em] text-primary">Giờ làm việc</p>
-              <p className="mt-1 text-[14px] font-semibold leading-[1.4] text-secondary">{publicWorkingHours}</p>
+              <p className="mt-1 text-[14px] font-medium leading-[1.4] text-secondary">{publicWorkingHours}</p>
             </li>
           </ul>
           <div className="flex items-start gap-2 type-body-sm text-body">
@@ -280,9 +280,8 @@ export function HomeFeaturedProductsSection({
           <HomeCarousel
             ariaLabel={title}
             controlsPlacement="inside"
-            desktopVisibleCount={4}
+            desktopVisibleCount={3}
             hideControlsWhenStatic
-            layout="fixed-gap"
             loop
           >
             {visibleProducts.map((productGroup) => (
@@ -308,8 +307,10 @@ export function HomeFeaturedProductsSection({
 }
 export function HomeServicesSection({
   services,
+  titleOverride,
   config
 }: Pick<HomeVisualSectionsProps, 'services'> & {
+  titleOverride?: string | null;
   config?: ServicesSectionConfig;
 }) {
   const mode = config?.mode ?? 'auto';
@@ -319,43 +320,63 @@ export function HomeServicesSection({
   if (visibleServices.length === 0) {
     return null;
   }
+  const [featuredService, ...otherServices] = visibleServices;
+  const featuredImageSource = resolvePublicFileSource(featuredService.image_file);
+  const title = titleOverride?.trim() || 'Dịch vụ kỹ thuật';
   return (
-    <section className="bg-white py-12 lg:py-16">
-      <Container className="grid grid-cols-2 gap-3 sm:gap-6 md:grid-cols-2 lg:grid-cols-4" size="narrow">
-        {visibleServices.map((service) => {
-          const imageSource = resolvePublicFileSource(service.image_file);
-          return (
-            <Link
-              aria-label={`Xem dịch vụ ${service.title}`}
-              className="group block h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-              href={`/dich-vu/${service.slug}`}
-              key={service.id}
-            >
-              <Card className="h-full overflow-hidden p-0 transition-shadow group-hover:shadow-action">
-                {imageSource ? (
-                  <div className="relative h-[116px] w-full overflow-hidden sm:h-[180px]">
-                    <Image
-                      alt={service.title}
-                      fill
-                      className="object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-                      loading="lazy"
-                      sizes="(min-width: 1024px) 25vw, (min-width: 768px) 50vw, 46vw"
-                      src={imageSource}
-                    />
-                  </div>
-                ) : null}
-                <div className="p-3 sm:p-6">
-                  <h3 className="type-card-title line-clamp-2 text-secondary transition-colors group-hover:text-primary">
-                    {service.title}
-                  </h3>
-                  {service.description?.trim() ? (
-                    <p className="type-body-sm mt-3 hidden text-body sm:block">{service.description.trim()}</p>
-                  ) : null}
-                </div>
-              </Card>
-            </Link>
-          );
-        })}
+    <section className="bg-white py-14 lg:py-20">
+      <Container className="space-y-8 lg:space-y-10" size="narrow">
+        <div className="flex flex-wrap items-end justify-between gap-5">
+          <h2 className="type-section-title text-secondary">{title}</h2>
+          <Link className="type-button inline-flex min-h-11 items-center gap-2 text-primary hover:underline" href="/dich-vu">
+            Xem tất cả dịch vụ <span aria-hidden>→</span>
+          </Link>
+        </div>
+        <div className={`grid gap-6 ${otherServices.length > 0 ? 'lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] lg:gap-12' : ''}`}>
+          <Link
+            aria-label={`Xem dịch vụ ${featuredService.title}`}
+            className={`group flex flex-col overflow-hidden rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary ${featuredImageSource ? 'border border-borderBlue bg-[#f5f8fc] text-secondary' : 'min-h-[300px] justify-end bg-secondary text-white'}`}
+            href={`/dich-vu/${featuredService.slug}`}
+          >
+            {featuredImageSource ? (
+              <div className="relative aspect-[16/9] w-full bg-[#e8f0fc]">
+                <Image
+                  alt={featuredService.title}
+                  className="object-contain"
+                  fill
+                  loading="lazy"
+                  sizes="(min-width: 1024px) 48vw, 100vw"
+                  src={featuredImageSource}
+                />
+              </div>
+            ) : null}
+            <div className={`max-w-[52ch] space-y-2 p-6 sm:p-8 ${featuredImageSource ? '' : 'text-white'}`}>
+              <p className={`type-label tabular-nums ${featuredImageSource ? 'text-primary' : 'text-white/85'}`}>01 / {String(visibleServices.length).padStart(2, '0')}</p>
+              <h3 className="font-display text-[24px] font-semibold leading-tight tracking-[-0.02em] sm:text-[28px]">{featuredService.title}</h3>
+              {featuredService.description?.trim() ? <p className={`type-body-sm line-clamp-2 ${featuredImageSource ? 'text-body' : 'text-white/90'}`}>{featuredService.description.trim()}</p> : null}
+              <span className={`type-button inline-flex min-h-11 items-center gap-2 pt-1 ${featuredImageSource ? 'text-primary' : 'text-white'}`}>Xem dịch vụ <span aria-hidden>→</span></span>
+            </div>
+          </Link>
+          {otherServices.length > 0 ? (
+            <div className="flex flex-col justify-center border-t border-borderBlue">
+              {otherServices.map((service, index) => (
+                <Link
+                  aria-label={`Xem dịch vụ ${service.title}`}
+                  className="group grid min-h-[112px] grid-cols-[32px_minmax(0,1fr)_24px] items-start gap-4 border-b border-borderBlue py-5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:grid-cols-[40px_minmax(0,1fr)_24px] sm:gap-5"
+                  href={`/dich-vu/${service.slug}`}
+                  key={service.id}
+                >
+                  <span className="type-caption pt-1 tabular-nums text-primary">{String(index + 2).padStart(2, '0')}</span>
+                  <span className="space-y-2">
+                    <span className="type-card-title block text-secondary transition-colors group-hover:text-primary">{service.title}</span>
+                    {service.description?.trim() ? <span className="type-body-sm line-clamp-2 block text-body">{service.description.trim()}</span> : null}
+                  </span>
+                  <span aria-hidden className="pt-1 text-xl leading-none text-primary transition-transform group-hover:translate-x-1 motion-reduce:transition-none">→</span>
+                </Link>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </Container>
     </section>
   );
@@ -392,7 +413,7 @@ export function HomeProjectsSection({
           ariaLabel={title}
           autoScrollIntervalMs={autoscrollMs}
           controlsPlacement="inside"
-          desktopVisibleCount={3}
+          desktopVisibleCount={2}
           hideControlsWhenStatic
           loop
         >
@@ -405,21 +426,21 @@ export function HomeProjectsSection({
                 href={`/du-an/${project.slug}`}
                 key={project.id}
               >
-                <Card className="flex h-full flex-col overflow-hidden transition-shadow group-hover:shadow-action">
+                <Card className="flex h-full flex-col overflow-hidden border-borderBlue shadow-none transition-[border-color,box-shadow] group-hover:border-primary/40 group-hover:shadow-soft">
                   {imageSource ? (
-                    <div className="relative h-[220px] w-full overflow-hidden sm:h-[280px] lg:h-[320px]">
+                    <div className="relative h-[240px] w-full overflow-hidden sm:h-[300px] lg:h-[350px]">
                       <Image
                         alt={project.title}
                         fill
                         className="object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                         loading="lazy"
-                        sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
+                        sizes="(min-width: 1024px) 50vw, (min-width: 768px) 50vw, 100vw"
                         src={imageSource}
                       />
                     </div>
                   ) : null}
-                  <div className={`flex flex-1 flex-col justify-center p-5 sm:p-6 ${imageSource ? '' : 'min-h-[200px]'}`}>
-                    {!imageSource && project.client_name?.trim() ? (
+                  <div className={`flex flex-1 flex-col justify-center p-5 sm:p-7 ${imageSource ? '' : 'min-h-[200px]'}`}>
+                    {project.client_name?.trim() ? (
                       <p className="type-label mb-3 line-clamp-1 text-primary">{project.client_name.trim()}</p>
                     ) : null}
                     <h3 className="type-card-title line-clamp-2 text-secondary transition-colors group-hover:text-primary">
@@ -430,7 +451,7 @@ export function HomeProjectsSection({
                         {project.description.trim()}
                       </p>
                     ) : null}
-                    {!imageSource && project.location?.trim() ? (
+                    {project.location?.trim() ? (
                       <p className="type-caption mt-4 line-clamp-2 text-body">{project.location.trim()}</p>
                     ) : null}
                   </div>
@@ -610,7 +631,7 @@ export function HomeTrustStripSection({
         ),
         value: String(brandCount),
         label: 'Thương hiệu',
-        sublabel: 'sản phẩm chính hãng'
+        sublabel: 'trong danh mục công khai'
       });
     }
   }
@@ -636,42 +657,30 @@ export function HomeTrustStripSection({
       : colCount === 2
       ? 'grid-cols-2'
       : colCount === 3
-      ? 'grid-cols-1 sm:grid-cols-3'
+      ? 'grid-cols-3'
       : 'grid-cols-2 lg:grid-cols-4';
   return (
-    <section className="relative overflow-hidden border-y border-borderBlue bg-[oklch(0.97_0.015_248)] py-14 lg:py-16">
-      {/* Soft pattern */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-[0.05]"
-        style={{
-          backgroundImage:
-            'linear-gradient(currentColor 1px, transparent 1px), linear-gradient(90deg, currentColor 1px, transparent 1px)',
-          backgroundSize: '32px 32px',
-          color: 'oklch(0.55 0.18 250)'
-        }}
-      />
-      <Container className={`relative grid gap-y-8 gap-x-4 sm:gap-y-10 sm:gap-x-8 ${gridClass}`} size="narrow">
+    <section className="border-y border-borderBlue bg-white py-10 lg:py-12">
+      <Container className={`grid gap-3 sm:gap-8 ${gridClass}`} size="narrow">
         {displaySignals.map((signal, index) => (
           <div
             key={signal.key}
-            className={`relative flex flex-col items-start gap-3 px-2 lg:px-4 ${
-              index > 0 ? 'sm:border-l sm:border-borderBlue' : ''
+            className={`flex min-w-0 flex-col items-start gap-2 px-1 sm:px-5 ${
+              index > 0 ? 'border-l border-borderBlue' : ''
             }`}
           >
-            <span className="inline-flex h-12 w-12 items-center justify-center rounded-sm bg-primary text-white shadow-action">
+            <span className="hidden h-8 w-8 items-center justify-center text-primary sm:inline-flex [&>svg]:h-5 [&>svg]:w-5">
               {signal.icon}
             </span>
-            <div className="font-display text-[40px] font-extrabold leading-none tracking-[-0.02em] text-primary sm:text-[56px] lg:text-[68px]">
+            <div className="font-display text-[32px] font-semibold leading-none tracking-[-0.025em] text-secondary sm:text-[44px] lg:text-[52px]">
               {signal.value}
             </div>
-            <div className="h-1 w-12 bg-primary" />
             <div>
-              <div className="type-caption font-bold uppercase tracking-[0.1em] text-primaryStrong">
+              <div className="type-caption font-medium text-secondary">
                 {signal.label}
               </div>
               {signal.sublabel ? (
-                <div className="mt-1 text-[14px] leading-snug text-secondary/80">
+                <div className="mt-1 hidden text-[14px] leading-snug text-body sm:block">
                   {signal.sublabel}
                 </div>
               ) : null}
@@ -710,9 +719,9 @@ export function HomeContactCtaSection({
     'Bạn cần giải pháp tối ưu cho hệ thống điện?';
   const showQuoteForm = config?.show_quote_form ?? true;
   return (
-    <section className={`bg-white ${compactTop ? 'pb-12 pt-8 lg:pb-20 lg:pt-12' : 'py-12 lg:py-24'}`}>
+    <section className={`bg-white ${compactTop ? 'pb-12 pt-8 lg:pb-20 lg:pt-12' : 'py-14 lg:py-16'}`}>
       <Container size="narrow">
-        <div className={`relative overflow-hidden rounded-lg px-5 py-8 sm:px-12 sm:py-10 lg:grid lg:grid-cols-[minmax(0,519px)_minmax(0,522px)] lg:items-center lg:gap-12 lg:px-16 ${isLight ? 'border border-borderBlue bg-primarySoft/55 text-secondary lg:py-12' : 'bg-primaryStrong text-white lg:min-h-[518px] lg:py-16'}`}>
+        <div className={`relative overflow-hidden rounded-lg px-5 py-8 sm:px-12 sm:py-10 lg:grid lg:grid-cols-[minmax(0,519px)_minmax(0,522px)] lg:items-center lg:gap-12 lg:px-16 ${isLight ? 'bg-[#e8f0fc] text-secondary lg:py-12' : 'bg-primaryStrong text-white lg:min-h-[518px] lg:py-16'}`}>
           {!isLight ? <div className="pointer-events-none absolute -right-32 -top-32 h-64 w-64 rounded-md bg-white/20 blur-[64px]" /> : null}
           {!isLight ? <div className="pointer-events-none absolute -bottom-32 -left-32 h-64 w-64 rounded-md bg-white/20 blur-[64px]" /> : null}
           <div className="relative space-y-6">
@@ -727,7 +736,7 @@ export function HomeContactCtaSection({
                 <span className={`type-caption flex h-6 w-6 items-center justify-center rounded-xs font-bold ${isLight ? 'bg-white text-primary' : 'bg-white/15'}`}>
                   <MailIcon className="h-3.5 w-3.5" />
                 </span>
-                <span>{publicEmail}</span>
+                <a className="break-all hover:underline" href={`mailto:${publicEmail}`}>{publicEmail}</a>
               </div> : null}
               {publicHotlines.length > 0 ? <div className="flex items-center gap-3">
                 <span className={`type-caption flex h-6 w-6 items-center justify-center rounded-xs font-bold ${isLight ? 'bg-white text-primary' : 'bg-white/15'}`}>
@@ -735,7 +744,7 @@ export function HomeContactCtaSection({
                 </span>
                 <span className="grid gap-1">
                   {publicHotlines.map((hotline) => (
-                    <span key={hotline}>{hotline}</span>
+                    <a className="hover:underline" href={`tel:${hotline.replace(/[^\d+]/g, '')}`} key={hotline}>{hotline}</a>
                   ))}
                 </span>
               </div> : null}

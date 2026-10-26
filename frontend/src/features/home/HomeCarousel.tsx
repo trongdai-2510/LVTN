@@ -21,7 +21,7 @@ const LOOP_REENABLE_TRANSITION_DELAY_MS = 32;
 type HomeCarouselProps = {
   ariaLabel: string;
   children: ReactNode;
-  desktopVisibleCount?: 3 | 4;
+  desktopVisibleCount?: 2 | 3 | 4;
   hideControlsWhenStatic?: boolean;
   layout?: 'default' | 'fixed-gap' | 'brand-strip';
   controlsPlacement?: 'outside' | 'inside';
@@ -54,6 +54,10 @@ function getResponsiveVisibleCount(
     if (screenWidth >= 1024) return 4;
     if (screenWidth >= 640) return 3;
     return 2;
+  }
+
+  if (desktopVisibleCount === 2) {
+    return screenWidth >= 640 ? 2 : 1;
   }
 
   if (layout === 'fixed-gap' || desktopVisibleCount === 4) {
@@ -408,6 +412,8 @@ export function HomeCarousel({
       ? 'basis-[calc((100%_-_24px)/2)] sm:basis-[calc((100%_-_48px)/3)] lg:basis-[calc((100%_-_72px)/4)] xl:basis-[calc((100%_-_120px)/6)]'
       : layout === 'fixed-gap'
         ? 'basis-full sm:basis-[calc((100%_-_24px)/2)] lg:basis-[calc((100%_-_48px)/3)] xl:basis-[calc((100%_-_72px)/4)]'
+        : desktopVisibleCount === 2
+          ? 'basis-full sm:basis-[calc((100%_-_24px)/2)]'
         : desktopVisibleCount === 4
           ? 'basis-full sm:basis-[calc((100%_-_24px)/2)] lg:basis-[calc((100%_-_48px)/3)] xl:basis-[calc((100%_-_72px)/4)]'
           : 'basis-full sm:basis-[calc((100%_-_24px)/2)] lg:basis-[calc((100%_-_48px)/3)]';

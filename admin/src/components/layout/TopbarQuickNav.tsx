@@ -162,9 +162,11 @@ export function TopbarQuickNav({
     <div
       ref={containerRef}
       data-topbar-quick-nav="true"
-      className="relative hidden w-full max-w-[560px] md:block"
+      className="relative hidden w-full max-w-[560px] rounded-xl border border-[#d7e4f0] bg-[#f5f9fd] shadow-[0_2px_8px_rgba(20,95,159,0.04)] transition-[border-color,background-color,box-shadow] hover:border-[#b8d2e8] focus-within:border-[#7eafd7] focus-within:bg-white focus-within:ring-[3px] focus-within:ring-[#e1effb] md:block"
     >
-      <Search className="pointer-events-none absolute left-3.5 top-1/2 z-[1] h-4 w-4 -translate-y-1/2 text-slate-500" />
+      <span className="pointer-events-none absolute left-1.5 top-1/2 z-[1] flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_2px_5px_rgba(20,95,159,0.16)]">
+        <Search className="h-[18px] w-[18px]" />
+      </span>
       <Input
         ref={inputRef}
         value={query}
@@ -197,8 +199,8 @@ export function TopbarQuickNav({
             navigateTo(matches[selectedIndex].href);
           }
         }}
-        className="rounded-xl border-slate-200 bg-white pl-10 pr-20 shadow-[0_2px_8px_rgba(15,23,42,0.04)] focus:border-blue-400 focus:bg-white focus:ring-blue-100"
-        placeholder="Tìm trang hoặc chọn nơi tìm dữ liệu..."
+        className="h-[46px] rounded-xl border-0 bg-transparent pl-[54px] pr-20 text-sm font-medium shadow-none placeholder:font-normal placeholder:text-slate-500 focus:border-0 focus:ring-0"
+        placeholder="Tìm trang hoặc nhập từ khóa..."
         aria-label="Tìm trang hoặc dữ liệu"
         role="combobox"
         aria-haspopup="dialog"
@@ -206,7 +208,7 @@ export function TopbarQuickNav({
         aria-controls={open ? 'admin-quick-nav-results' : undefined}
         aria-activedescendant={open && selectedIndex >= 0 ? `admin-quick-nav-option-${selectedIndex}` : undefined}
       />
-      <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 lg:inline-block">
+      <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded-md border border-[#dce7f1] bg-white px-2 py-1 font-mono text-[10px] font-medium text-slate-500 shadow-[0_1px_2px_rgba(15,23,42,0.04)] lg:inline-block">
         Ctrl K
       </kbd>
       {open ? (

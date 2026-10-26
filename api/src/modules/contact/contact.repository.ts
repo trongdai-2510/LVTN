@@ -145,6 +145,9 @@ export class ContactRepository {
           .forUpdate()
           .first();
         if (!assignee) return 'assignee_not_found' as const;
+        if (!(await this.logicUsers.canProcessRequests(
+          assignedTo, 'contact.read', 'contact.update_status', trx
+        ))) return 'assignee_not_eligible' as const;
       }
       await trx(CONTACT_REQUEST_TABLE).where({ id }).update({ assigned_to: assignedTo });
       return 'updated' as const;
@@ -185,7 +188,11 @@ export class ContactRepository {
   }
 
   async listAssigneeOptions(): Promise<ContactAssigneeOption[]> {
-    return this.logicUsers.listAssignableUsers();
+    return this.logicUsers.listAssignableUsers('contact.read', 'contact.update_status');
+  }
+
+  async listAssigneeFilterOptions(): Promise<ContactAssigneeOption[]> {
+    return this.logicUsers.listActiveUsers();
   }
 
   private async lockContact(trx: Knex.Transaction, id: string) {
