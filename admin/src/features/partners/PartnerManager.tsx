@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { FileImage } from '@/components/ui/FileImage';
 import { Modal } from '@/components/ui/Modal';
 import { useAuthState } from '@/features/auth/useAuthState';
-import { apiClient } from '@/lib/api-client';
+import { ApiClientError, apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
 import { PERMISSIONS } from '@/lib/permissions';
 
@@ -53,7 +53,17 @@ function toForm(partner: Partner): PartnerForm {
 }
 
 function messageOf(error: unknown): string {
+  if (error instanceof ApiClientError && error.status === 409 && error.serverMessage.includes('Thứ tự hiển thị')) {
+    return error.serverMessage;
+  }
   return error instanceof Error ? error.message : 'Không thể hoàn tất thao tác. Vui lòng thử lại.';
+}
+
+function nextOrder(items: Partner[]): number {
+  const used = new Set(items.filter((item) => !item.deleted_at).map((item) => item.sort_order));
+  let order = 0;
+  while (used.has(order)) order += 1;
+  return order;
 }
 
 function websiteHost(value: string | null): string | null {
@@ -115,7 +125,7 @@ export function PartnerManager() {
 
   function select(partner: Partner | null) {
     setSelectedId(partner?.id ?? null);
-    setForm(partner ? toForm(partner) : EMPTY_FORM);
+    setForm(partner ? toForm(partner) : { ...EMPTY_FORM, sort_order: String(nextOrder(items)) });
     setError(null);
     setNotice(null);
     setEditing(true);
@@ -138,6 +148,9 @@ export function PartnerManager() {
       if (!payload.name) throw new Error('Vui lòng nhập tên đối tác.');
       if (!Number.isInteger(payload.sort_order) || payload.sort_order < 0 || payload.sort_order > 32767) {
         throw new Error('Thứ tự phải là số nguyên từ 0 đến 32767.');
+      }
+      if (items.some((item) => !item.deleted_at && item.id !== selected?.id && item.sort_order === payload.sort_order)) {
+        throw new Error('Thứ tự hiển thị này đã được dùng. Vui lòng chọn số khác.');
       }
       if (selected) {
         await apiClient.put(`${endpoints.songThanh.partners}/${selected.id}`, payload);
@@ -287,13 +300,14 @@ export function PartnerManager() {
                   <input className={inputClass + ' mt-1'} disabled={!canSave || saving} maxLength={255} onChange={(event) => setForm({ ...form, name: event.target.value })} required value={form.name} />
                 </label>
                 <div className="min-w-0 text-sm font-medium text-text sm:col-span-2">Logo đối tác
-                  <div className="mt-1"><FileReferencePicker allowedMimePrefix="image/" fieldLabel="logo đối tác" onChange={(value) => setForm({ ...form, logo_file_id: value })} readOnly={!canSave || saving} value={form.logo_file_id} /></div>
+                  <div className="mt-1"><FileReferencePicker allowedMimePrefix="image/" fieldLabel="logo đối tác" onChange={(value) => setForm((previous) => ({ ...previous, logo_file_id: value }))} readOnly={!canSave || saving} value={form.logo_file_id} /></div>
                 </div>
                 <label className="block min-w-0 text-sm font-medium text-text sm:col-span-2">Website đối tác
                   <input className={inputClass + ' mt-1'} disabled={!canSave || saving} maxLength={2048} onChange={(event) => setForm({ ...form, website_url: event.target.value })} placeholder="https://..." type="url" value={form.website_url} />
                 </label>
                 <label className="block text-sm font-medium text-text">Thứ tự hiển thị
                   <input className={inputClass + ' mt-1'} disabled={!canSave || saving} max={32767} min={0} onChange={(event) => setForm({ ...form, sort_order: event.target.value })} type="number" value={form.sort_order} />
+                  <span className="mt-1 block text-xs font-normal text-muted-foreground">Mỗi đối tác đang quản lý cần một số riêng.</span>
                 </label>
                 <label className="block text-sm font-medium text-text">Trạng thái
                   <select className={inputClass + ' mt-1'} disabled={!canSave || saving} onChange={(event) => setForm({ ...form, status: event.target.value as PartnerForm['status'] })} value={form.status}>

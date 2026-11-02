@@ -15,7 +15,7 @@ export class CertificateService {
 
   async create(body: CertificateDto) {
     const input = await this.normalize(body);
-    return { certificate: await this.repository.create(input) };
+    return { certificate: await this.withUniqueOrder(() => this.repository.create(input)) };
   }
 
   async update(id: string, body: UpdateCertificateDto) {
@@ -27,7 +27,7 @@ export class CertificateService {
     if (issuedDate && expiresDate && expiresDate < issuedDate) {
       throw this.invalid('Expiry date must not precede issue date.');
     }
-    await this.repository.update(old.id, input);
+    await this.withUniqueOrder(() => this.repository.update(old.id, input));
     return { certificate: await this.repository.find(old.id) };
   }
 
@@ -43,7 +43,8 @@ export class CertificateService {
       const fileId = row[field];
       if (fileId && !await this.repository.fileExists(fileId, image)) throw this.invalid('Certificate file is no longer available.', HttpStatus.CONFLICT);
     }
-    await this.repository.restore(row.id);
+    const sortOrder = await this.restoreOrder(row.sort_order);
+    await this.withUniqueOrder(() => this.repository.restore(row.id, sortOrder));
     return { certificate: await this.repository.find(row.id) };
   }
 
@@ -78,5 +79,28 @@ export class CertificateService {
 
   private invalid(message: string, statusCode = HttpStatus.BAD_REQUEST) {
     return new AppError({ code: ErrorCodes.VALIDATION_ERROR, message, statusCode });
+  }
+
+  private async withUniqueOrder<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && 'constraint' in error
+        && error.code === '23505' && error.constraint === 'uq_certificate_sort_order_active') {
+        throw this.invalid('Thứ tự hiển thị đã được dùng bởi chứng nhận khác.', HttpStatus.CONFLICT);
+      }
+      throw error;
+    }
+  }
+
+  private async restoreOrder(previousOrder: number): Promise<number> {
+    const used = new Set((await this.repository.list())
+      .filter((item) => !item.deleted_at)
+      .map((item) => item.sort_order));
+    if (previousOrder >= 0 && previousOrder <= 32767 && !used.has(previousOrder)) return previousOrder;
+    let order = 0;
+    while (used.has(order) && order <= 32767) order += 1;
+    if (order > 32767) throw this.invalid('Không còn thứ tự hiển thị trống để khôi phục chứng nhận.', HttpStatus.CONFLICT);
+    return order;
   }
 }

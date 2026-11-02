@@ -64,11 +64,11 @@ export class PartnerRepository {
     });
   }
 
-  async restore(id: string): Promise<void> {
+  async restore(id: string, sortOrder: number): Promise<void> {
     await this.knexService.db.transaction(async (trx) => {
       const existing = await trx<PartnerRecord>('partner').where({ id }).whereNotNull('deleted_at').forUpdate().first();
       if (!existing) return;
-      await trx('partner').where({ id }).update({ deleted_at: null });
+      await trx('partner').where({ id }).update({ deleted_at: null, sort_order: sortOrder });
       await this.syncLogo(trx, id, null, existing.logo_file_id);
     });
   }

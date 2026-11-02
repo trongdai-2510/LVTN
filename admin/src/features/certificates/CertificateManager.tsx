@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { FileImage } from '@/components/ui/FileImage';
 import { Modal } from '@/components/ui/Modal';
 import { usePermissions } from '@/features/auth/useAuthState';
-import { apiClient } from '@/lib/api-client';
+import { ApiClientError, apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
 import { PERMISSIONS } from '@/lib/permissions';
 
@@ -20,7 +20,16 @@ type Certificate = {
 type Form = { title: string; file_id: string; image_file_id: string; issued_date: string; expires_date: string; sort_order: string; status: 'active' | 'inactive' };
 const empty: Form = { title: '', file_id: '', image_file_id: '', issued_date: '', expires_date: '', sort_order: '0', status: 'active' };
 const inputClass = 'mt-1 min-h-11 w-full rounded-md border border-border bg-panel px-3 text-sm text-secondary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60';
-function messageOf(error: unknown) { return error instanceof Error ? error.message : 'Không thể hoàn tất thao tác.'; }
+function messageOf(error: unknown) {
+  if (error instanceof ApiClientError && error.status === 409 && error.serverMessage.includes('Thứ tự hiển thị')) return error.serverMessage;
+  return error instanceof Error ? error.message : 'Không thể hoàn tất thao tác.';
+}
+function nextOrder(items: Certificate[]): number {
+  const used = new Set(items.filter((item) => !item.deleted_at).map((item) => item.sort_order));
+  let order = 0;
+  while (used.has(order)) order += 1;
+  return order;
+}
 function dateOf(value: string | null) { return value?.slice(0, 10) ?? ''; }
 function dateLabel(value: string | null) {
   const date = dateOf(value);
@@ -61,7 +70,7 @@ export function CertificateManager() {
 
   function select(row: Certificate | null) {
     setSelectedId(row?.id ?? null);
-    setForm(row ? asForm(row) : empty);
+    setForm(row ? asForm(row) : { ...empty, sort_order: String(nextOrder(items)) });
     setError(null);
     setNotice(null);
     setEditorOpen(true);
@@ -77,6 +86,7 @@ export function CertificateManager() {
     if (!payload.title) { setError('Vui lòng nhập tên chứng nhận.'); return; }
     if (payload.issued_date && payload.expires_date && payload.expires_date < payload.issued_date) { setError('Ngày hết hạn phải sau ngày cấp.'); return; }
     if (!Number.isInteger(payload.sort_order) || payload.sort_order < 0 || payload.sort_order > 32767) { setError('Thứ tự phải là số nguyên từ 0 đến 32767.'); return; }
+    if (items.some((item) => !item.deleted_at && item.id !== selected?.id && item.sort_order === payload.sort_order)) { setError('Thứ tự hiển thị này đã được dùng. Vui lòng chọn số khác.'); return; }
     setSaving(true); setError(null); setNotice(null);
     try {
       if (selected) await apiClient.put(`${endpoints.songThanh.certificates}/${selected.id}`, payload);
@@ -175,7 +185,23 @@ export function CertificateManager() {
           )}
         </section>
 
-        <Modal open={editorOpen} title={selected ? 'Chỉnh sửa chứng nhận' : 'Thêm chứng nhận'} onClose={() => setEditorOpen(false)} closeDisabled={saving} panelClassName="max-w-3xl" bodyClassName="p-0">
+        <Modal
+          open={editorOpen}
+          title={selected ? 'Chỉnh sửa chứng nhận' : 'Thêm chứng nhận'}
+          onClose={() => setEditorOpen(false)}
+          closeDisabled={saving}
+          panelClassName="max-w-4xl"
+          bodyClassName="p-0"
+          footer={!selected?.deleted_at ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>{selected && permissions.includes(PERMISSIONS.certificateArchive) ? <Button disabled={saving} onClick={() => void changeArchive('archive')} type="button" variant="danger">Lưu trữ</Button> : null}</div>
+              <div className="flex gap-2">
+                <Button disabled={saving} onClick={() => setEditorOpen(false)} type="button" variant="secondary">Hủy</Button>
+                {canSave ? <Button disabled={saving} form="certificate-editor-form" type="submit">{saving ? 'Đang lưu...' : 'Lưu chứng nhận'}</Button> : null}
+              </div>
+            </div>
+          ) : undefined}
+        >
           {error ? <p className="mx-5 mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{error}</p> : null}
           {selected?.deleted_at ? (
             <div className="space-y-4 p-5">
@@ -183,38 +209,51 @@ export function CertificateManager() {
               {permissions.includes(PERMISSIONS.certificateRestore) ? <Button disabled={saving} onClick={() => void changeArchive('restore')} type="button" variant="secondary">Khôi phục chứng nhận</Button> : null}
             </div>
           ) : (
-            <form className="grid gap-5 p-5 md:grid-cols-2" onSubmit={(event) => void save(event)}>
-              <label className="block text-sm font-medium text-text md:col-span-2">Tên chứng nhận
-                <input className={inputClass} disabled={!canSave || saving} maxLength={255} onChange={(event) => setForm({ ...form, title: event.target.value })} required value={form.title} />
-              </label>
-              <div className="grid gap-4 border-t border-border pt-4 md:col-span-2 md:grid-cols-2">
-                <h3 className="text-sm font-semibold text-text md:col-span-2">Tệp và hình đại diện</h3>
-                <div className="text-sm font-medium text-text">Tệp chứng nhận (PDF hoặc ảnh)
-                  <div className="mt-1"><FileReferencePicker fieldLabel="tệp chứng nhận" onChange={(value) => setForm({ ...form, file_id: value })} readOnly={!canSave || saving} value={form.file_id} /></div>
+            <form id="certificate-editor-form" className="grid gap-6 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:p-6" onSubmit={(event) => void save(event)}>
+              <aside className="flex min-w-0 items-center gap-3 lg:block">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-white lg:aspect-[4/3] lg:h-auto lg:w-full">
+                  <FileImage fileId={form.image_file_id || null} alt="" className="h-full w-full object-contain p-4" fallback={<FileCheck2 size={36} className="text-muted-foreground" />} />
                 </div>
-                <div className="text-sm font-medium text-text">Ảnh xem trước
-                  <div className="mt-1"><FileReferencePicker allowedMimePrefix="image/" fieldLabel="ảnh chứng nhận" onChange={(value) => setForm({ ...form, image_file_id: value })} readOnly={!canSave || saving} value={form.image_file_id} /></div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground lg:mt-3">Xem trước ngoài website</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">Ảnh đại diện sẽ xuất hiện ở trang chủ và Giới thiệu khi chứng nhận được bật.</p>
                 </div>
-              </div>
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 md:col-span-2">
-                <label className="block text-sm font-medium text-text">Ngày cấp
-                  <input className={inputClass} disabled={!canSave || saving} onChange={(event) => setForm({ ...form, issued_date: event.target.value })} type="date" value={form.issued_date} />
-                </label>
-                <label className="block text-sm font-medium text-text">Ngày hết hạn
-                  <input className={inputClass} disabled={!canSave || saving} min={form.issued_date || undefined} onChange={(event) => setForm({ ...form, expires_date: event.target.value })} type="date" value={form.expires_date} />
-                </label>
-                <label className="block text-sm font-medium text-text">Thứ tự
-                  <input className={inputClass} disabled={!canSave || saving} max={32767} min={0} onChange={(event) => setForm({ ...form, sort_order: event.target.value })} type="number" value={form.sort_order} />
-                </label>
-                <label className="block text-sm font-medium text-text">Trạng thái
-                  <select className={inputClass} disabled={!canSave || saving} onChange={(event) => setForm({ ...form, status: event.target.value as Form['status'] })} value={form.status}>
-                    <option value="active">Hiển thị</option><option value="inactive">Tạm ẩn</option>
-                  </select>
-                </label>
-              </div>
-              <div className="flex flex-wrap gap-2 border-t border-border pt-4 md:col-span-2">
-                {canSave ? <Button disabled={saving} type="submit">{saving ? 'Đang lưu...' : 'Lưu chứng nhận'}</Button> : null}
-                {selected && permissions.includes(PERMISSIONS.certificateArchive) ? <Button disabled={saving} onClick={() => void changeArchive('archive')} type="button" variant="danger">Lưu trữ</Button> : null}
+              </aside>
+              <div className="min-w-0 space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-text">Tên chứng nhận <span aria-hidden="true" className="text-red-600">*</span>
+                    <input className={inputClass} data-modal-autofocus="true" disabled={!canSave || saving} maxLength={255} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Ví dụ: Chứng nhận ISO 9001" required value={form.title} />
+                  </label>
+                </div>
+                <section className="space-y-3 border-t border-border pt-5" aria-label="Tệp chứng nhận">
+                  <div>
+                    <h3 className="text-sm font-semibold text-text">Tệp và ảnh đại diện</h3>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">Đính kèm PDF hoặc ảnh chứng nhận. Ảnh đại diện có thể chọn riêng.</p>
+                  </div>
+                  <div className="text-sm font-medium text-text">Tệp chứng nhận
+                    <div className="mt-1.5"><FileReferencePicker compact uploadAccept=".jpg,.jpeg,.png,.webp,.svg,.pdf" fieldLabel="tệp chứng nhận" onChange={(value) => setForm((previous) => ({ ...previous, file_id: value }))} readOnly={!canSave || saving} value={form.file_id} /></div>
+                  </div>
+                  <div className="text-sm font-medium text-text">Ảnh đại diện
+                    <div className="mt-1.5"><FileReferencePicker compact allowedMimePrefix="image/" fieldLabel="ảnh chứng nhận" onChange={(value) => setForm((previous) => ({ ...previous, image_file_id: value }))} readOnly={!canSave || saving} value={form.image_file_id} /></div>
+                  </div>
+                </section>
+                <section className="grid gap-4 border-t border-border pt-5 sm:grid-cols-2" aria-label="Hiển thị và hiệu lực">
+                  <label className="block text-sm font-medium text-text">Ngày cấp
+                    <input className={inputClass} disabled={!canSave || saving} onChange={(event) => setForm({ ...form, issued_date: event.target.value })} type="date" value={form.issued_date} />
+                  </label>
+                  <label className="block text-sm font-medium text-text">Ngày hết hạn
+                    <input className={inputClass} disabled={!canSave || saving} min={form.issued_date || undefined} onChange={(event) => setForm({ ...form, expires_date: event.target.value })} type="date" value={form.expires_date} />
+                  </label>
+                  <label className="block text-sm font-medium text-text">Thứ tự hiển thị
+                    <input className={inputClass} disabled={!canSave || saving} max={32767} min={0} onChange={(event) => setForm({ ...form, sort_order: event.target.value })} type="number" value={form.sort_order} />
+                    <span className="mt-1 block text-xs font-normal text-muted-foreground">Mỗi chứng nhận cần một số riêng.</span>
+                  </label>
+                  <label className="block text-sm font-medium text-text">Trạng thái
+                    <select className={inputClass} disabled={!canSave || saving} onChange={(event) => setForm({ ...form, status: event.target.value as Form['status'] })} value={form.status}>
+                      <option value="active">Hiển thị</option><option value="inactive">Tạm ẩn</option>
+                    </select>
+                  </label>
+                </section>
               </div>
             </form>
           )}

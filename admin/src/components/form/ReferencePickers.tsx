@@ -90,6 +90,8 @@ export function FileReferencePicker({
   fieldLabel = 'tệp',
   preferredGroup,
   allowedMimePrefix,
+  uploadAccept,
+  compact = false,
   discouragedGroups,
   discouragedGroupMessage,
   inputId,
@@ -103,6 +105,8 @@ export function FileReferencePicker({
   fieldLabel?: string;
   preferredGroup?: FileUsageGroup;
   allowedMimePrefix?: string;
+  uploadAccept?: string;
+  compact?: boolean;
   discouragedGroups?: FileUsageGroup[];
   discouragedGroupMessage?: string;
   inputId?: string;
@@ -167,6 +171,7 @@ export function FileReferencePicker({
       invalid={invalid}
       dataField={dataField}
       warning={warning}
+      compact={compact}
       onClear={() => onChange('')}
       onOpen={() => {
         setUsageGroup(preferredGroup ?? 'all');
@@ -216,6 +221,7 @@ export function FileReferencePicker({
         title={uploadLabel}
         description="Tải tệp mới và dùng ngay cho bản ghi này."
         submitLabel={uploadLabel}
+        accept={uploadAccept ?? (allowedMimePrefix === 'image/' ? '.jpg,.jpeg,.png,.webp,.svg' : undefined)}
         onClose={() => setUploadOpen(false)}
         onUploaded={(item) => {
           if (allowedMimePrefix && !String(item.mime_type ?? '').startsWith(allowedMimePrefix)) {
@@ -329,6 +335,7 @@ function ReferenceBox({
   openLabel,
   uploadLabel,
   warning,
+  compact,
   children
 }: {
   icon: React.ReactNode;
@@ -346,16 +353,18 @@ function ReferenceBox({
   openLabel: string;
   uploadLabel?: string;
   warning?: string;
+  compact?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div
       className={cn(
-        'rounded-sm border bg-panel',
+        'rounded-md border bg-panel',
+        compact && 'sm:flex sm:items-center',
         invalid ? 'border-red-200' : 'border-border'
       )}
     >
-      <div className="flex items-start gap-3 p-3 sm:p-4">
+      <div className={cn('flex min-w-0 items-start gap-3 p-3 sm:p-4', compact && 'sm:flex-1 sm:py-3')}>
         <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-sm border border-border bg-muted text-primary sm:h-8 sm:w-8">
           {icon}
         </div>
@@ -366,7 +375,7 @@ function ReferenceBox({
           </div>
         </div>
       </div>
-      <div className="grid gap-2 border-t border-border bg-muted px-3 py-3 sm:flex sm:flex-wrap sm:py-2">
+      <div className={cn('grid gap-2 border-t border-border bg-muted px-3 py-3 sm:flex sm:flex-wrap sm:py-2', compact && 'grid-cols-2 sm:shrink-0 sm:border-l sm:border-t-0 sm:bg-transparent sm:pl-2')}>
         <Button
           type="button"
           size="sm"
@@ -389,13 +398,13 @@ function ReferenceBox({
             {uploadLabel ?? 'Tải tệp mới'}
           </Button>
         ) : null}
-        {onClear ? (
+        {onClear && value ? (
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            className="w-full sm:w-auto"
-            disabled={readOnly || !value}
+            className={cn('w-full sm:w-auto', compact && 'col-span-2')}
+            disabled={readOnly}
             onClick={onClear}
           >
             <X className="h-3.5 w-3.5" />

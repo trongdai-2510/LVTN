@@ -24,11 +24,11 @@ export class PartnerService {
     const name = this.name(body.name);
     const logo_file_id = await this.logo(body.logo_file_id);
     const website_url = this.website(body.website_url);
-    const created = await this.repository.create({
+    const created = await this.withUniqueOrder(() => this.repository.create({
       name, logo_file_id, website_url,
       sort_order: body.sort_order ?? 0,
       status: body.status ?? 'active'
-    });
+    }));
     return { partner: created };
   }
 
@@ -41,7 +41,7 @@ export class PartnerService {
     if (body.sort_order !== undefined) input.sort_order = body.sort_order;
     if (body.status !== undefined) input.status = body.status;
     if (Object.keys(input).length === 0) throw this.invalid('No partner fields were provided.');
-    await this.repository.update(partner.id, input);
+    await this.withUniqueOrder(() => this.repository.update(partner.id, input));
     return this.getPartner(partner.id);
   }
 
@@ -58,7 +58,8 @@ export class PartnerService {
     if (partner.logo_file_id && !await this.repository.logoExists(partner.logo_file_id)) {
       throw this.invalid('The archived partner logo is no longer available.', HttpStatus.CONFLICT);
     }
-    await this.repository.restore(partner.id);
+    const sortOrder = await this.restoreOrder(partner.sort_order);
+    await this.withUniqueOrder(() => this.repository.restore(partner.id, sortOrder));
     return this.getPartner(partner.id);
   }
 
@@ -107,5 +108,28 @@ export class PartnerService {
 
   private notFound() {
     return new AppError({ code: ErrorCodes.NOT_FOUND, message: 'Partner was not found.', statusCode: HttpStatus.NOT_FOUND });
+  }
+
+  private async withUniqueOrder<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && 'constraint' in error
+        && error.code === '23505' && error.constraint === 'uq_partner_sort_order_active') {
+        throw this.invalid('Thứ tự hiển thị đã được dùng bởi đối tác khác.', HttpStatus.CONFLICT);
+      }
+      throw error;
+    }
+  }
+
+  private async restoreOrder(previousOrder: number): Promise<number> {
+    const used = new Set((await this.repository.list())
+      .filter((item) => !item.deleted_at)
+      .map((item) => item.sort_order));
+    if (previousOrder >= 0 && previousOrder <= 32767 && !used.has(previousOrder)) return previousOrder;
+    let order = 0;
+    while (used.has(order) && order <= 32767) order += 1;
+    if (order > 32767) throw this.invalid('Không còn thứ tự hiển thị trống để khôi phục đối tác.', HttpStatus.CONFLICT);
+    return order;
   }
 }

@@ -67,6 +67,66 @@ test('certificate and tag managers create records without horizontal overflow', 
   }
 });
 
+test('selecting a certificate file keeps the draft open on mobile', async ({ page }) => {
+  let saves = 0;
+  const filePermissions = [...permissions, 'file.create'];
+  await page.addInitScript((state) => window.sessionStorage.setItem('song-thanh-admin-auth', JSON.stringify(state)),
+    { accessToken: 'qa-token', refreshToken: 'qa-refresh', user, permissions: filePermissions, roles: ['super_admin'] });
+  await page.route(`${api}/**`, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/auth/me') return route.fulfill({ json: { ok: true, data: { user, permissions: filePermissions, roles: ['super_admin'] } } });
+    if (path === '/song-thanh/certificates' && route.request().method() === 'GET') return route.fulfill({ json: { ok: true, data: { items: [] } } });
+    if (path === '/song-thanh/certificates' && route.request().method() === 'POST') saves += 1;
+    if (path === '/song-thanh/files/upload') return route.fulfill({ json: { ok: true, data: { file: { id: 'qa-cert-file', original_filename: 'certificate.pdf', mime_type: 'application/pdf' } } } });
+    if (path === '/song-thanh/files/qa-cert-file') return route.fulfill({ json: { ok: true, data: { file: { id: 'qa-cert-file', original_filename: 'certificate.pdf', mime_type: 'application/pdf' } } } });
+    return route.fulfill({ status: 404, json: { ok: false, error: { message: 'Not mocked' } } });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${admin}/admin/certificates`);
+  await page.getByRole('button', { name: 'Thêm chứng nhận' }).click();
+  const editor = page.getByRole('dialog', { name: 'Thêm chứng nhận' });
+  await editor.getByLabel('Tên chứng nhận').fill('Đang nhập chứng nhận');
+  await editor.getByRole('button', { name: 'Tải tệp mới' }).click();
+  const upload = page.getByRole('dialog', { name: 'Tải tệp mới' });
+  const fileChooser = page.waitForEvent('filechooser');
+  await upload.locator('[data-file-upload-input]').click();
+  await (await fileChooser).setFiles({ name: 'certificate.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n') });
+  await expect(upload).toContainText('certificate.pdf');
+  await expect(editor.getByLabel('Tên chứng nhận')).toHaveValue('Đang nhập chứng nhận');
+  expect(saves).toBe(0);
+  await upload.locator('[data-file-upload-submit]').click();
+  await expect(upload).toHaveCount(0);
+  await expect(editor).toBeVisible();
+  await expect(editor).toContainText('certificate.pdf');
+  await expect(editor.getByLabel('Tên chứng nhận')).toHaveValue('Đang nhập chứng nhận');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('certificate editor suggests a free order and rejects an occupied one', async ({ page }) => {
+  let saves = 0;
+  await page.addInitScript((state) => window.sessionStorage.setItem('song-thanh-admin-auth', JSON.stringify(state)),
+    { accessToken: 'qa-token', refreshToken: 'qa-refresh', user, permissions, roles: ['super_admin'] });
+  await page.route(`${api}/**`, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/auth/me') return route.fulfill({ json: { ok: true, data: { user, permissions, roles: ['super_admin'] } } });
+    if (path === '/song-thanh/certificates' && route.request().method() === 'GET') return route.fulfill({ json: { ok: true, data: { items: [
+      { id: 'a', title: 'A', sort_order: 0, status: 'inactive', deleted_at: null },
+      { id: 'b', title: 'B', sort_order: 2, status: 'active', deleted_at: null }
+    ] } } });
+    if (path === '/song-thanh/certificates' && route.request().method() === 'POST') saves += 1;
+    return route.fulfill({ status: 404, json: { ok: false, error: { message: 'Not mocked' } } });
+  });
+  await page.goto(`${admin}/admin/certificates`);
+  await page.getByRole('button', { name: 'Thêm chứng nhận' }).click();
+  const editor = page.getByRole('dialog', { name: 'Thêm chứng nhận' });
+  await expect(editor.getByLabel('Thứ tự hiển thị')).toHaveValue('1');
+  await editor.getByLabel('Tên chứng nhận').fill('C');
+  await editor.getByLabel('Thứ tự hiển thị').fill('2');
+  await editor.getByRole('button', { name: 'Lưu chứng nhận' }).click();
+  await expect(editor.getByRole('alert')).toContainText('đã được dùng');
+  expect(saves).toBe(0);
+});
+
 test('certificate visibility on home and about matches public records', async ({ page, request }) => {
   const response = await request.get(`${api}/public/certificates`);
   expect(response.ok()).toBe(true);

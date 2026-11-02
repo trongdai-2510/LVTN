@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Field } from '@/components/form/Field';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,14 @@ type UploadResponse = {
   file?: Record<string, unknown>;
 };
 
+function acceptsFile(file: File, accept: string): boolean {
+  const name = file.name.toLowerCase();
+  return accept.split(',').map((part) => part.trim().toLowerCase()).some((part) =>
+    part.startsWith('.') ? name.endsWith(part) : part.endsWith('/*')
+      ? file.type.toLowerCase().startsWith(part.slice(0, -1)) : file.type.toLowerCase() === part
+  );
+}
+
 export function FileUploadModal({
   open,
   canUpload,
@@ -26,6 +35,7 @@ export function FileUploadModal({
   title = 'Tải tệp lên',
   description = 'Tải tệp vào Kho tệp.',
   submitLabel = 'Tải tệp lên',
+  accept = '.jpg,.jpeg,.png,.webp,.svg,.pdf,.doc,.docx,.xls,.xlsx,.csv',
   onClose,
   onUploaded
 }: {
@@ -35,6 +45,7 @@ export function FileUploadModal({
   title?: string;
   description?: string;
   submitLabel?: string;
+  accept?: string;
   onClose: () => void;
   onUploaded: (file: Record<string, unknown>) => Promise<void> | void;
 }) {
@@ -54,6 +65,10 @@ export function FileUploadModal({
 
   async function submit() {
     if (!canUpload || !selectedFile) return;
+    if (!acceptsFile(selectedFile, accept)) {
+      setError(new Error('Định dạng tệp không phù hợp với mục này. Vui lòng chọn tệp khác.'));
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -73,20 +88,25 @@ export function FileUploadModal({
     }
   }
 
-  return (
+  if (!open || typeof document === 'undefined') return null;
+
+  return createPortal(
     <Modal open={open} title={title} onClose={onClose}>
       <div className="space-y-4" data-file-upload-modal="true">
         <p className="text-sm text-muted-foreground">{description}</p>
         <Field
           label="Chọn file"
-          hint="Hỗ trợ ảnh, PDF, Word, Excel và CSV."
+          hint={accept === '.jpg,.jpeg,.png,.webp,.svg' ? 'Chọn ảnh JPG, PNG, WebP hoặc SVG.' : accept === '.jpg,.jpeg,.png,.webp,.svg,.pdf' ? 'Chọn PDF hoặc ảnh JPG, PNG, WebP, SVG.' : 'Hỗ trợ ảnh, PDF, Word, Excel và CSV.'}
         >
           <Input
             data-file-upload-input="true"
             type="file"
-            accept=".jpg,.jpeg,.png,.webp,.svg,.pdf,.doc,.docx,.xls,.xlsx,.csv"
+            accept={accept}
             disabled={!canUpload || submitting}
-            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+            onChange={(event) => {
+              setSelectedFile(event.target.files?.[0] ?? null);
+              setError(null);
+            }}
           />
         </Field>
         <Field
@@ -128,6 +148,7 @@ export function FileUploadModal({
           </Button>
         </div>
       </div>
-    </Modal>
+    </Modal>,
+    document.body
   );
 }

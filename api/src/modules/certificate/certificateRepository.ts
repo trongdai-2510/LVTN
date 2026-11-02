@@ -68,11 +68,11 @@ export class CertificateRepository {
     });
   }
 
-  async restore(id: string): Promise<void> {
+  async restore(id: string, sortOrder: number): Promise<void> {
     await this.knexService.db.transaction(async (trx) => {
       const old = await trx<CertificateRecord>('certificate').where({ id }).whereNotNull('deleted_at').forUpdate().first();
       if (!old) return;
-      await trx('certificate').where({ id }).update({ deleted_at: null });
+      await trx('certificate').where({ id }).update({ deleted_at: null, sort_order: sortOrder });
       await this.syncFiles(trx, id, null, old);
     });
   }

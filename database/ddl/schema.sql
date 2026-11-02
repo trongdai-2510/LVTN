@@ -3136,6 +3136,8 @@ CREATE UNIQUE INDEX uq_brand_page_brand_active ON public.brand_page USING btree 
 
 CREATE UNIQUE INDEX uq_brand_slug_active ON public.brand USING btree (slug) WHERE (deleted_at IS NULL);
 
+CREATE UNIQUE INDEX uq_certificate_sort_order_active ON public.certificate USING btree (sort_order) WHERE (deleted_at IS NULL);
+
 
 --
 -- Name: uq_company_info_singleton_active; Type: INDEX; Schema: public; Owner: -
@@ -3163,6 +3165,8 @@ CREATE UNIQUE INDEX uq_news_category_slug_active ON public.news_category USING b
 --
 
 CREATE UNIQUE INDEX uq_page_content_slug_active ON public.page_content USING btree (slug) WHERE (deleted_at IS NULL);
+
+CREATE UNIQUE INDEX uq_partner_sort_order_active ON public.partner USING btree (sort_order) WHERE (deleted_at IS NULL);
 
 
 --
