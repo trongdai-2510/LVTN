@@ -48,16 +48,17 @@ test('certificate and tag managers create records without horizontal overflow', 
   await expect(page.getByLabel('Tên nhãn')).toHaveCount(0);
   await page.getByRole('button', { name: 'Thêm nhãn' }).click();
   await expect(page.getByRole('dialog', { name: 'Tạo nhãn mới' })).toBeVisible();
+  await expect(page.getByText('Trên website, nhãn nằm gần tên sản phẩm')).toBeVisible();
   await page.getByLabel('Tên nhãn').fill('Nhãn thử');
-  await page.getByRole('button', { name: 'Lửa' }).click();
-  await page.getByRole('button', { name: 'Vàng hổ phách' }).click();
+  await page.getByRole('button', { name: /Huy chương/ }).click();
+  await page.getByRole('button', { name: 'Tím' }).click();
   await page.getByRole('button', { name: 'Lưu nhãn' }).click();
   await expect(page.getByText('Đã tạo nhãn.')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button', { name: /Nhãn thử/ }).click();
   await expect(page.getByRole('dialog', { name: 'Chỉnh sửa nhãn' })).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Đóng' }).click();
-  expect(tag).toMatchObject({ name: 'Nhãn thử', status: 'active', icon_key: 'flame', tone_key: 'amber' });
+  expect(tag).toMatchObject({ name: 'Nhãn thử', status: 'active', icon_key: 'award', tone_key: 'violet' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   for (const width of [1440, 2560]) {
     await page.setViewportSize({ width, height: 900 });

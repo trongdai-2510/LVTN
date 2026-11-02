@@ -1,7 +1,7 @@
 import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
-export const TAG_ICON_KEYS = ['none', 'flame', 'star', 'sparkles', 'shield', 'leaf', 'zap'] as const;
-export const TAG_TONE_KEYS = ['blue', 'amber', 'green', 'rose', 'slate'] as const;
+export const TAG_ICON_KEYS = ['none', 'flame', 'star', 'sparkles', 'shield', 'leaf', 'zap', 'award', 'gift', 'heart', 'plug'] as const;
+export const TAG_TONE_KEYS = ['blue', 'amber', 'green', 'rose', 'slate', 'violet', 'cyan', 'orange', 'teal'] as const;
 export type TagIconKey = typeof TAG_ICON_KEYS[number];
 export type TagToneKey = typeof TAG_TONE_KEYS[number];
 

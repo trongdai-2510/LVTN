@@ -202,29 +202,31 @@ export function TagManager() {
               </label>
 
               <div className="rounded-md border border-border bg-surface p-4">
-                <p className="text-sm font-medium text-muted-foreground">Xem trước trên website</p>
-                <span className={'mt-3 inline-flex min-h-10 max-w-full items-center gap-2 rounded-full border px-3.5 text-sm font-semibold ' + tagToneClass(toneKey)}>
-                  <TagGlyph className="h-4 w-4 shrink-0" icon={iconKey} />
+                <p className="text-sm font-semibold text-text">Xem trước trên thẻ sản phẩm</p>
+                <span className={'mt-3 inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ' + tagToneClass(toneKey)}>
+                  <TagGlyph className="h-3.5 w-3.5 shrink-0" icon={iconKey} />
                   <span className="truncate">{name.trim() || 'Tên nhãn'}</span>
                 </span>
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">Trên website, nhãn nằm gần tên sản phẩm trong thẻ sản phẩm. Khách bấm vào nhãn để xem các sản phẩm cùng nhãn. Nhãn chỉ hiện khi đang bật và đã gắn vào sản phẩm được hiển thị.</p>
               </div>
 
               <fieldset className="space-y-2">
                 <legend className="text-sm font-semibold text-text">Biểu tượng</legend>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <p className="text-xs leading-5 text-muted-foreground">Biểu tượng chỉ gợi ý nội dung; hệ thống không tự xác định sản phẩm bán chạy, được yêu thích hay có quà tặng.</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {tagIconOptions.map((option) => (
                     <button
                       aria-pressed={iconKey === option.value}
                       className={iconKey === option.value
-                        ? 'flex min-h-11 items-center gap-2 rounded-md border-2 border-primary bg-blue-50 px-3 text-left text-sm font-medium text-text'
-                        : 'flex min-h-11 items-center gap-2 rounded-md border border-border px-3 text-left text-sm text-text hover:border-primary'}
+                        ? 'flex min-h-16 items-start gap-2 rounded-md border-2 border-primary bg-blue-50 p-2.5 text-left text-sm font-medium text-text'
+                        : 'flex min-h-16 items-start gap-2 rounded-md border border-border p-2.5 text-left text-sm text-text hover:border-primary'}
                       disabled={!canSave || saving}
                       key={option.value}
                       onClick={() => setIconKey(option.value)}
                       type="button"
                     >
-                      {option.value === 'none' ? <TagIcon size={17} /> : <TagGlyph className="h-4 w-4" icon={option.value} />}
-                      <span>{option.label}</span>
+                      {option.value === 'none' ? <TagIcon className="mt-0.5 shrink-0" size={16} /> : <TagGlyph className="mt-0.5 h-4 w-4 shrink-0" icon={option.value} />}
+                      <span><span className="block font-medium leading-5">{option.label}</span><span className="block text-xs font-normal leading-4 text-muted-foreground">{option.hint}</span></span>
                     </button>
                   ))}
                 </div>
@@ -232,12 +234,13 @@ export function TagManager() {
 
               <fieldset className="space-y-2">
                 <legend className="text-sm font-semibold text-text">Màu nhãn</legend>
+                <p className="text-xs leading-5 text-muted-foreground">Màu giúp phân biệt nhãn trên website, không thay đổi thứ tự hay điều kiện hiển thị.</p>
                 <div className="flex flex-wrap gap-2">
                   {tagToneOptions.map((option) => (
                     <button
                       aria-pressed={toneKey === option.value}
                       className={toneKey === option.value
-                        ? 'min-h-10 rounded-full border-2 border-primary px-3 text-sm font-semibold ' + tagToneClass(option.value)
+                        ? 'min-h-10 rounded-full border px-3 text-sm font-semibold ring-2 ring-primary ring-offset-1 ' + tagToneClass(option.value)
                         : 'min-h-10 rounded-full border px-3 text-sm font-medium hover:brightness-95 ' + tagToneClass(option.value)}
                       disabled={!canSave || saving}
                       key={option.value}
