@@ -183,7 +183,7 @@ Sơ đồ chỉ nhấn quan hệ cần cho các hành trình chính; cardinality
 | Có trong schema nhưng chưa là luồng quản trị độc lập (2) | `certificate`, `partner` | Không suy ra feature từ tên bảng. |
 | Metadata migration (2) | `knex_migrations`, `knex_migrations_lock` | Cơ chế Knex, không phải dữ liệu nghiệp vụ. |
 
-Kiểm tra database local ngày 26/10 cho thấy 62 bảng, 48 migration áp dụng, 85 FK không có bản ghi mồ côi và 13/13 phép kiểm tra toàn vẹn đạt ([database-integrity-audit.mjs](scripts/qa/database-integrity-audit.mjs)). File [schema snapshot](database/ddl/song_thanh_deployment_schema_20260730.sql) chụp tại 30/07/2026; các migration sau đó vẫn cần áp dụng, nhất là trước khi so schema môi trường bàn giao.
+Kiểm tra database local ngày 02/11 cho thấy 62 bảng, 48 migration áp dụng và 13/13 phép kiểm tra toàn vẹn đạt ([database-integrity-audit.mjs](scripts/qa/database-integrity-audit.mjs)). File [schema snapshot](database/ddl/schema.sql) được chụp từ schema local hiện hành, gồm ledger Knex tương ứng; các migration phát sinh sau snapshot vẫn cần áp dụng.
 
 ### 6.3 Bốn trục trạng thái không được gộp
 

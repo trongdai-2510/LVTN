@@ -28,7 +28,7 @@ const DDL_PATH = path.join(
   ROOT,
   'database',
   'ddl',
-  'song_thanh_deployment_schema_20260730.sql'
+  'schema.sql'
 );
 const MIGRATIONS_DIR = path.join(API_ROOT, 'migrations');
 const HOME_SECTION_TYPES = [
@@ -384,6 +384,9 @@ async function main() {
 
 function deriveExpectedTables() {
   const ddl = readFileSync(DDL_PATH, 'utf8');
+  const includedMigrations = new Set([
+    ...ddl.matchAll(/^\s*\(\d+,\s*'([^']+\.js)',\s*\d+,\s*NOW\(\)\)/gm)
+  ].map((match) => match[1]));
   const tables = new Set([
     ...ddl.matchAll(
       /CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(?:public\.)?"?([a-z_][a-z0-9_]*)"?\s*\(/gi
@@ -391,6 +394,7 @@ function deriveExpectedTables() {
   ].map((match) => match[1]));
 
   for (const file of migrationFiles()) {
+    if (includedMigrations.has(file)) continue;
     const fullSource = readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
     // A migration file contains both directions. Runtime history applies only
     // exports.up; parsing exports.down as well would immediately undo every

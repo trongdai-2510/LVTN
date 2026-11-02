@@ -23,7 +23,7 @@ const DDL_PATH = path.join(
   ROOT,
   'database',
   'ddl',
-  'song_thanh_deployment_schema_20260730.sql'
+  'schema.sql'
 );
 
 function walkFiles(root, predicate) {

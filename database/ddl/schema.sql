@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict YS1y5u7uG5eRkkIsr2F956pFO1wpXQm7ecnLZxa6AKyma0aReyi1S1abY7xIkGX
+\restrict 8pHTE6lGqIymhIw66seoTPFOpaHj8u0lRf87hfpPtoDPu8OsB9iXBipwWlkfcrC
 
 -- Dumped from database version 18.4
 -- Dumped by pg_dump version 18.4
@@ -167,8 +167,36 @@ CREATE TABLE public.admin_user (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at timestamp with time zone,
+    logic_user_id integer NOT NULL,
     CONSTRAINT chk_admin_user_status CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text, 'locked'::text])))
 );
+
+
+--
+-- Name: COLUMN admin_user.logic_user_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.admin_user.logic_user_id IS 'INTEGER compatibility key for confirmed business logic-user references; UUID id remains the auth primary key.';
+
+
+--
+-- Name: admin_user_logic_user_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.admin_user_logic_user_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: admin_user_logic_user_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.admin_user_logic_user_id_seq OWNED BY public.admin_user.logic_user_id;
 
 
 --
@@ -212,7 +240,7 @@ CREATE TABLE public.audit_log (
 
 CREATE TABLE public.banner (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    "position" character varying(32) NOT NULL,
+    "position" character varying(512) NOT NULL,
     title character varying(255) NOT NULL,
     image_file_id uuid NOT NULL,
     link_type character varying(16) NOT NULL,
@@ -657,6 +685,7 @@ CREATE TABLE public.import_batch (
     deleted_at timestamp with time zone,
     selected_row_ranges jsonb,
     column_mapping jsonb,
+    source_sheet_name character varying(255),
     CONSTRAINT chk_import_batch_source_file_name_not_blank CHECK ((btrim(source_file_name) <> ''::text)),
     CONSTRAINT chk_import_batch_status CHECK (((status)::text = ANY ((ARRAY['created'::character varying, 'validated'::character varying, 'in_review'::character varying, 'ready_to_apply'::character varying, 'applied'::character varying, 'cancelled'::character varying])::text[]))),
     CONSTRAINT import_batch_conflict_count_check CHECK ((conflict_count >= 0)),
@@ -1245,7 +1274,16 @@ CREATE TABLE public.quote_item (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
-    CONSTRAINT quote_item_quantity_check CHECK (((quantity IS NULL) OR (quantity > 0)))
+    quantity_raw character varying(64),
+    quantity_unit character varying(32),
+    quantity_state character varying(24) DEFAULT 'unspecified'::character varying NOT NULL,
+    public_price_amount_at_request integer,
+    CONSTRAINT quote_item_public_price_snapshot_positive CHECK (((public_price_amount_at_request IS NULL) OR (public_price_amount_at_request > 0))),
+    CONSTRAINT quote_item_quantity_check CHECK (((quantity IS NULL) OR (quantity > 0))),
+    CONSTRAINT quote_item_quantity_interpretation_check CHECK (((((quantity_state)::text = 'confirmed'::text) AND (quantity IS NOT NULL) AND (quantity_raw IS NOT NULL)) OR (((quantity_state)::text = 'unspecified'::text) AND (quantity IS NULL)))),
+    CONSTRAINT quote_item_quantity_raw_not_blank CHECK (((quantity_raw IS NULL) OR (btrim((quantity_raw)::text) <> ''::text))),
+    CONSTRAINT quote_item_quantity_state_check CHECK (((quantity_state)::text = ANY ((ARRAY['confirmed'::character varying, 'unspecified'::character varying])::text[]))),
+    CONSTRAINT quote_item_quantity_unit_not_blank CHECK (((quantity_unit IS NULL) OR (btrim((quantity_unit)::text) <> ''::text)))
 );
 
 
@@ -1269,10 +1307,16 @@ CREATE TABLE public.quote_request (
     ip_address inet,
     user_agent text,
     customer_id uuid,
+    project_name character varying(255),
+    project_context text,
+    project_requirements jsonb DEFAULT '[]'::jsonb NOT NULL,
     CONSTRAINT chk_quote_request_email_format CHECK (((email IS NULL) OR ((email)::text ~* '^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}$'::text))),
     CONSTRAINT chk_quote_request_name_not_blank CHECK ((btrim((full_name)::text) <> ''::text)),
     CONSTRAINT chk_quote_request_phone_not_blank CHECK ((btrim((phone)::text) <> ''::text)),
-    CONSTRAINT chk_quote_request_status CHECK (((status)::text = ANY ((ARRAY['new'::character varying, 'in_progress'::character varying, 'done'::character varying, 'spam'::character varying, 'invalid'::character varying])::text[])))
+    CONSTRAINT chk_quote_request_status CHECK (((status)::text = ANY ((ARRAY['new'::character varying, 'in_progress'::character varying, 'done'::character varying, 'spam'::character varying, 'invalid'::character varying])::text[]))),
+    CONSTRAINT quote_request_project_context_not_blank CHECK (((project_context IS NULL) OR (btrim(project_context) <> ''::text))),
+    CONSTRAINT quote_request_project_name_not_blank CHECK (((project_name IS NULL) OR (btrim((project_name)::text) <> ''::text))),
+    CONSTRAINT quote_request_project_requirements_array CHECK ((jsonb_typeof(project_requirements) = 'array'::text))
 );
 
 
@@ -1497,6 +1541,13 @@ CREATE TABLE public.variant_spec_group (
     deleted_at timestamp with time zone,
     CONSTRAINT chk_variant_spec_group_name_not_blank CHECK ((btrim((group_name)::text) <> ''::text))
 );
+
+
+--
+-- Name: admin_user logic_user_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admin_user ALTER COLUMN logic_user_id SET DEFAULT nextval('public.admin_user_logic_user_id_seq'::regclass);
 
 
 --
@@ -2026,6 +2077,22 @@ ALTER TABLE ONLY public.admin_user
 
 
 --
+-- Name: admin_user uq_admin_user_logic_user_id; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admin_user
+    ADD CONSTRAINT uq_admin_user_logic_user_id UNIQUE (logic_user_id);
+
+
+--
+-- Name: admin_user_role uq_admin_user_role_single_role; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admin_user_role
+    ADD CONSTRAINT uq_admin_user_role_single_role UNIQUE (admin_user_id);
+
+
+--
 -- Name: product_group_daily_view uq_product_group_daily_view_product_date; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2532,6 +2599,517 @@ CREATE INDEX idx_variant_spec_group ON public.variant_spec USING btree (variant_
 --
 
 CREATE INDEX idx_variant_spec_group_variant ON public.variant_spec_group USING btree (product_variant_id) WHERE (deleted_at IS NULL);
+
+
+--
+-- Name: st_fk_admin_role_permission_admin_permission_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_admin_role_permission_admin_permission_id_idx ON public.admin_role_permission USING btree (admin_permission_id);
+
+
+--
+-- Name: st_fk_admin_user_role_admin_role_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_admin_user_role_admin_role_id_idx ON public.admin_user_role USING btree (admin_role_id);
+
+
+--
+-- Name: st_fk_banner_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_banner_image_file_id_idx ON public.banner USING btree (image_file_id);
+
+
+--
+-- Name: st_fk_banner_image_mobile_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_banner_image_mobile_file_id_idx ON public.banner USING btree (image_mobile_file_id);
+
+
+--
+-- Name: st_fk_brand_logo_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_logo_file_id_idx ON public.brand USING btree (logo_file_id);
+
+
+--
+-- Name: st_fk_brand_page_brand_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_brand_id_idx ON public.brand_page USING btree (brand_id);
+
+
+--
+-- Name: st_fk_brand_page_featured_product_group_brand_page_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_featured_product_group_brand_page_id_idx ON public.brand_page_featured_product_group USING btree (brand_page_id);
+
+
+--
+-- Name: st_fk_brand_page_featured_product_group_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_featured_product_group_product_group_id_idx ON public.brand_page_featured_product_group USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_brand_page_hero_banner_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_hero_banner_id_idx ON public.brand_page USING btree (hero_banner_id);
+
+
+--
+-- Name: st_fk_brand_page_seo_og_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_seo_og_image_file_id_idx ON public.brand_page USING btree (seo_og_image_file_id);
+
+
+--
+-- Name: st_fk_brand_page_source_brand_page_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_source_brand_page_id_idx ON public.brand_page_source USING btree (brand_page_id);
+
+
+--
+-- Name: st_fk_brand_page_source_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_source_file_id_idx ON public.brand_page_source USING btree (file_id);
+
+
+--
+-- Name: st_fk_brand_page_stat_brand_page_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_stat_brand_page_id_idx ON public.brand_page_stat USING btree (brand_page_id);
+
+
+--
+-- Name: st_fk_brand_page_stat_source_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_stat_source_file_id_idx ON public.brand_page_stat USING btree (source_file_id);
+
+
+--
+-- Name: st_fk_brand_page_support_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_brand_page_support_image_file_id_idx ON public.brand_page USING btree (support_image_file_id);
+
+
+--
+-- Name: st_fk_certificate_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_certificate_file_id_idx ON public.certificate USING btree (file_id);
+
+
+--
+-- Name: st_fk_certificate_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_certificate_image_file_id_idx ON public.certificate USING btree (image_file_id);
+
+
+--
+-- Name: st_fk_company_info_favicon_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_company_info_favicon_file_id_idx ON public.company_info USING btree (favicon_file_id);
+
+
+--
+-- Name: st_fk_company_info_logo_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_company_info_logo_file_id_idx ON public.company_info USING btree (logo_file_id);
+
+
+--
+-- Name: st_fk_company_social_link_company_info_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_company_social_link_company_info_id_idx ON public.company_social_link USING btree (company_info_id);
+
+
+--
+-- Name: st_fk_conflict_resolution_conflict_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_conflict_resolution_conflict_id_idx ON public.conflict_resolution USING btree (conflict_id);
+
+
+--
+-- Name: st_fk_contact_internal_note_contact_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_contact_internal_note_contact_id_idx ON public.contact_internal_note USING btree (contact_id);
+
+
+--
+-- Name: st_fk_data_conflict_import_batch_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_data_conflict_import_batch_id_idx ON public.data_conflict USING btree (import_batch_id);
+
+
+--
+-- Name: st_fk_file_usage_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_file_usage_file_id_idx ON public.file_usage USING btree (file_id);
+
+
+--
+-- Name: st_fk_import_batch_source_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_import_batch_source_file_id_idx ON public.import_batch USING btree (source_file_id);
+
+
+--
+-- Name: st_fk_import_error_log_import_batch_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_import_error_log_import_batch_id_idx ON public.import_error_log USING btree (import_batch_id);
+
+
+--
+-- Name: st_fk_import_error_log_raw_data_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_import_error_log_raw_data_id_idx ON public.import_error_log USING btree (raw_data_id);
+
+
+--
+-- Name: st_fk_import_mapping_import_batch_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_import_mapping_import_batch_id_idx ON public.import_mapping USING btree (import_batch_id);
+
+
+--
+-- Name: st_fk_menu_item_menu_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_menu_item_menu_id_idx ON public.menu_item USING btree (menu_id);
+
+
+--
+-- Name: st_fk_menu_item_parent_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_menu_item_parent_id_idx ON public.menu_item USING btree (parent_id);
+
+
+--
+-- Name: st_fk_page_content_featured_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_page_content_featured_image_file_id_idx ON public.page_content USING btree (featured_image_file_id);
+
+
+--
+-- Name: st_fk_page_content_seo_og_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_page_content_seo_og_image_file_id_idx ON public.page_content USING btree (seo_og_image_file_id);
+
+
+--
+-- Name: st_fk_partner_logo_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_partner_logo_file_id_idx ON public.partner USING btree (logo_file_id);
+
+
+--
+-- Name: st_fk_pending_product_group_conflict_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_pending_product_group_conflict_id_idx ON public.pending_product_group USING btree (conflict_id);
+
+
+--
+-- Name: st_fk_pending_product_group_import_batch_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_pending_product_group_import_batch_id_idx ON public.pending_product_group USING btree (import_batch_id);
+
+
+--
+-- Name: st_fk_pending_product_group_mapped_official_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_pending_product_group_mapped_official_id_idx ON public.pending_product_group USING btree (mapped_official_id);
+
+
+--
+-- Name: st_fk_pending_variant_conflict_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_pending_variant_conflict_id_idx ON public.pending_variant USING btree (conflict_id);
+
+
+--
+-- Name: st_fk_pending_variant_import_batch_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_pending_variant_import_batch_id_idx ON public.pending_variant USING btree (import_batch_id);
+
+
+--
+-- Name: st_fk_pending_variant_mapped_official_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_pending_variant_mapped_official_id_idx ON public.pending_variant USING btree (mapped_official_id);
+
+
+--
+-- Name: st_fk_pending_variant_pending_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_pending_variant_pending_product_group_id_idx ON public.pending_variant USING btree (pending_product_group_id);
+
+
+--
+-- Name: st_fk_product_category_icon_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_category_icon_file_id_idx ON public.product_category USING btree (icon_file_id);
+
+
+--
+-- Name: st_fk_product_category_parent_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_category_parent_id_idx ON public.product_category USING btree (parent_id);
+
+
+--
+-- Name: st_fk_product_group_brand_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_group_brand_id_idx ON public.product_group USING btree (brand_id);
+
+
+--
+-- Name: st_fk_product_group_category_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_group_category_id_idx ON public.product_group USING btree (category_id);
+
+
+--
+-- Name: st_fk_product_group_seo_og_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_group_seo_og_image_file_id_idx ON public.product_group USING btree (seo_og_image_file_id);
+
+
+--
+-- Name: st_fk_product_group_tag_tag_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_group_tag_tag_id_idx ON public.product_group_tag USING btree (tag_id);
+
+
+--
+-- Name: st_fk_product_group_thumbnail_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_group_thumbnail_file_id_idx ON public.product_group USING btree (thumbnail_file_id);
+
+
+--
+-- Name: st_fk_product_highlight_spec_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_highlight_spec_product_group_id_idx ON public.product_highlight_spec USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_product_highlight_spec_product_variant_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_highlight_spec_product_variant_id_idx ON public.product_highlight_spec USING btree (product_variant_id);
+
+
+--
+-- Name: st_fk_product_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_image_file_id_idx ON public.product_image USING btree (file_id);
+
+
+--
+-- Name: st_fk_product_image_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_image_product_group_id_idx ON public.product_image USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_product_image_product_variant_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_image_product_variant_id_idx ON public.product_image USING btree (product_variant_id);
+
+
+--
+-- Name: st_fk_product_spec_spec_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_spec_spec_group_id_idx ON public.product_spec USING btree (spec_group_id);
+
+
+--
+-- Name: st_fk_product_variant_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_product_variant_product_group_id_idx ON public.product_variant USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_project_gallery_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_project_gallery_file_id_idx ON public.project_gallery USING btree (file_id);
+
+
+--
+-- Name: st_fk_project_gallery_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_project_gallery_project_id_idx ON public.project_gallery USING btree (project_id);
+
+
+--
+-- Name: st_fk_project_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_project_image_file_id_idx ON public.project USING btree (image_file_id);
+
+
+--
+-- Name: st_fk_project_product_group_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_project_product_group_product_group_id_idx ON public.project_product_group USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_project_seo_og_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_project_seo_og_image_file_id_idx ON public.project USING btree (seo_og_image_file_id);
+
+
+--
+-- Name: st_fk_quote_internal_note_quote_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_quote_internal_note_quote_id_idx ON public.quote_internal_note USING btree (quote_id);
+
+
+--
+-- Name: st_fk_quote_item_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_quote_item_product_group_id_idx ON public.quote_item USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_quote_item_product_variant_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_quote_item_product_variant_id_idx ON public.quote_item USING btree (product_variant_id);
+
+
+--
+-- Name: st_fk_quote_item_quote_request_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_quote_item_quote_request_id_idx ON public.quote_item USING btree (quote_request_id);
+
+
+--
+-- Name: st_fk_raw_data_import_batch_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_raw_data_import_batch_id_idx ON public.raw_data USING btree (import_batch_id);
+
+
+--
+-- Name: st_fk_service_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_service_image_file_id_idx ON public.service USING btree (image_file_id);
+
+
+--
+-- Name: st_fk_service_product_group_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_service_product_group_product_group_id_idx ON public.service_product_group USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_service_seo_og_image_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_service_seo_og_image_file_id_idx ON public.service USING btree (seo_og_image_file_id);
+
+
+--
+-- Name: st_fk_spec_group_product_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_spec_group_product_group_id_idx ON public.spec_group USING btree (product_group_id);
+
+
+--
+-- Name: st_fk_technical_document_file_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_technical_document_file_id_idx ON public.technical_document USING btree (file_id);
+
+
+--
+-- Name: st_fk_technical_document_product_variant_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_technical_document_product_variant_id_idx ON public.technical_document USING btree (product_variant_id);
+
+
+--
+-- Name: st_fk_variant_attribute_product_variant_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_variant_attribute_product_variant_id_idx ON public.variant_attribute USING btree (product_variant_id);
+
+
+--
+-- Name: st_fk_variant_spec_group_product_variant_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_variant_spec_group_product_variant_id_idx ON public.variant_spec_group USING btree (product_variant_id);
+
+
+--
+-- Name: st_fk_variant_spec_variant_spec_group_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX st_fk_variant_spec_variant_spec_group_id_idx ON public.variant_spec USING btree (variant_spec_group_id);
 
 
 --
@@ -3876,5 +4454,60 @@ ALTER TABLE ONLY public.product_group_daily_view
 -- PostgreSQL database dump complete
 --
 
-\unrestrict YS1y5u7uG5eRkkIsr2F956pFO1wpXQm7ecnLZxa6AKyma0aReyi1S1abY7xIkGX
+\unrestrict 8pHTE6lGqIymhIw66seoTPFOpaHj8u0lRf87hfpPtoDPu8OsB9iXBipwWlkfcrC
 
+
+-- Knex bootstrap ledger for this schema-only snapshot. Restore into an empty database.
+-- The snapshot contains all 48 migrations listed below; future migrations remain pending.
+INSERT INTO public.knex_migrations (id, name, batch, migration_time) VALUES
+  (1, '202604250001_create_admin_auth_tables.js', 1, NOW()),
+  (2, '202604270001_add_file_metadata_purpose.js', 1, NOW()),
+  (3, '202604280001_add_product_domain_contexts.js', 1, NOW()),
+  (4, '202604290001_add_import_batch_mapping_config.js', 1, NOW()),
+  (5, '202604290002_create_import_mapping_profiles.js', 1, NOW()),
+  (6, '202605080001_create_customer_profile.js', 1, NOW()),
+  (7, '202605100001_add_public_product_group_view_count_and_mpe_brand.js', 1, NOW()),
+  (8, '202605130002_add_banner_content_fields.js', 1, NOW()),
+  (9, '202605130003_add_banner_text_style_fields.js', 1, NOW()),
+  (10, '202605130003_banner_display_mode_9pos.js', 1, NOW()),
+  (11, '202605130004_add_page_content_content_type.js', 1, NOW()),
+  (12, '202605130005_page_content_news_fields.js', 1, NOW()),
+  (13, '202605140001_add_company_info_hotlines_working_days.js', 1, NOW()),
+  (14, '202605140002_add_service_project_content_fields.js', 1, NOW()),
+  (15, '202605170001_create_brand_page_tables.js', 1, NOW()),
+  (16, '202605170002_add_brand_page_hero_style_fields.js', 1, NOW()),
+  (17, '202605190001_add_menu_item_open_new_tab_icon_description.js', 1, NOW()),
+  (18, '202605190002_rename_footer_to_footer_quick.js', 1, NOW()),
+  (19, '202605200001_extend_service_for_dich_vu_redesign.js', 1, NOW()),
+  (20, '202605200002_news_category_soft_delete.js', 1, NOW()),
+  (21, '202605200003_project_gallery_admin_surface.js', 1, NOW()),
+  (22, '202605210001_add_product_image_variant_link.js', 1, NOW()),
+  (23, '202605210002_add_product_variant_detailed_description.js', 1, NOW()),
+  (24, '202605290002_split_sino_tu_dien_groups.js', 1, NOW()),
+  (25, '202605290003_create_product_highlight_specs.js', 1, NOW()),
+  (26, '202606030001_create_home_sections.js', 1, NOW()),
+  (27, '202606040001_add_page_content_extra_blocks.js', 1, NOW()),
+  (28, '202606050001_seed_shipping_policy_banner.js', 1, NOW()),
+  (29, '202606060001_drop_legacy_strapi_tables.js', 1, NOW()),
+  (30, '202606140001_dedupe_product_image_gallery.js', 1, NOW()),
+  (31, '202606140002_backfill_product_image_variant_links.js', 1, NOW()),
+  (32, '202606150001_add_brand_page_accent_layout.js', 1, NOW()),
+  (33, '202606150002_softdelete_aware_unique_indexes.js', 1, NOW()),
+  (34, '202606150003_drop_dead_permission_table.js', 1, NOW()),
+  (35, '202606150004_revert_auth_unique_to_absolute.js', 1, NOW()),
+  (36, '202607120001_add_product_group_daily_views.js', 1, NOW()),
+  (37, '202607130001_add_company_info_home_seo.js', 1, NOW()),
+  (38, '202607130002_add_site_daily_views.js', 1, NOW()),
+  (39, '202607130003_reconcile_customer_profiles_by_identity.js', 1, NOW()),
+  (40, '202607130004_remove_stale_working_hours_from_page_content.js', 1, NOW()),
+  (41, '202607130005_align_audit_actor_with_admin_user.js', 1, NOW()),
+  (42, '202607300001_add_admin_user_logic_user_id.js', 1, NOW()),
+  (43, '202608100001_quoteprojectcontext.js', 1, NOW()),
+  (44, '202609080001_add_fk_supporting_indexes.js', 1, NOW()),
+  (45, '202610010001_oneUserRole.js', 1, NOW()),
+  (46, '202610090001_bannerPosition.js', 1, NOW()),
+  (47, '202610090002_quotePriceSnapshot.js', 1, NOW()),
+  (48, '202610090003_importSheet.js', 1, NOW());
+SELECT pg_catalog.setval('public.knex_migrations_id_seq', 48, true);
+INSERT INTO public.knex_migrations_lock ("index", is_locked) VALUES (1, 0);
+SELECT pg_catalog.setval('public.knex_migrations_lock_index_seq', 1, true);

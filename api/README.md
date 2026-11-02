@@ -31,8 +31,9 @@ Bộ kiểm thử tích hợp toàn hệ thống nằm trong `scripts/qa/` ở t
 
 - `migrations/` là chuỗi thay đổi schema có thứ tự.
 - `seeds/` chứa dữ liệu nền và tài khoản quản trị khởi tạo.
-- `database/ddl/song_thanh_deployment_schema_20260730.sql` là snapshot schema dùng
-  cho diễn tập khôi phục sạch; migration mới vẫn phải được chạy sau snapshot.
+- `database/ddl/schema.sql` là snapshot schema-only từ database local hiện hành,
+  gồm ledger Knex cho 48 migration đã áp dụng. Chỉ khôi phục vào database trống;
+  migration mới vẫn phải được chạy sau snapshot.
 - Không chạy các script `import:*` hoặc `backfill:*` với `--apply` nếu chưa sao lưu
   và kiểm tra kết quả dry-run.
 

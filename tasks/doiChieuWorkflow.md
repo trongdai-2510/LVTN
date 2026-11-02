@@ -64,7 +64,7 @@ Các đường dẫn dưới đây giúp kiểm tra những quy tắc dễ bị 
 
 | Workflow liên quan | Dữ liệu hiện có | Kịch bản kiểm thử liên quan |
 | --- | --- | --- |
-| WF02, WF05–WF07 | [DDL triển khai](../database/ddl/song_thanh_deployment_schema_20260730.sql), [miền dữ liệu sản phẩm](../api/migrations/202604280001_add_product_domain_contexts.js), [trang tính nhập hàng](../api/migrations/202610090003_importSheet.js) | [Tìm sản phẩm](../api/tests/unit/productSearch.test.ts), [ghép dữ liệu nhập](../api/tests/unit/importmapping.test.ts), [điều kiện công bố sản phẩm](../admin/tests/e2e/productreadiness.spec.ts) |
+| WF02, WF05–WF07 | [DDL triển khai](../database/ddl/schema.sql), [miền dữ liệu sản phẩm](../api/migrations/202604280001_add_product_domain_contexts.js), [trang tính nhập hàng](../api/migrations/202610090003_importSheet.js) | [Tìm sản phẩm](../api/tests/unit/productSearch.test.ts), [ghép dữ liệu nhập](../api/tests/unit/importmapping.test.ts), [điều kiện công bố sản phẩm](../admin/tests/e2e/productreadiness.spec.ts) |
 | WF03–WF04, WF13–WF15 | [Hồ sơ khách](../api/migrations/202605080001_create_customer_profile.js), [ngữ cảnh yêu cầu tư vấn](../api/migrations/202608100001_quoteprojectcontext.js), [giá ghi nhận lúc gửi](../api/migrations/202610090002_quotePriceSnapshot.js) | [Giá ghi nhận khi gửi](../api/tests/unit/publicQuotePrice.test.ts), [biểu mẫu yêu cầu](../api/tests/unit/publicquotecontract.test.ts) |
 | WF08–WF12 | [Trang thương hiệu](../api/migrations/202605170001_create_brand_page_tables.js), [nội dung dịch vụ và dự án](../api/migrations/202605140002_add_service_project_content_fields.js), [khu vực trang chủ](../api/migrations/202606030001_create_home_sections.js) | [Duyệt nội dung công khai](../api/tests/unit/publicContentReview.test.ts), [ngừng hiển thị](../api/tests/unit/contentUnpublish.test.ts), [nội dung trang](../api/tests/unit/pageContentGuardrails.test.ts) |
 | WF16 | [Bảng tài khoản và quyền](../api/migrations/202604250001_create_admin_auth_tables.js), [một vai trò cho mỗi tài khoản](../api/migrations/202610010001_oneUserRole.js) | [Một vai trò](../api/tests/unit/singleRole.test.ts), [quyền duyệt và công bố](../api/tests/unit/workflow-approval.guard.test.ts) |
@@ -76,7 +76,7 @@ Các đường dẫn dưới đây giúp kiểm tra những quy tắc dễ bị 
 3. **Nhập tệp qua đường dẫn nội bộ:** Ngoài tải tệp từ giao diện, source còn có cách đọc đường dẫn local. Không đưa vào bản trình giảng viên cho đến khi người dùng xác nhận đây là phạm vi sử dụng thông thường.
 4. **Cách duyệt khi quản trị viên cấp cao sửa nội dung đã đăng:** Source cho phép sửa trực tiếp trong một số trường hợp; bản đề xuất chỉ nêu trường hợp nhân viên sửa nội dung quan trọng cần duyệt lại. Nếu muốn chính sách duyệt chung bắt buộc cho mọi người, đó sẽ là yêu cầu mới cần xác nhận.
 5. **Mức bắt buộc của ảnh, mô tả, biến thể, tài liệu và thông tin tối ưu tìm kiếm:** Mỗi loại nội dung có điều kiện chặn khác nhau; một số điều chỉ là cảnh báo chất lượng. Không được hiểu câu “đủ điều kiện” trong bản giảng viên là mọi trường đều bắt buộc.
-6. **Dữ liệu triển khai thật:** Snapshot trong [DDL](../database/ddl/song_thanh_deployment_schema_20260730.sql) cũ hơn một số migration. Chưa kiểm tra cơ sở dữ liệu môi trường bàn giao để xác nhận cấu trúc và dữ liệu thực tế.
+6. **Dữ liệu triển khai thật:** Snapshot trong [DDL](../database/ddl/schema.sql) phản ánh schema local ngày 02/11/2026. Chưa kiểm tra cơ sở dữ liệu môi trường bàn giao để xác nhận cấu trúc và dữ liệu thực tế.
 
 ## Mức kiểm chứng
 

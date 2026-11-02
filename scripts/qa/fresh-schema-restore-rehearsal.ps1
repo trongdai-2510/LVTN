@@ -3,8 +3,7 @@ $ErrorActionPreference = 'Stop'
 $workspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $apiDirectory = Join-Path $workspaceRoot 'api'
 $apiEnvPath = Join-Path $apiDirectory '.env'
-$baselinePath = Join-Path $workspaceRoot 'database\ddl\song_thanh_deployment_schema_20260730.sql'
-$migrationHistoryPath = Join-Path $workspaceRoot 'database\ddl\song_thanh_deployment_migration_history_20260730.sql'
+$baselinePath = Join-Path $workspaceRoot 'database\ddl\schema.sql'
 $outputPath = Join-Path $workspaceRoot 'tmp\qa-artifacts\generated\fresh-schema-restore-rehearsal.md'
 $runtimeDirectory = Join-Path $workspaceRoot 'tmp\qa-runtime'
 
@@ -77,9 +76,6 @@ if (-not (Test-Path -LiteralPath $apiEnvPath)) {
 }
 if (-not (Test-Path -LiteralPath $baselinePath)) {
   throw "Missing deployment schema snapshot: $baselinePath"
-}
-if (-not (Test-Path -LiteralPath $migrationHistoryPath)) {
-  throw "Missing deployment migration history: $migrationHistoryPath"
 }
 
 Import-DotEnv -Path $apiEnvPath
@@ -156,18 +152,6 @@ try {
       '--file', $baselinePath
     ) `
     -FailureMessage 'Deployment schema snapshot failed on an empty database.'
-
-  Invoke-NativeChecked `
-    -FilePath $psql `
-    -ArgumentList @(
-      '--host', $env:DATABASE_HOST,
-      '--port', $env:DATABASE_PORT,
-      '--username', $env:DATABASE_USER,
-      '--dbname', $freshDatabase,
-      '--set', 'ON_ERROR_STOP=1',
-      '--file', $migrationHistoryPath
-    ) `
-    -FailureMessage 'Deployment migration history failed on an empty database.'
 
   $env:DATABASE_NAME = $freshDatabase
   Write-Host 'Applying API migrations and auth-only bootstrap seed.'
@@ -295,7 +279,7 @@ try {
 ## Evidence
 
 1. Created a truly empty PostgreSQL database.
-2. Applied the versioned deployment schema and its matching Knex migration ledger with ``ON_ERROR_STOP``.
+2. Applied the current schema snapshot, including its Knex migration ledger, with ``ON_ERROR_STOP``.
 3. Confirmed ``migrate:latest`` sees the snapshot as current and can apply future migrations normally.
 4. Ran the auth-only bootstrap seed twice and verified the second run is idempotent; news/demo seeds were not executed.
 5. Ran the compiled API ``--db-check`` path.

@@ -8,7 +8,7 @@
 
 - **F:** [trang chủ](../frontend/src/app/page.tsx), [SiteHeader](../frontend/src/components/layout/SiteHeader.tsx), [SiteFooter](../frontend/src/components/layout/SiteFooter.tsx).
 - **C/S/R:** [public.controller.ts](../api/src/modules/public/public.controller.ts) `site-shell`, `site-views`; [public.service.ts](../api/src/modules/public/public.service.ts) `getSiteShell`; [public.repository.ts](../api/src/modules/public/public.repository.ts) `activeMenuByPosition`, `publishedSystemPageSlugs`; [home-page.service.ts](../api/src/modules/home-page/home-page.service.ts) `getPublicLayout`.
-- **D/T:** [schema DDL](../database/ddl/song_thanh_deployment_schema_20260730.sql) `company_info`, `menu`, `home_section`; [publicSiteShell.test.ts](../api/tests/unit/publicSiteShell.test.ts), [publicMenuTree.test.ts](../api/tests/unit/publicMenuTree.test.ts), [publicRouteVisibility.test.mjs](../frontend/tests/publicRouteVisibility.test.mjs).
+- **D/T:** [schema DDL](../database/ddl/schema.sql) `company_info`, `menu`, `home_section`; [publicSiteShell.test.ts](../api/tests/unit/publicSiteShell.test.ts), [publicMenuTree.test.ts](../api/tests/unit/publicMenuTree.test.ts), [publicRouteVisibility.test.mjs](../frontend/tests/publicRouteVisibility.test.mjs).
 
 ### E02
 
@@ -74,7 +74,7 @@
 
 - **A:** [ProductDomainBusinessPages.tsx](../admin/src/features/product-domain/ProductDomainBusinessPages.tsx), [ProductInspector.tsx](../admin/src/features/product-domain/ProductInspector.tsx), [businessStatus.ts](../admin/src/features/product-domain/businessStatus.ts).
 - **C/S/R:** [product-variant.controller.ts](../api/src/modules/product-variant/product-variant.controller.ts); [product-variant.service.ts](../api/src/modules/product-variant/product-variant.service.ts) `createProductVariant`, `normalizeUpdateInput`, `assertPublishReadiness`, `archiveProductVariant`; [product-variant.repository.ts](../api/src/modules/product-variant/product-variant.repository.ts); [product-variant.guardrails.ts](../api/src/modules/product-variant/product-variant.guardrails.ts) `resolvePriceState`.
-- **D/T:** [DDL](../database/ddl/song_thanh_deployment_schema_20260730.sql) cho cấu trúc giá/biến thể; [publicPrice.test.ts](../api/tests/unit/publicPrice.test.ts), [publicEditorialUpdates.test.ts](../api/tests/unit/publicEditorialUpdates.test.ts), [role-user-journeys.spec.ts](../admin/tests/e2e/role-user-journeys.spec.ts) (E2E chưa chạy).
+- **D/T:** [DDL](../database/ddl/schema.sql) cho cấu trúc giá/biến thể; [publicPrice.test.ts](../api/tests/unit/publicPrice.test.ts), [publicEditorialUpdates.test.ts](../api/tests/unit/publicEditorialUpdates.test.ts), [role-user-journeys.spec.ts](../admin/tests/e2e/role-user-journeys.spec.ts) (E2E chưa chạy).
 
 ### E13
 
@@ -92,7 +92,7 @@
 
 - **A:** [ImportDetailPage.tsx](../admin/src/features/import-workspace/ImportDetailPage.tsx) `approveSingleGroup`, `resolveConflict`, `ready`.
 - **C/S/R:** [import-workspace.controller.ts](../api/src/modules/import-workspace/import-workspace.controller.ts) `review-transition`, `bulk-approve`, `conflicts`, `readiness`, `apply-preview`; [import-workspace.service.ts](../api/src/modules/import-workspace/import-workspace.service.ts) `reviewTransition`, `resolveConflict`, `evaluateImportBatchReadiness`; [import-workspace.readiness.ts](../api/src/modules/import-workspace/import-workspace.readiness.ts); [import-workspace.repository.ts](../api/src/modules/import-workspace/import-workspace.repository.ts) cập nhật dòng tạm/xung đột.
-- **D/T:** [DDL](../database/ddl/song_thanh_deployment_schema_20260730.sql) `pending_*`, `data_conflict`, `conflict_resolution`; [import-domain-invariants-smoke.mjs](../scripts/qa/import-domain-invariants-smoke.mjs), [importmapping.test.ts](../api/tests/unit/importmapping.test.ts) (smoke chưa chạy).
+- **D/T:** [DDL](../database/ddl/schema.sql) `pending_*`, `data_conflict`, `conflict_resolution`; [import-domain-invariants-smoke.mjs](../scripts/qa/import-domain-invariants-smoke.mjs), [importmapping.test.ts](../api/tests/unit/importmapping.test.ts) (smoke chưa chạy).
 
 ### E16
 
@@ -250,7 +250,7 @@ Script [generate-system-inventory.mjs](../scripts/qa/generate-system-inventory.m
 
 - Đã chạy ngày 12/10/2026: API `npm.cmd run test:unit` **129/129 đạt**; Frontend `npm.cmd test` **16/16 đạt**; Admin unit `node --test tests/unit/*.test.mjs` **12/12 đạt**; `npm.cmd run typecheck` ở cả API, Admin, Frontend **đạt**. Đây là test unit/tĩnh theo mã hiện tại.
 - Đã thử đọc `localhost:4000/health`, `localhost:3001/admin/login`, `localhost:3000` với timeout 3 giây; cả ba không trả lời trong thời gian đó. **Chưa xác minh runtime đang chạy, PostgreSQL/migration thực tế, E2E hoặc các smoke script có ghi dữ liệu.** Những file E2E/smoke dẫn trên là bằng chứng phạm vi kiểm thử có sẵn, không phải kết quả chạy của lần phân tích này.
-- DDL ở `database/ddl/song_thanh_deployment_schema_20260730.sql` là snapshot cũ hơn migration mới nhất; mô tả hành vi ưu tiên controller/service/repository hiện tại và migration bổ sung. Cần kiểm tra DB môi trường bàn giao nếu muốn xác nhận constraint/triggers thực tế.
+- DDL ở `database/ddl/schema.sql` là snapshot từ database local ngày 02/11/2026, đã gồm 48 migration hiện có; mô tả hành vi vẫn ưu tiên controller/service/repository hiện tại. Cần kiểm tra DB môi trường bàn giao nếu muốn xác nhận constraint/triggers thực tế.
 - [module-config.ts](../admin/src/features/module-config.ts) chứa vài nhãn/field tổng quát có thể cũ (ví dụ trường duyệt/xuất bản trong cấu hình banner). Với quy tắc nghiệp vụ, tài liệu này ưu tiên schema/types, service/repository và bộ lọc public đang được gọi.
 - Nút “public-safe” trong WF29 áp dụng các tham số lọc của từng API quản trị; riêng tài liệu kỹ thuật bộ lọc ở trình xuất dùng `active` và `is_public`, không thực hiện đầy đủ cùng kiểm tra quan hệ như API cấp tệp công khai ở WF04. Vì vậy tên nút không phải chứng cứ tệp xuất đã an toàn để phát hành ra ngoài.
 - Mã có một số hàm/script backfill, import một lần và bảng di sản; chúng không được xem là thao tác Admin thường ngày nếu không có route/controller/giao diện hiện hành.

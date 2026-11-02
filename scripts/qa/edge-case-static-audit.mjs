@@ -40,7 +40,7 @@ const FILES = {
   fileWorkflow: 'admin/src/lib/file-workflow.ts',
   siteShellTypes: 'frontend/src/types/contracts/public-site-shell.ts',
   jsonLd: 'frontend/src/lib/seo/json-ld.ts',
-  ddl: 'database/ddl/song_thanh_deployment_schema_20260730.sql'
+  ddl: 'database/ddl/schema.sql'
 };
 
 const sourceCache = new Map();
