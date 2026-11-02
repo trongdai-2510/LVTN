@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Plus, Search, Tag as TagIcon } from '@/components/icons';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { usePermissions } from '@/features/auth/useAuthState';
 import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
@@ -36,7 +37,7 @@ export function TagManager() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const editorRef = useRef<HTMLElement>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -60,7 +61,7 @@ export function TagManager() {
   const activeCount = items.filter((item) => !item.deleted_at && item.status === 'active').length;
   const unusedCount = items.filter((item) => !item.deleted_at && Number(item.product_count ?? 0) === 0).length;
 
-  function choose(tag: Tag | null, scroll = true) {
+  function choose(tag: Tag | null) {
     setSelected(tag);
     setName(tag?.name ?? '');
     setStatus(tag?.status ?? 'active');
@@ -68,7 +69,7 @@ export function TagManager() {
     setToneKey(tag?.tone_key ?? 'blue');
     setError('');
     setNotice('');
-    if (scroll) requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'start' }));
+    setEditorOpen(true);
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -87,7 +88,7 @@ export function TagManager() {
       if (selected) await apiClient.put(endpoints.songThanh.tags + '/' + selected.id, payload);
       else await apiClient.post(endpoints.songThanh.tags, payload);
       await load();
-      choose(null, false);
+      setEditorOpen(false);
       setNotice(selected ? 'Đã cập nhật nhãn.' : 'Đã tạo nhãn.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Không lưu được nhãn.');
@@ -104,7 +105,7 @@ export function TagManager() {
     try {
       await apiClient.post(endpoints.songThanh.tags + '/' + selected.id + '/' + action);
       await load();
-      choose(null, false);
+      setEditorOpen(false);
       setNotice(action === 'archive' ? 'Đã lưu trữ nhãn.' : 'Đã khôi phục nhãn.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Không thể đổi trạng thái nhãn.');
@@ -132,7 +133,7 @@ export function TagManager() {
       {error ? <p className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{error}</p> : null}
       {notice ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">{notice}</p> : null}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div>
         <section aria-label="Bộ nhãn sản phẩm" className="min-w-0 overflow-hidden rounded-md border border-border bg-panel">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-4">
             <h2 className="font-display text-lg font-semibold text-text">Bộ nhãn</h2>
@@ -168,10 +169,7 @@ export function TagManager() {
               {visible.map((item) => (
                 <li key={item.id}>
                   <button
-                    aria-current={selected?.id === item.id ? 'true' : undefined}
-                    className={selected?.id === item.id
-                      ? 'group rounded-md border-2 border-primary bg-white p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/25'
-                      : 'group rounded-md border border-border bg-white p-2 text-left outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-primary/25'}
+                    className="group rounded-md border border-border bg-white p-2 text-left outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
                     onClick={() => choose(item)}
                     type="button"
                   >
@@ -189,11 +187,8 @@ export function TagManager() {
           )}
         </section>
 
-        <aside aria-label="Thiết kế nhãn" className="scroll-mt-5 overflow-hidden rounded-md border border-border bg-panel xl:sticky xl:top-5" ref={editorRef}>
-          <div className="border-b border-border bg-surface px-5 py-4">
-            <h2 className="font-display text-lg font-semibold text-text">{selected ? 'Chỉnh sửa nhãn' : 'Tạo nhãn mới'}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{selected ? Number(selected.product_count ?? 0) + ' sản phẩm đang gắn' : 'Xem nhãn sẽ trông như thế nào trước khi lưu.'}</p>
-          </div>
+        <Modal open={editorOpen} title={selected ? 'Chỉnh sửa nhãn' : 'Tạo nhãn mới'} onClose={() => setEditorOpen(false)} closeDisabled={saving} panelClassName="max-w-2xl" bodyClassName="p-0">
+          {error ? <p className="mx-5 mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{error}</p> : null}
           {selected?.deleted_at ? (
             <div className="space-y-4 p-5">
               <Badge tone="archived">Đã lưu trữ</Badge>
@@ -216,7 +211,7 @@ export function TagManager() {
 
               <fieldset className="space-y-2">
                 <legend className="text-sm font-semibold text-text">Biểu tượng</legend>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {tagIconOptions.map((option) => (
                     <button
                       aria-pressed={iconKey === option.value}
@@ -273,7 +268,7 @@ export function TagManager() {
               </div>
             </form>
           )}
-        </aside>
+        </Modal>
       </div>
     </div>
   );

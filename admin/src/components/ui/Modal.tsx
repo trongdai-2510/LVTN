@@ -62,6 +62,7 @@ export function Modal({
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       event.preventDefault();
+      event.stopPropagation();
       if (!closeDisabled) {
         onClose();
       }
@@ -71,6 +72,8 @@ export function Modal({
     if (event.key !== 'Tab') {
       return;
     }
+
+    event.stopPropagation();
 
     const panel = panelRef.current;
     if (!panel) {

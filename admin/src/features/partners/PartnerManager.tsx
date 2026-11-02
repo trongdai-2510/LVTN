@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Building2, ExternalLink, Globe2, Plus, Search } from '@/components/icons';
 import { FileReferencePicker } from '@/components/form/ReferencePickers';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { FileImage } from '@/components/ui/FileImage';
+import { Modal } from '@/components/ui/Modal';
 import { useAuthState } from '@/features/auth/useAuthState';
 import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
@@ -77,7 +78,6 @@ export function PartnerManager() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
-  const editorRef = useRef<HTMLElement>(null);
 
   const canCreate = auth.permissions.includes(PERMISSIONS.partnerCreate);
   const canUpdate = auth.permissions.includes(PERMISSIONS.partnerUpdate);
@@ -119,7 +119,6 @@ export function PartnerManager() {
     setError(null);
     setNotice(null);
     setEditing(true);
-    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'start' }));
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -268,15 +267,8 @@ export function PartnerManager() {
         )}
       </section>
 
-      {editing ? (
-        <section aria-label={selected ? 'Chỉnh sửa đối tác' : 'Thêm đối tác'} className="scroll-mt-5 overflow-hidden rounded-md border border-border bg-panel" ref={editorRef}>
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-surface px-5 py-4">
-            <div>
-              <h2 className="font-display text-xl font-semibold text-text">{selected ? 'Chỉnh sửa đối tác' : 'Thêm đối tác'}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{selected ? selected.name : 'Điền thông tin nhận diện và trạng thái hiển thị.'}</p>
-            </div>
-            <Button onClick={() => setEditing(false)} type="button" variant="ghost">Đóng</Button>
-          </div>
+      <Modal open={editing} title={selected ? 'Chỉnh sửa đối tác' : 'Thêm đối tác'} onClose={() => setEditing(false)} closeDisabled={saving} panelClassName="max-w-4xl" bodyClassName="p-0">
+          {error ? <p className="mx-5 mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{error}</p> : null}
           {selected?.deleted_at ? (
             <div className="space-y-4 px-5 py-7">
               <p className="text-sm text-muted-foreground">Bản ghi này đang được lưu trữ và không xuất hiện ngoài website.</p>
@@ -320,8 +312,7 @@ export function PartnerManager() {
               </div>
             </form>
           )}
-        </section>
-      ) : null}
+      </Modal>
     </div>
   );
 }

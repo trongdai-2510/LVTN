@@ -29,12 +29,27 @@ test('partner manager handles an empty list, a new partner and mobile layout', a
   await page.goto(`${adminUrl}/admin/partners`);
   await expect(page.getByRole('heading', { name: 'Đối tác', exact: true })).toBeVisible();
   await expect(page.getByText('Chưa có đối tác.')).toBeVisible();
+  await expect(page.getByLabel('Tên đối tác')).toHaveCount(0);
   await page.getByRole('button', { name: 'Thêm đối tác đầu tiên' }).click();
+  await expect(page.getByRole('dialog', { name: 'Thêm đối tác' })).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Đóng' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Thêm đối tác', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Thêm đối tác' }).getByRole('button', { name: 'Chọn ảnh' }).click();
+  await expect(page.getByRole('dialog', { name: 'Chọn ảnh' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Chọn ảnh' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Thêm đối tác' })).toBeVisible();
   await page.getByLabel('Tên đối tác').fill('Đối tác thử nghiệm');
   await page.getByLabel('Website đối tác').fill('https://example.com');
   await page.getByRole('button', { name: 'Lưu đối tác' }).click();
   await expect(page.getByText('Đã thêm đối tác.')).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Đối tác thử nghiệm/ })).toBeVisible();
+  await page.getByRole('button', { name: /Đối tác thử nghiệm/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Chỉnh sửa đối tác' })).toBeVisible();
+  await expect(page.getByLabel('Tên đối tác')).toHaveValue('Đối tác thử nghiệm');
+  await page.getByRole('dialog').getByRole('button', { name: 'Đóng' }).click();
   expect(saved).toMatchObject({ name: 'Đối tác thử nghiệm', website_url: 'https://example.com', status: 'active' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   for (const width of [1440, 2560]) {

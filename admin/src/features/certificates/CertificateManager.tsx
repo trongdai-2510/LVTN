@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { FileCheck2, FileText, Plus, Search } from '@/components/icons';
 import { FileReferencePicker } from '@/components/form/ReferencePickers';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { FileImage } from '@/components/ui/FileImage';
+import { Modal } from '@/components/ui/Modal';
 import { usePermissions } from '@/features/auth/useAuthState';
 import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
@@ -38,9 +39,9 @@ export function CertificateManager() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'current' | 'active' | 'inactive' | 'archived'>('current');
-  const editorRef = useRef<HTMLElement>(null);
   const selected = items.find((item) => item.id === selectedId) ?? null;
   const canSave = selected ? permissions.includes(PERMISSIONS.certificateUpdate) && !selected.deleted_at : permissions.includes(PERMISSIONS.certificateCreate);
   const visible = useMemo(() => items.filter((item) => {
@@ -63,7 +64,7 @@ export function CertificateManager() {
     setForm(row ? asForm(row) : empty);
     setError(null);
     setNotice(null);
-    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'start' }));
+    setEditorOpen(true);
   }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,7 +81,7 @@ export function CertificateManager() {
     try {
       if (selected) await apiClient.put(`${endpoints.songThanh.certificates}/${selected.id}`, payload);
       else await apiClient.post(endpoints.songThanh.certificates, payload);
-      await load(); select(null); setNotice(selected ? 'Đã lưu chứng nhận.' : 'Đã thêm chứng nhận.');
+      await load(); setEditorOpen(false); setNotice(selected ? 'Đã lưu chứng nhận.' : 'Đã thêm chứng nhận.');
     } catch (cause) { setError(messageOf(cause)); }
     finally { setSaving(false); }
   }
@@ -88,7 +89,7 @@ export function CertificateManager() {
     if (!selected || saving) return;
     if (action === 'archive' && !window.confirm(`Lưu trữ chứng nhận “${selected.title}”?`)) return;
     setSaving(true); setError(null);
-    try { await apiClient.post(`${endpoints.songThanh.certificates}/${selected.id}/${action}`); await load(); select(null); setNotice(action === 'archive' ? 'Đã lưu trữ chứng nhận.' : 'Đã khôi phục chứng nhận.'); }
+    try { await apiClient.post(`${endpoints.songThanh.certificates}/${selected.id}/${action}`); await load(); setEditorOpen(false); setNotice(action === 'archive' ? 'Đã lưu trữ chứng nhận.' : 'Đã khôi phục chứng nhận.'); }
     catch (cause) { setError(messageOf(cause)); }
     finally { setSaving(false); }
   }
@@ -109,7 +110,7 @@ export function CertificateManager() {
       {error ? <p className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{error}</p> : null}
       {notice ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">{notice}</p> : null}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+      <div>
         <section aria-label="Thư viện chứng nhận" className="min-w-0">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
@@ -147,10 +148,7 @@ export function CertificateManager() {
               {visible.map((item) => (
                 <li key={item.id}>
                   <button
-                    aria-current={selectedId === item.id ? 'true' : undefined}
-                    className={selectedId === item.id
-                      ? 'group h-full w-full overflow-hidden rounded-md border-2 border-primary bg-panel text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/25'
-                      : 'group h-full w-full overflow-hidden rounded-md border border-border bg-panel text-left outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-primary/25'}
+                    className="group h-full w-full overflow-hidden rounded-md border border-border bg-panel text-left outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
                     onClick={() => select(item)}
                     type="button"
                   >
@@ -177,23 +175,20 @@ export function CertificateManager() {
           )}
         </section>
 
-        <aside aria-label="Biểu mẫu chứng nhận" className="scroll-mt-5 overflow-hidden rounded-md border border-border bg-panel xl:sticky xl:top-5" ref={editorRef}>
-          <div className="border-b border-border bg-surface px-5 py-4">
-            <h2 className="font-display text-lg font-semibold text-text">{selected ? 'Chỉnh sửa chứng nhận' : 'Chứng nhận mới'}</h2>
-            {selected ? <p className="mt-1 truncate text-sm text-muted-foreground">{selected.title}</p> : <p className="mt-1 text-sm text-muted-foreground">Tạo hồ sơ và chọn tệp trong Kho tệp.</p>}
-          </div>
+        <Modal open={editorOpen} title={selected ? 'Chỉnh sửa chứng nhận' : 'Thêm chứng nhận'} onClose={() => setEditorOpen(false)} closeDisabled={saving} panelClassName="max-w-3xl" bodyClassName="p-0">
+          {error ? <p className="mx-5 mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">{error}</p> : null}
           {selected?.deleted_at ? (
             <div className="space-y-4 p-5">
               <p className="text-sm text-muted-foreground">Chứng nhận này đang lưu trữ và không xuất hiện trên website.</p>
               {permissions.includes(PERMISSIONS.certificateRestore) ? <Button disabled={saving} onClick={() => void changeArchive('restore')} type="button" variant="secondary">Khôi phục chứng nhận</Button> : null}
             </div>
           ) : (
-            <form className="space-y-5 p-5" onSubmit={(event) => void save(event)}>
-              <label className="block text-sm font-medium text-text">Tên chứng nhận
+            <form className="grid gap-5 p-5 md:grid-cols-2" onSubmit={(event) => void save(event)}>
+              <label className="block text-sm font-medium text-text md:col-span-2">Tên chứng nhận
                 <input className={inputClass} disabled={!canSave || saving} maxLength={255} onChange={(event) => setForm({ ...form, title: event.target.value })} required value={form.title} />
               </label>
-              <div className="space-y-4 border-t border-border pt-4">
-                <h3 className="text-sm font-semibold text-text">Tệp và hình đại diện</h3>
+              <div className="grid gap-4 border-t border-border pt-4 md:col-span-2 md:grid-cols-2">
+                <h3 className="text-sm font-semibold text-text md:col-span-2">Tệp và hình đại diện</h3>
                 <div className="text-sm font-medium text-text">Tệp chứng nhận (PDF hoặc ảnh)
                   <div className="mt-1"><FileReferencePicker fieldLabel="tệp chứng nhận" onChange={(value) => setForm({ ...form, file_id: value })} readOnly={!canSave || saving} value={form.file_id} /></div>
                 </div>
@@ -201,7 +196,7 @@ export function CertificateManager() {
                   <div className="mt-1"><FileReferencePicker allowedMimePrefix="image/" fieldLabel="ảnh chứng nhận" onChange={(value) => setForm({ ...form, image_file_id: value })} readOnly={!canSave || saving} value={form.image_file_id} /></div>
                 </div>
               </div>
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 md:col-span-2">
                 <label className="block text-sm font-medium text-text">Ngày cấp
                   <input className={inputClass} disabled={!canSave || saving} onChange={(event) => setForm({ ...form, issued_date: event.target.value })} type="date" value={form.issued_date} />
                 </label>
@@ -217,13 +212,13 @@ export function CertificateManager() {
                   </select>
                 </label>
               </div>
-              <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+              <div className="flex flex-wrap gap-2 border-t border-border pt-4 md:col-span-2">
                 {canSave ? <Button disabled={saving} type="submit">{saving ? 'Đang lưu...' : 'Lưu chứng nhận'}</Button> : null}
                 {selected && permissions.includes(PERMISSIONS.certificateArchive) ? <Button disabled={saving} onClick={() => void changeArchive('archive')} type="button" variant="danger">Lưu trữ</Button> : null}
               </div>
             </form>
           )}
-        </aside>
+        </Modal>
       </div>
     </div>
   );
