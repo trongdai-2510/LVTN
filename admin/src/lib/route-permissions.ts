@@ -11,6 +11,8 @@ const routePermissions: Array<{ prefix: string; permission?: string }> = [
   { prefix: '/product-categories', permission: PERMISSIONS.productCategoryRead },
   { prefix: '/brands', permission: PERMISSIONS.brandRead },
   { prefix: '/partners', permission: PERMISSIONS.partnerRead },
+    { prefix: '/certificates', permission: PERMISSIONS.certificateRead },
+    { prefix: '/tags', permission: PERMISSIONS.tagRead },
   { prefix: '/product-groups', permission: PERMISSIONS.productGroupRead },
   { prefix: '/product-variants', permission: PERMISSIONS.productVariantRead },
   { prefix: '/technical-documents', permission: PERMISSIONS.technicalDocumentRead },

@@ -48,6 +48,12 @@ export class PublicProductGroupListQueryDto {
   @IsOptional()
   @Transform(({ value }) => trimOptionalString(value))
   @IsString()
+  @MaxLength(64)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  tag?: string;
+  @IsOptional()
+  @Transform(({ value }) => trimOptionalString(value))
+  @IsString()
   @MaxLength(2048)
   ids?: string;
 

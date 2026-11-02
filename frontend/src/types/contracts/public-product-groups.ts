@@ -3,6 +3,7 @@ import type { PublicFileSummary } from './public-site-shell';
 export type PublicProductGroupSort = 'newest' | 'popular' | 'name_asc' | 'name_desc';
 
 export interface PublicProductGroupListItem {
+  tags?: Array<{ id: string; name: string; slug: string }>;
   id: string;
   name: string;
   slug: string;

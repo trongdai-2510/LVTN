@@ -49,6 +49,7 @@ import type {
   PublicPageContentDetailResponse,
   PublicProjectDetailResponse,
   PublicPartnerListResponse,
+  PublicCertificateListResponse,
   PublicProjectListResponse,
   PublicProductGroupDetailResponse,
   PublicProductGroupListResponse,
@@ -1289,6 +1290,7 @@ export class PublicService {
     );
 
     const result = await this.publicRepository.listPublicProductGroups({
+      tag_slug: query.tag ?? null,
       ids: query.ids ? parseCommaSeparatedUuids(query.ids) : null,
       q: query.q?.trim() ? query.q.trim() : null,
       category_id: normalizedCategoryFilter,
@@ -1364,7 +1366,7 @@ export class PublicService {
       result.items.map((item) => item.thumbnail_file_id),
     );
     this.traceProductListTiming("file-map", traceStartedAt);
-    const [variantCountMap, modelCodeSummaryMap, publicPriceSummaryMap, documentCountMap, highlightSpecMap] =
+    const [variantCountMap, modelCodeSummaryMap, publicPriceSummaryMap, documentCountMap, highlightSpecMap, tagMap] =
       await Promise.all([
         this.publicRepository.publicVariantCountMap(
           result.items.map((item) => item.id),
@@ -1381,6 +1383,7 @@ export class PublicService {
         this.publicRepository.publicGroupHighlightSpecMap(
           result.items.map((item) => item.id),
         ),
+        this.publicRepository.publicTagMap(result.items.map((item) => item.id)),
       ]);
     this.traceProductListTiming("item-enrichment", traceStartedAt);
     const fallbackProductGroupIds = result.items
@@ -1426,6 +1429,7 @@ export class PublicService {
             variant_count: 0
           },
           document_count: documentCountMap.get(item.id) ?? 0,
+          tags: tagMap.get(item.id) ?? [],
           highlight_specs:
             curatedHighlightSpecs.length > 0
               ? curatedHighlightSpecs
@@ -1966,6 +1970,16 @@ export class PublicService {
           : null,
       })),
     };
+  }
+
+  async listPublicCertificates(): Promise<PublicCertificateListResponse> {
+    const rows = await this.publicRepository.listPublicCertificates();
+    const fileMap = await this.publicRepository.activeFileMap(rows.flatMap((row) => [row.file_id, row.image_file_id]));
+    return { items: rows.map((row) => ({
+      id: row.id, title: row.title, issued_date: row.issued_date, expires_date: row.expires_date,
+      file: row.file_id ? fileMap.get(row.file_id) ?? null : null,
+      image_file: row.image_file_id ? fileMap.get(row.image_file_id) ?? null : null
+    })) };
   }
 
   async getPublicBrandDetail(slug: string): Promise<PublicBrandDetailResponse> {

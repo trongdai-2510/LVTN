@@ -109,6 +109,14 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
     },
     CORE_CAPABILITY_TEMPLATE_BLOCK,
     {
+      id: 'about-certificates',
+      title: 'Chứng nhận của Song Thanh',
+      owner: 'module',
+      ownerLabel: 'Chứng nhận',
+      href: '/certificates',
+      description: 'Chỉ hiện ngoài website khi có chứng nhận đang hoạt động. Có thể đổi vị trí tại đây.'
+    },
+    {
       id: 'about-contact',
       title: 'Pháp nhân & liên hệ',
       owner: 'settings',

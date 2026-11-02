@@ -160,6 +160,10 @@ export function ProductGroupCard({
           </Heading>
         </Link>
 
+        {productGroup.tags?.length ? <div className="mt-2 flex flex-wrap gap-1.5">{productGroup.tags.slice(0, 3).map((tag) =>
+          <Link className="rounded-full border border-borderBlue bg-white px-2.5 py-1 text-xs font-medium text-primary hover:border-primary" href={`/san-pham/nhan/${encodeURIComponent(tag.slug)}`} key={tag.id}>{tag.name}</Link>
+        )}</div> : null}
+
         <ProductCodeSummary
           className={mobileRow ? 'max-sm:col-start-2 max-sm:px-3' : ''}
           product={productGroup}

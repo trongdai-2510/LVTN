@@ -28,6 +28,8 @@ export const endpoints = {
     productCategories: '/song-thanh/product-categories',
     brands: '/song-thanh/brands',
     partners: '/song-thanh/partners',
+    certificates: '/song-thanh/certificates',
+    tags: '/song-thanh/tags',
     productGroups: '/song-thanh/product-groups',
     productVariants: '/song-thanh/product-variants',
     variantAttributeNameSuggestions: '/admin/variant-attributes/name-suggestions',

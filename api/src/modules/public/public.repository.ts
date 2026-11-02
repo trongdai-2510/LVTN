@@ -53,6 +53,7 @@ import type { PublicFileSummary, PublicHighlightSpec, PublicProductPriceSummary 
 const PROJECT_GALLERY_TABLE = "project_gallery";
 const FILE_USAGE_TABLE = "file_usage";
 const PARTNER_TABLE = "partner";
+const CERTIFICATE_TABLE = "certificate";
 const PRODUCT_SPEC_TABLE = "product_spec";
 const PRODUCT_HIGHLIGHT_SPEC_TABLE = "product_highlight_spec";
 const SPEC_GROUP_TABLE = "spec_group";
@@ -1015,6 +1016,12 @@ export class PublicRepository {
       .orderBy("sort_order", "asc")
       .orderBy("name", "asc");
   }
+  async listPublicCertificates(): Promise<Array<{ id: string; title: string; issued_date: string | null; expires_date: string | null; file_id: string | null; image_file_id: string | null }>> {
+    return this.knexService.db(CERTIFICATE_TABLE)
+      .where({ status: 'active' }).whereNull('deleted_at')
+      .select('id', 'title', 'issued_date', 'expires_date', 'file_id', 'image_file_id')
+      .orderBy('sort_order', 'asc').orderBy('title', 'asc');
+  }
   async findPublicBrandDetailBySlug(
     slug: string,
   ): Promise<PublicBrandDetailRow | null> {
@@ -1444,6 +1451,7 @@ export class PublicRepository {
     return rows;
   }
   async listPublicProductGroups(params: {
+    tag_slug?: string | null;
     ids: string[] | null;
     q: string | null;
     category_id: string | null;
@@ -1470,6 +1478,14 @@ export class PublicRepository {
       brand_ids: params.brand_ids,
       status_filters: params.status_filters,
     });
+    if (params.tag_slug) {
+      baseQuery.whereExists((query) => query.select(this.knexService.db.raw('1'))
+        .from('product_group_tag as product_tag')
+        .join('tag as tag_record', 'tag_record.id', 'product_tag.tag_id')
+        .whereRaw('product_tag.product_group_id = ??', [`${groupAlias}.id`])
+        .whereNull('product_tag.deleted_at').whereNull('tag_record.deleted_at')
+        .where('tag_record.status', 'active').where('tag_record.slug', params.tag_slug!));
+    }
     if (params.ids !== null) {
       baseQuery.whereIn(`${groupAlias}.id`, params.ids);
     }
@@ -1553,6 +1569,15 @@ export class PublicRepository {
         total,
       }),
     };
+  }
+  async publicTagMap(productIds: string[]): Promise<Map<string, Array<{ id: string; name: string; slug: string }>>> {
+    const map = new Map<string, Array<{ id: string; name: string; slug: string }>>();
+    if (!productIds.length) return map;
+    const rows = await this.knexService.db('product_group_tag as link').join('tag as t', 't.id', 'link.tag_id')
+      .whereIn('link.product_group_id', productIds).whereNull('link.deleted_at').whereNull('t.deleted_at')
+      .where('t.status', 'active').select('link.product_group_id', 't.id', 't.name', 't.slug').orderBy('t.name');
+    for (const row of rows) map.set(row.product_group_id, [...(map.get(row.product_group_id) ?? []), { id: row.id, name: row.name, slug: row.slug }]);
+    return map;
   }
   async listPublicProductGroupSpecFacetRows(params: {
     q: string | null;
@@ -3242,6 +3267,7 @@ export class PublicRepository {
       this.isCategoryIconFilePublic(fileId),
       this.isBrandLogoFilePublic(fileId),
       this.isPartnerLogoFilePublic(fileId),
+      this.isCertificateFilePublic(fileId),
       this.isServiceFilePublic(fileId),
       this.isProjectFilePublic(fileId),
       this.isPageContentFilePublic(fileId),
@@ -3310,6 +3336,13 @@ export class PublicRepository {
       .where({ logo_file_id: fileId, status: "active" })
       .whereNull("deleted_at")
       .first("id");
+    return Boolean(row);
+  }
+  private async isCertificateFilePublic(fileId: string): Promise<boolean> {
+    const row = await this.knexService.db(CERTIFICATE_TABLE)
+      .where({ status: 'active' }).whereNull('deleted_at')
+      .andWhere((builder) => builder.where('file_id', fileId).orWhere('image_file_id', fileId))
+      .first('id');
     return Boolean(row);
   }
   private async isServiceFilePublic(fileId: string): Promise<boolean> {

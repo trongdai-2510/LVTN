@@ -15,6 +15,7 @@ import {
   ProductBusinessDetailPage,
   ProductBusinessListPage
 } from './ProductDomainBusinessPages';
+import { ProductTagPanel } from '@/features/tags/ProductTagPanel';
 
 type DomainKind =
   | 'category'
@@ -28,5 +29,5 @@ export function ProductDomainListPage({ kind }: { kind: DomainKind }) {
 }
 
 export function ProductDomainDetailPage({ kind, id }: { kind: DomainKind; id: string }) {
-  return <ProductBusinessDetailPage kind={kind} id={id} />;
+  return <><ProductBusinessDetailPage kind={kind} id={id} />{kind === 'productGroup' && id !== 'new' ? <div className="mt-6"><ProductTagPanel productId={id} /></div> : null}</>;
 }

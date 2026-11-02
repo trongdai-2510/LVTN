@@ -28,6 +28,7 @@ import { resolvePublicFileSource } from '@/lib/public-file';
 import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicBrandListItem } from '@/types/contracts/public-brands';
 import type { PublicPartner } from '@/types/contracts/publicPartners';
+import type { PublicCertificate } from '@/types/contracts/publicCertificates';
 import type { PublicPageContentDetailResponse } from '@/types/contracts/public-page-contents';
 import type {
   PublicNewsCategoryItem,
@@ -61,6 +62,7 @@ type PreviewSupportData = {
   banners: PublicBannerListItem[];
   brands: PublicBrandListItem[];
   partners: PublicPartner[];
+  certificates: PublicCertificate[];
   capabilityBanners: PublicBannerListItem[];
   contactBanners: PublicBannerListItem[];
   newsBanners: PublicBannerListItem[];
@@ -144,6 +146,7 @@ export function PageContentPreviewClient({
         companyInfo={supportData.companyInfo}
         pageContent={draft}
         partners={supportData.partners}
+        certificates={supportData.certificates}
       />
     );
   }

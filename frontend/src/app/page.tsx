@@ -1,8 +1,11 @@
 import type { Metadata } from 'next';
+import { Fragment } from 'react';
 
 import { getPublicBanners } from '@/lib/api/public-banners';
 import { getAllPublicBrands } from '@/lib/api/public-brands';
 import { getPublicPartners } from '@/lib/api/publicPartners';
+import { getPublicCertificates } from '@/lib/api/publicCertificates';
+import { CertificateDirectory } from '@/features/certificates/CertificateDirectory';
 import { DEFAULT_HOME_LAYOUT, getPublicHomePage } from '@/lib/api/public-home-page';
 import { getPublicPageContentBySlug } from '@/lib/api/public-page-contents';
 import { getPublicProductCategories } from '@/lib/api/public-product-categories';
@@ -108,6 +111,7 @@ export default async function HomePage() {
     projectsResponse,
     brandsResponse,
     partnersResponse,
+    certificatesResponse,
     heroBannersResponse,
     companyAboutPage,
     shell,
@@ -157,6 +161,7 @@ export default async function HomePage() {
       filters: { q: null }
     })),
     getPublicPartners().catch(() => ({ items: [] })),
+    getPublicCertificates().catch(() => ({ items: [] })),
     heroFetch.catch(() => emptyPublicBannersForPlacement('HOME_HERO')),
     getPublicPageContentBySlug(companyOverviewSlug)
       .then((response) => response.page_content)
@@ -209,6 +214,7 @@ export default async function HomePage() {
             );
           case 'company_overview':
             return (
+              <Fragment key={section.id}>
               <HomeCompanyOverviewSection
                 key={section.id}
                 companyInfo={shell.company_info}
@@ -216,6 +222,8 @@ export default async function HomePage() {
                 titleOverride={section.title_override}
                 config={configOf(section)}
               />
+              <CertificateDirectory certificates={certificatesResponse.items} />
+              </Fragment>
             );
           case 'featured_products':
             return (

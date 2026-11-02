@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { CompanyAboutPage } from '@/features/company-about/CompanyAboutPage';
 import { getAllPublicBrands } from '@/lib/api/public-brands';
 import { getPublicPartners } from '@/lib/api/publicPartners';
+import { getPublicCertificates } from '@/lib/api/publicCertificates';
 import { getPublicPageContentBySlug, getPublicPageContentBySlugOrNull } from '@/lib/api/public-page-contents';
 import { getPublicSiteShell } from '@/lib/api/public-site-shell';
 import { emptyPublicBannersForPlacement, getPublicBannersForPlacement } from '@/lib/public-banner-placement';
@@ -32,13 +33,14 @@ export default async function AboutRoutePage() {
   const pageContent = await getPublicPageContentBySlugOrNull('gioi-thieu');
   if (!pageContent) notFound();
 
-  const [brandsResponse, partnersResponse, heroBannersResponse, shell] = await Promise.all([
+  const [brandsResponse, partnersResponse, certificatesResponse, heroBannersResponse, shell] = await Promise.all([
     getAllPublicBrands().catch(() => ({
       items: [],
       pagination: { page: 1, page_size: ABOUT_BRAND_PAGE_SIZE, total: 0, page_count: 1 },
       filters: { q: null }
     })),
     getPublicPartners().catch(() => ({ items: [] })),
+    getPublicCertificates().catch(() => ({ items: [] })),
     getPublicBannersForPlacement('ABOUT_HERO').catch(() =>
       emptyPublicBannersForPlacement('ABOUT_HERO')
     ),
@@ -57,6 +59,7 @@ export default async function AboutRoutePage() {
       banners={heroBannersResponse.items}
       brands={brandsResponse.items}
       partners={partnersResponse.items}
+      certificates={certificatesResponse.items}
       companyInfo={shell.company_info}
       pageContent={pageContent}
     />

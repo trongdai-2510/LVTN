@@ -88,6 +88,18 @@ export const sidebarGroups: SidebarGroup[] = [
         permission: PERMISSIONS.partnerRead,
         icon: Building2
       },
+        {
+          label: 'Chứng nhận',
+          href: '/certificates',
+          permission: PERMISSIONS.certificateRead,
+          icon: Building2
+        },
+        {
+          label: 'Nhãn sản phẩm',
+          href: '/tags',
+          permission: PERMISSIONS.tagRead,
+          icon: Building2
+        },
       {
         label: 'Chuyển hướng',
         href: '/redirects',

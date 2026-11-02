@@ -32,6 +32,7 @@ import type {
   PublicBrandDetailResponse,
   PublicBrandListResponse,
   PublicPartnerListResponse,
+  PublicCertificateListResponse,
   PublicCategoryListResponse,
   PublicContactRequestCreateResponse,
   PublicNewsCategoryListResponse,
@@ -154,6 +155,11 @@ export class PublicController {
   @Get("partners")
   listPublicPartners(): Promise<PublicPartnerListResponse> {
     return this.publicService.listPublicPartners();
+  }
+
+  @Get('certificates')
+  listPublicCertificates(): Promise<PublicCertificateListResponse> {
+    return this.publicService.listPublicCertificates();
   }
 
   @Get("news/related")

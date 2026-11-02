@@ -79,6 +79,8 @@ const RESOURCE_LABELS: Record<string, string> = {
   product_category: 'danh mục sản phẩm',
   brand: 'thương hiệu',
   partner: 'đối tác',
+  certificate: 'chứng nhận',
+  tag: 'nhãn sản phẩm',
   product_group: 'sản phẩm',
   product_variant: 'biến thể sản phẩm',
   technical_document: 'tài liệu kỹ thuật',

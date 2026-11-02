@@ -8,6 +8,7 @@ import type {
 
 export type GetPublicProductGroupsParams = {
   ids?: string;
+  tag?: string;
   q?: string;
   category_id?: string;
   brands?: string;
@@ -26,6 +27,7 @@ export async function getPublicProductGroups(
   const searchParams = new URLSearchParams();
 
   if (params?.ids) searchParams.set('ids', params.ids);
+  if (params?.tag) searchParams.set('tag', params.tag);
   if (params?.q) searchParams.set('q', params.q);
   if (params?.category_id) searchParams.set('category_id', params.category_id);
   if (params?.brands) searchParams.set('brands', params.brands);

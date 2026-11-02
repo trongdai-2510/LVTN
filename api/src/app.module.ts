@@ -22,6 +22,8 @@ import { MenuModule } from './modules/menu/menu.module';
 import { NewsCategoryModule } from './modules/news-category/news-category.module';
 import { PageContentModule } from './modules/page-content/page-content.module';
 import { PartnerModule } from './modules/partner/partnerModule';
+import { CertificateModule } from './modules/certificate/certificateModule';
+import { TagModule } from './modules/tag/tagModule';
 import { ProductCategoryModule } from './modules/product-category/product-category.module';
 import { ProductGroupModule } from './modules/product-group/product-group.module';
 import { ProductVariantModule } from './modules/product-variant/product-variant.module';
@@ -65,6 +67,8 @@ import { AuditTrailInterceptor } from './common/audit/audit-trail.interceptor';
     NewsCategoryModule,
     PageContentModule,
     PartnerModule,
+    CertificateModule,
+    TagModule,
     BannerModule,
     RedirectModule,
     AuditLogModule,

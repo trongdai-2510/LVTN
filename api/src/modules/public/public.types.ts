@@ -79,6 +79,7 @@ export interface PublicCategoryListResponse {
 }
 
 export interface PublicProductGroupListItem {
+  tags?: Array<{ id: string; name: string; slug: string }>;
   id: string;
   name: string;
   slug: string;
@@ -427,6 +428,17 @@ export interface PublicPartnerListResponse {
     website_url: string | null;
     logo_file_id: string | null;
     logo_file: PublicFileSummary | null;
+  }>;
+}
+
+export interface PublicCertificateListResponse {
+  items: Array<{
+    id: string;
+    title: string;
+    issued_date: string | null;
+    expires_date: string | null;
+    file: PublicFileSummary | null;
+    image_file: PublicFileSummary | null;
   }>;
 }
 
