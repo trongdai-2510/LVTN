@@ -16,7 +16,7 @@ import {
   getProductVariantParentPublishIssue,
   optimisticVersionPayload
 } from '../../src/features/product-domain/businessStatus';
-import { ApiClientError } from '../../src/lib/api-client';
+import { ApiClientError, apiClient } from '../../src/lib/api-client';
 import { AuthRequestError } from '../../src/features/auth/auth.store';
 import { formatAdminError } from '../../src/lib/admin-error-messages';
 import {
@@ -99,6 +99,23 @@ test('API error text shown directly in admin never exposes the server message', 
   expect(new ApiClientError(0, 'NETWORK_ERROR', 'Failed to fetch').message).toContain('kết nối');
   expect(new AuthRequestError(500).message).not.toContain('HTTP');
   expect(new AuthRequestError(401).message).toContain('mật khẩu');
+});
+
+test('malformed API envelopes produce a safe admin error', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: false }), {
+    status: 500,
+    headers: { 'content-type': 'application/json' }
+  });
+  try {
+    await expect(apiClient.get('/broken')).rejects.toMatchObject({
+      status: 500,
+      code: 'HTTP_500',
+      message: 'Hệ thống đang gặp lỗi xử lý. Vui lòng thử lại sau.'
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('a complete published product is ready and exposes every affected destination', () => {

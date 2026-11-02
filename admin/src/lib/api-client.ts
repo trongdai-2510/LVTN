@@ -3,13 +3,6 @@
 import { authStore } from '@/features/auth/auth.store';
 import { adminPath } from './admin-navigation';
 
-type ApiEnvelope<T> =
-  | { ok: true; data: T; meta?: Record<string, unknown> }
-  | {
-      ok: false;
-      error: { code: string; message: string; details?: Record<string, unknown> };
-    };
-
 export class ApiClientError extends Error {
   readonly status: number;
   readonly code: string;
@@ -33,6 +26,22 @@ export class ApiClientError extends Error {
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:4000';
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function responseError(status: number, payload: unknown): ApiClientError {
+  const error = asRecord(asRecord(payload)?.error);
+  return new ApiClientError(
+    status,
+    typeof error?.code === 'string' ? error.code : `HTTP_${status}`,
+    typeof error?.message === 'string' ? error.message : 'Không thể kết nối hệ thống.',
+    asRecord(error?.details) ?? undefined
+  );
+}
 
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -70,18 +79,15 @@ async function request<T>(
 
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json')
-    ? ((await response.json().catch(() => null)) as ApiEnvelope<T> | null)
+    ? await response.json().catch(() => null) as unknown
     : null;
+  const envelope = asRecord(payload);
 
-  if (!response.ok || !payload || payload.ok === false) {
-    const error =
-      payload && payload.ok === false
-        ? payload.error
-        : { code: `HTTP_${response.status}`, message: 'Không thể kết nối hệ thống.' };
-    throw new ApiClientError(response.status, error.code, error.message, error.details);
+  if (!response.ok || envelope?.ok !== true || !('data' in envelope)) {
+    throw responseError(response.status, payload);
   }
 
-  return payload.data;
+  return envelope.data as T;
 }
 
 async function requestBlob(path: string, retry = true): Promise<Blob> {
@@ -105,16 +111,14 @@ async function requestBlob(path: string, retry = true): Promise<Blob> {
   if (!response.ok) {
     const contentType = response.headers.get('content-type') || '';
     const payload = contentType.includes('application/json')
-      ? ((await response.json().catch(() => null)) as ApiEnvelope<never> | null)
+      ? await response.json().catch(() => null) as unknown
       : null;
-    const error =
-      payload && payload.ok === false
-        ? payload.error
-        : { code: `HTTP_${response.status}`, message: 'Không thể kết nối hệ thống.' };
-    throw new ApiClientError(response.status, error.code, error.message, error.details);
+    throw responseError(response.status, payload);
   }
 
-  return response.blob();
+  return response.blob().catch(() => {
+    throw new ApiClientError(0, 'NETWORK_ERROR', 'Network request failed');
+  });
 }
 
 export const apiClient = {
