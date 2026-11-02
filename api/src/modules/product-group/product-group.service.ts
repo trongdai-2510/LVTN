@@ -782,14 +782,7 @@ export class ProductGroupService {
     ], actorIsSuperAdmin);
     const next = { ...current, ...mutation };
     await this.assertReferencesUsable(next);
-    const allowLegacyMissingShortDescription =
-      current.publish_status === 'published' &&
-      !current.short_description?.trim() &&
-      typeof input.publish_status === 'undefined' &&
-      typeof input.short_description === 'undefined';
-    await this.assertPublishReadiness(next, {
-      allowLegacyMissingShortDescription
-    });
+    await this.assertPublishReadiness(next, id, current.publish_status !== 'published');
     return mutation;
   }
 
@@ -871,8 +864,8 @@ export class ProductGroupService {
       switch (error.code) {
         case 'PRODUCT_GROUP_PUBLISH_REQUIRES_THUMBNAIL':
           return { error_code: error.code, message: 'Thiếu ảnh chính.' };
-        case 'PRODUCT_GROUP_PUBLISH_REQUIRES_SHORT_DESCRIPTION':
-          return { error_code: error.code, message: 'Thiếu mô tả ngắn.' };
+        case 'PRODUCT_GROUP_PUBLISH_REQUIRES_SPEC':
+          return { error_code: error.code, message: 'Thiếu thông số kỹ thuật chung hoặc của biến thể/SKU.' };
         case 'PRODUCT_GROUP_PUBLISH_REQUIRES_APPROVED_REVIEW':
           return { error_code: error.code, message: 'Chưa được duyệt.' };
         case 'PRODUCT_GROUP_PUBLISH_REQUIRES_ACTIVE_STATUS':
@@ -940,7 +933,8 @@ export class ProductGroupService {
 
   private async assertPublishReadiness(
     input: ProductGroupMutationInput,
-    options: { allowLegacyMissingShortDescription?: boolean } = {}
+    productGroupId: string | null = null,
+    checkSpecs = true
   ): Promise<void> {
     if (input.publish_status !== 'published') {
       return;
@@ -982,17 +976,14 @@ export class ProductGroupService {
         }
       });
     }
-    if (
-      !options.allowLegacyMissingShortDescription &&
-      !input.short_description?.trim()
-    ) {
+    if (checkSpecs && (!productGroupId || !(await this.productGroupRepository.hasTechnicalSpecifications(productGroupId)))) {
       throw new AppError({
-        code: 'PRODUCT_GROUP_PUBLISH_REQUIRES_SHORT_DESCRIPTION',
+        code: 'PRODUCT_GROUP_PUBLISH_REQUIRES_SPEC',
         message:
-          'Product group cannot be published without short_description.',
+          'Product group cannot be published without a shared or variant technical specification.',
         statusCode: HttpStatus.CONFLICT,
         details: {
-          field: 'short_description'
+          field: 'specifications'
         }
       });
     }

@@ -330,6 +330,7 @@ function Meta({ label, value }: { label: string; value: unknown }) {
 
 function productReadiness(row: RecordMap): ProductReadiness {
   return evaluateProductReadiness(row, {
+    active_specs: count(row.technical_spec_count),
     active_variants: count(row.variant_count),
     active_documents: count(row.document_count),
     active_images: count(row.image_count) || (row.thumbnail_file_id ? 1 : 0)

@@ -182,9 +182,10 @@ export class ProductGroupRepository {
 
     const typedRows = rows as ProductGroupAdminRecord[];
     const ids = typedRows.map((row) => row.id);
-    const [variantCounts, documentCounts] = await Promise.all([
+    const [variantCounts, documentCounts, technicalSpecCounts] = await Promise.all([
       this.countMap(PRODUCT_VARIANT_TABLE, 'product_group_id', ids),
-      this.countMap(TECHNICAL_DOCUMENT_TABLE, 'product_group_id', ids)
+      this.countMap(TECHNICAL_DOCUMENT_TABLE, 'product_group_id', ids),
+      this.technicalSpecCountMap(ids)
     ]);
 
     return {
@@ -192,6 +193,7 @@ export class ProductGroupRepository {
         ...normalizeCategoryPath(row),
         variant_count: variantCounts.get(row.id) ?? 0,
         document_count: documentCounts.get(row.id) ?? 0,
+        technical_spec_count: technicalSpecCounts.get(row.id) ?? 0,
         search_match: searchMatches.get(row.id) ?? null
       })),
       total,
@@ -397,14 +399,16 @@ export class ProductGroupRepository {
       activeImages,
       activeServiceRelations,
       activeProjectRelations,
-      activeQuoteItems
+      activeQuoteItems,
+      technicalSpecCounts
     ] = await Promise.all([
       this.countRows(PRODUCT_VARIANT_TABLE, 'product_group_id', productGroupId),
       this.countRows(TECHNICAL_DOCUMENT_TABLE, 'product_group_id', productGroupId),
       this.countRows(PRODUCT_IMAGE_TABLE, 'product_group_id', productGroupId),
       this.countRows(SERVICE_PRODUCT_GROUP_TABLE, 'product_group_id', productGroupId),
       this.countRows(PROJECT_PRODUCT_GROUP_TABLE, 'product_group_id', productGroupId),
-      this.countRows(QUOTE_ITEM_TABLE, 'product_group_id', productGroupId)
+      this.countRows(QUOTE_ITEM_TABLE, 'product_group_id', productGroupId),
+      this.technicalSpecCountMap([productGroupId])
     ]);
 
     return {
@@ -413,8 +417,13 @@ export class ProductGroupRepository {
       active_images: activeImages,
       active_service_relations: activeServiceRelations,
       active_project_relations: activeProjectRelations,
-      active_quote_items: activeQuoteItems
+      active_quote_items: activeQuoteItems,
+      active_specs: technicalSpecCounts.get(productGroupId) ?? 0
     };
+  }
+
+  async hasTechnicalSpecifications(productGroupId: string): Promise<boolean> {
+    return ((await this.technicalSpecCountMap([productGroupId])).get(productGroupId) ?? 0) > 0;
   }
 
   async publicPriceSummary(productGroupId: string): Promise<ProductGroupPublicPriceSummary> {
@@ -981,6 +990,36 @@ export class ProductGroupRepository {
       .groupBy(columnName)
       .count({ total: columnName })) as Array<Record<string, string | number | null>>;
     return new Map(rows.map((row) => [String(row[columnName]), Number(row.total ?? 0)]));
+  }
+
+  private async technicalSpecCountMap(ids: string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const [shared, variant, attributes] = await Promise.all([
+      this.knexService.db({ spec: PRODUCT_SPEC_TABLE })
+        .innerJoin({ group: SPEC_GROUP_TABLE }, 'group.id', 'spec.spec_group_id')
+        .whereIn('group.product_group_id', ids)
+        .whereNull('group.deleted_at').whereNull('spec.deleted_at')
+        .select('group.product_group_id as product_group_id')
+        .count({ total: 'spec.id' }).groupBy('group.product_group_id'),
+      this.knexService.db({ spec: VARIANT_SPEC_TABLE })
+        .innerJoin({ group: VARIANT_SPEC_GROUP_TABLE }, 'group.id', 'spec.variant_spec_group_id')
+        .innerJoin({ variant: PRODUCT_VARIANT_TABLE }, 'variant.id', 'group.product_variant_id')
+        .whereIn('variant.product_group_id', ids)
+        .whereNull('variant.deleted_at').whereNull('group.deleted_at').whereNull('spec.deleted_at')
+        .select('variant.product_group_id as product_group_id')
+        .count({ total: 'spec.id' }).groupBy('variant.product_group_id'),
+      this.knexService.db({ attribute: VARIANT_ATTRIBUTE_TABLE })
+        .innerJoin({ variant: PRODUCT_VARIANT_TABLE }, 'variant.id', 'attribute.product_variant_id')
+        .whereIn('variant.product_group_id', ids)
+        .whereNull('variant.deleted_at').whereNull('attribute.deleted_at')
+        .select('variant.product_group_id as product_group_id')
+        .count({ total: 'attribute.id' }).groupBy('variant.product_group_id')
+    ]);
+    const counts = new Map<string, number>();
+    for (const row of [...shared, ...variant, ...attributes] as Array<{ product_group_id: string; total: string | number }>) {
+      counts.set(row.product_group_id, (counts.get(row.product_group_id) ?? 0) + Number(row.total));
+    }
+    return counts;
   }
 
   private async countDistinct(query: Knex.QueryBuilder, column: string): Promise<number> {

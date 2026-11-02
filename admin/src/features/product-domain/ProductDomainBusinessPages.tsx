@@ -1387,11 +1387,19 @@ export function ProductBusinessDetailPage({
       return;
     }
 
+    const productDependencies = asRecord(detail.dependency_counts);
+    const validationDependencies =
+      kind === 'productGroup' && isCreate
+        ? { active_specs: 0 }
+        : kind === 'productGroup' && record.publish_status === 'published' && form.publish_status === 'published'
+          ? { ...productDependencies, active_specs: undefined }
+          : productDependencies;
     const validationIssues = validateBusinessForm(
       kind,
       !canPrivilegedWorkflow && (kind === 'productGroup' || kind === 'productVariant')
         ? { ...form, publish_status: 'unpublished' }
-        : form
+        : form,
+      validationDependencies
     );
     if (validationIssues.length > 0) {
       const nextFieldErrors = validationIssues.reduce<FieldErrors>((accumulator, issue) => {
@@ -1543,6 +1551,7 @@ export function ProductBusinessDetailPage({
       inline={kind === 'productGroup'}
       kind={kind}
       form={form}
+      dependencies={asRecord(detail.dependency_counts)}
       canAct={canSave}
       canPrivilegedWorkflow={canPrivilegedWorkflow}
       hasUnsavedChanges={isDirty}
@@ -2557,6 +2566,7 @@ function DisplayStatusSection({
   inline = false,
   kind,
   form,
+  dependencies,
   canAct,
   canPrivilegedWorkflow,
   hasUnsavedChanges,
@@ -2567,6 +2577,7 @@ function DisplayStatusSection({
   inline?: boolean;
   kind: BusinessKind;
   form: Record<string, string>;
+  dependencies: Record<string, unknown>;
   canAct: boolean;
   canPrivilegedWorkflow: boolean;
   hasUnsavedChanges: boolean;
@@ -2575,7 +2586,7 @@ function DisplayStatusSection({
 }) {
   const status = displayStatusState(form, canPrivilegedWorkflow);
   const publishBlockers =
-    status.actions.includes('publish') ? getDisplayPublishBlockers(kind, form) : [];
+    status.actions.includes('publish') ? getDisplayPublishBlockers(kind, form, dependencies) : [];
   const actionDisabled = pendingAction !== null || !canAct || hasUnsavedChanges;
 
   const content = (

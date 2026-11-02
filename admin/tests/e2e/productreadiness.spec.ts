@@ -8,6 +8,7 @@ import {
   buildBusinessPayload,
   businessFormFromRecord,
   createBusinessForm,
+  getDisplayPublishBlockers,
   validateBusinessForm
 } from '../../src/features/product-domain/businessForm';
 import {
@@ -50,6 +51,7 @@ const readyGroup = {
 };
 
 const readyDependencies = {
+  active_specs: 1,
   active_variants: 2,
   active_documents: 1,
   active_images: 3,
@@ -101,8 +103,7 @@ test('required identity and classification fields use the same hard boundaries a
     'product_name_missing',
     'product_slug_invalid',
     'product_category_missing',
-    'product_thumbnail_missing',
-    'product_short_description_missing'
+    'product_thumbnail_missing'
   ]);
   expect(readiness.dataIssues.map((issue) => issue.code)).toEqual([
     'product_name_missing',
@@ -110,9 +111,9 @@ test('required identity and classification fields use the same hard boundaries a
     'product_category_missing'
   ]);
   expect(readiness.publicationIssues.map((issue) => issue.code)).toEqual([
-    'product_thumbnail_missing',
-    'product_short_description_missing'
+    'product_thumbnail_missing'
   ]);
+  expect(readiness.qualityIssues.map((issue) => issue.code)).toContain('product_short_description_missing');
   expect(readiness.canPublish).toBe(false);
 });
 
@@ -267,10 +268,29 @@ test('a currently public legacy record stays in the public lane when it only lac
   expect(readiness.isPublic).toBe(true);
   expect(readiness.lane).toBe('published');
   expect(readiness.dataIssues).toEqual([]);
-  expect(readiness.publicationIssues.map((issue) => issue.code)).toEqual([
-    'product_short_description_missing'
-  ]);
-  expect(readiness.catalogIssues).toEqual(readiness.publicationIssues);
+  expect(readiness.publicationIssues).toEqual([]);
+  expect(readiness.qualityIssues.map((issue) => issue.code)).toContain('product_short_description_missing');
+  expect(readiness.catalogIssues).toEqual([]);
+});
+
+test('missing descriptions are suggestions while missing every technical spec blocks publication', () => {
+  const withoutDescriptions = { ...readyGroup, publish_status: 'unpublished', short_description: null, detailed_description: null };
+  const withSpec = evaluateProductReadiness(withoutDescriptions, readyDependencies);
+  expect(withSpec.canPublish).toBe(true);
+  expect(withSpec.blockingIssues).toEqual([]);
+  expect(withSpec.qualityIssues.map((issue) => issue.code)).toContain('product_short_description_missing');
+
+  const withoutSpec = evaluateProductReadiness(withoutDescriptions, { ...readyDependencies, active_specs: 0 });
+  expect(withoutSpec.canPublish).toBe(false);
+  expect(withoutSpec.publicationIssues.map((issue) => issue.code)).toEqual(['product_technical_spec_missing']);
+
+  const form = { ...businessFormFromRecord('productGroup', withoutDescriptions), publish_status: 'published' };
+  expect(validateBusinessForm('productGroup', form, readyDependencies)).toEqual([]);
+  expect(getDisplayPublishBlockers('productGroup', form, readyDependencies)).toEqual([]);
+  expect(validateBusinessForm('productGroup', form, { ...readyDependencies, active_specs: 0 })
+    .some((issue) => issue.message.includes('Thiếu thông số kỹ thuật'))).toBe(true);
+  expect(getDisplayPublishBlockers('productGroup', form, { ...readyDependencies, active_specs: 0 })
+    .some((message) => message.includes('Thiếu thông số kỹ thuật'))).toBe(true);
 });
 
 test('optional quality suggestions do not inflate the required-work count shown in the catalogue', () => {

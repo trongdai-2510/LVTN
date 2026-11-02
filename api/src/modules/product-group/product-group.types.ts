@@ -103,9 +103,11 @@ export interface ProductGroupAdminRecord extends ProductGroupRecord {
 export interface ProductGroupListItem extends ProductGroupAdminRecord {
   variant_count: number;
   document_count: number;
+  technical_spec_count: number;
 }
 
 export interface ProductGroupDependencyCounts {
+  active_specs?: number;
   active_variants: number;
   active_documents: number;
   active_images: number;

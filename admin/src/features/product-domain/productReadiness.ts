@@ -119,9 +119,17 @@ export function evaluateProductReadiness(
 
   if (!textValue(productGroup.short_description)) {
     issues.push(
-      issue('product_short_description_missing', 'blocking', 'publication', 'content', 'short_description',
-        'Thiếu mô tả ngắn', 'Cần có mô tả ngắn để khách hàng hiểu nhanh sản phẩm trước khi xem chi tiết.',
-        'Bổ sung mô tả ngắn')
+      issue('product_short_description_missing', 'warning', 'quality', 'content', 'short_description',
+        'Thiếu mô tả ngắn', 'Có thể bổ sung sau để khách hàng hiểu nhanh sản phẩm trước khi xem chi tiết.',
+        'Bổ sung khi có nội dung')
+    );
+  }
+
+  if (optionalCountValue(dependencies.active_specs) === 0) {
+    issues.push(
+      issue('product_technical_spec_missing', 'blocking', 'publication', 'variant', 'variants',
+        'Thiếu thông số kỹ thuật', 'Cần ít nhất một thông số kỹ thuật chung hoặc của biến thể/SKU.',
+        'Thêm thông số biến thể')
     );
   }
 

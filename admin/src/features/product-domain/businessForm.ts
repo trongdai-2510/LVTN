@@ -8,7 +8,8 @@ export type ValidationIssue = {
 
 export function validateBusinessForm(
   kind: BusinessKind,
-  form: Record<string, string>
+  form: Record<string, string>,
+  dependencies: Record<string, unknown> = {}
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -43,7 +44,7 @@ export function validateBusinessForm(
         issues.push({ field: 'category_id', message: 'Vui lòng chọn danh mục con.' });
       }
       if (form.publish_status === 'published') {
-        const publishBlockers = getProductGroupPersistedPublishBlockers(form);
+        const publishBlockers = getProductGroupPersistedPublishBlockers(form, dependencies);
         if (publishBlockers.length > 0) {
           issues.push({
             field: '__form',
@@ -96,14 +97,15 @@ export function validateBusinessForm(
 }
 
 function getProductGroupPersistedPublishBlockers(
-  form: Record<string, string>
+  form: Record<string, string>,
+  dependencies: Record<string, unknown>
 ) {
   const normalizedProduct = {
     ...form,
     category_level_2_id: form.category_level_2_id || form.category_id
   };
 
-  return evaluateProductReadiness(normalizedProduct).blockingIssues.map(
+  return evaluateProductReadiness(normalizedProduct, dependencies).blockingIssues.map(
     (item) => `${item.title}. ${item.action}.`
   );
 }
@@ -124,10 +126,11 @@ function getProductVariantPersistedPublishBlockers(
 
 export function getDisplayPublishBlockers(
   kind: BusinessKind,
-  form: Record<string, string>
+  form: Record<string, string>,
+  dependencies: Record<string, unknown> = {}
 ) {
   if (kind === 'productGroup') {
-    return getProductGroupPersistedPublishBlockers(form);
+    return getProductGroupPersistedPublishBlockers(form, dependencies);
   }
 
   if (kind === 'productVariant') {
