@@ -69,6 +69,7 @@ test('certificate and tag managers create records without horizontal overflow', 
 
 test('selecting a certificate file keeps the draft open on mobile', async ({ page }) => {
   let saves = 0;
+  let uploads = 0;
   const filePermissions = [...permissions, 'file.create'];
   await page.addInitScript((state) => window.sessionStorage.setItem('song-thanh-admin-auth', JSON.stringify(state)),
     { accessToken: 'qa-token', refreshToken: 'qa-refresh', user, permissions: filePermissions, roles: ['super_admin'] });
@@ -77,8 +78,14 @@ test('selecting a certificate file keeps the draft open on mobile', async ({ pag
     if (path === '/auth/me') return route.fulfill({ json: { ok: true, data: { user, permissions: filePermissions, roles: ['super_admin'] } } });
     if (path === '/song-thanh/certificates' && route.request().method() === 'GET') return route.fulfill({ json: { ok: true, data: { items: [] } } });
     if (path === '/song-thanh/certificates' && route.request().method() === 'POST') saves += 1;
-    if (path === '/song-thanh/files/upload') return route.fulfill({ json: { ok: true, data: { file: { id: 'qa-cert-file', original_filename: 'certificate.pdf', mime_type: 'application/pdf' } } } });
+    if (path === '/song-thanh/files/upload') {
+      uploads += 1;
+      return route.fulfill({ json: { ok: true, data: { file: uploads === 1
+        ? { id: 'qa-cert-file', original_filename: 'certificate.pdf', mime_type: 'application/pdf' }
+        : { id: 'qa-cert-image', original_filename: 'certificate.png', mime_type: 'image/png' } } } });
+    }
     if (path === '/song-thanh/files/qa-cert-file') return route.fulfill({ json: { ok: true, data: { file: { id: 'qa-cert-file', original_filename: 'certificate.pdf', mime_type: 'application/pdf' } } } });
+    if (path === '/song-thanh/files/qa-cert-image') return route.fulfill({ json: { ok: true, data: { file: { id: 'qa-cert-image', original_filename: 'certificate.png', mime_type: 'image/png' } } } });
     return route.fulfill({ status: 404, json: { ok: false, error: { message: 'Not mocked' } } });
   });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -99,6 +106,17 @@ test('selecting a certificate file keeps the draft open on mobile', async ({ pag
   await expect(editor).toBeVisible();
   await expect(editor).toContainText('certificate.pdf');
   await expect(editor.getByLabel('Tên chứng nhận')).toHaveValue('Đang nhập chứng nhận');
+  await editor.getByRole('button', { name: 'Tải ảnh mới' }).click();
+  const imageUpload = page.getByRole('dialog', { name: 'Tải ảnh mới' });
+  const imageChooser = page.waitForEvent('filechooser');
+  await imageUpload.locator('[data-file-upload-input]').click();
+  await (await imageChooser).setFiles({ name: 'certificate.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64') });
+  await expect(editor.getByLabel('Tên chứng nhận')).toHaveValue('Đang nhập chứng nhận');
+  await imageUpload.locator('[data-file-upload-submit]').click();
+  await expect(imageUpload).toHaveCount(0);
+  await expect(editor).toContainText('certificate.png');
+  expect(uploads).toBe(2);
+  expect(saves).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
