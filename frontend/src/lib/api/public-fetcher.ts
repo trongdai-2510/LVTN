@@ -65,10 +65,7 @@ export async function publicFetcher<T>(pathname: string, init?: RequestInit): Pr
       'Public API base URL is not configured for production server rendering.',
       0,
       'PUBLIC_API_BASE_URL_MISSING',
-      {
-        pathname,
-        expected_env: ['API_BASE_URL', 'NEXT_PUBLIC_API_BASE_URL']
-      }
+      null
     );
   }
 
@@ -90,11 +87,8 @@ export async function publicFetcher<T>(pathname: string, init?: RequestInit): Pr
   let response: Response;
   try {
     response = await fetch(resolvePublicApiUrl(pathname), fetchInit);
-  } catch (error) {
-    throw new PublicApiError('Public API is unavailable.', 0, 'PUBLIC_API_UNAVAILABLE', {
-      pathname,
-      cause: error instanceof Error ? error.message : String(error)
-    });
+  } catch {
+    throw new PublicApiError('Public API is unavailable.', 0, 'PUBLIC_API_UNAVAILABLE', null);
   }
 
   let payload: PublicApiEnvelope<T> | null = null;
