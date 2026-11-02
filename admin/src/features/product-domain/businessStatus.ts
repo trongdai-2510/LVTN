@@ -17,6 +17,18 @@ export function supportsSimplifiedDisplayStatus(kind: BusinessKind) {
   return kind === 'productGroup' || kind === 'productVariant';
 }
 
+export function getProductVariantParentPublishIssue(record: RecordMap): string | null {
+  if (!record.product_group_id) return null;
+  const status = record.product_group_status;
+  const review = record.product_group_review_status;
+  const publish = record.product_group_publish_status;
+  if (!status || !review || !publish) return null;
+  if (status !== 'active') return 'Sản phẩm cha chưa ở trạng thái hoạt động.';
+  if (review !== 'approved') return 'Sản phẩm cha chưa được duyệt.';
+  if (publish !== 'published') return 'Sản phẩm cha chưa xuất bản.';
+  return null;
+}
+
 export function optimisticVersionPayload(
   kind: BusinessKind,
   record?: RecordMap

@@ -13,8 +13,11 @@ import {
 } from '../../src/features/product-domain/businessForm';
 import {
   buildDisplayStatusPayload,
+  getProductVariantParentPublishIssue,
   optimisticVersionPayload
 } from '../../src/features/product-domain/businessStatus';
+import { ApiClientError } from '../../src/lib/api-client';
+import { formatAdminError } from '../../src/lib/admin-error-messages';
 import {
   buildBusinessListHref,
   defaultBusinessListFilters,
@@ -59,6 +62,24 @@ const readyDependencies = {
   active_project_relations: 1,
   active_quote_items: 2
 };
+
+test('variant publish explains an unpublished parent and the API error gives a usable next step', () => {
+  const parent = {
+    product_group_id: 'da7688ef-d748-4e15-b4d3-b6f85d8da55a',
+    product_group_status: 'active',
+    product_group_review_status: 'approved',
+    product_group_publish_status: 'unpublished'
+  };
+  expect(getProductVariantParentPublishIssue(parent)).toContain('chưa xuất bản');
+  expect(getProductVariantParentPublishIssue({ ...parent, product_group_publish_status: 'published' })).toBeNull();
+
+  const error = new ApiClientError(409, 'PRODUCT_VARIANT_PUBLISH_REQUIRES_PUBLIC_GROUP',
+    'Product variant cannot be published before its product group is approved and published.', parent);
+  const presentation = formatAdminError(error, 'module-action');
+  expect(presentation.title).toBe('Cần xuất bản sản phẩm cha trước');
+  expect(presentation.message).toContain('chưa xuất bản');
+  expect(presentation.suggestedAction).toContain('sản phẩm cha');
+});
 
 test('a complete published product is ready and exposes every affected destination', () => {
   const readiness = evaluateProductReadiness(readyGroup, readyDependencies);

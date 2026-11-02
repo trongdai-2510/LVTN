@@ -540,6 +540,17 @@ export function formatAdminError(
     );
   }
 
+  if (normalized.code === 'PRODUCT_GROUP_PUBLISH_REQUIRES_SPEC') {
+    return withTechnicalDetail(
+      {
+        title: 'Chưa thể xuất bản sản phẩm',
+        message: 'Sản phẩm cần ít nhất một thông số kỹ thuật chung hoặc của một biến thể/SKU.',
+        suggestedAction: 'Thêm thông số kỹ thuật rồi xuất bản lại sản phẩm.'
+      },
+      normalized
+    );
+  }
+
   if (
     normalized.code === 'PRODUCT_GROUP_BRAND_CONTEXT_MISSING' ||
     normalized.code === 'PRODUCT_GROUP_BRAND_CONTEXT_INVALID'
@@ -577,6 +588,19 @@ export function formatAdminError(
           'Trạng thái duyệt phải là “Đã duyệt” trước khi chuyển sang “Đã xuất bản”.',
         suggestedAction:
           'Đổi “Trạng thái duyệt” sang “Đã duyệt”, sau đó lưu lại.'
+      },
+      normalized
+    );
+  }
+
+  if (normalized.code === 'PRODUCT_VARIANT_PUBLISH_REQUIRES_PUBLIC_GROUP') {
+    return withTechnicalDetail(
+      {
+        title: 'Cần xuất bản sản phẩm cha trước',
+        message: normalized.details?.product_group_review_status === 'approved'
+          ? 'Sản phẩm cha đã được duyệt nhưng chưa xuất bản, nên biến thể chưa thể hiển thị trên website.'
+          : 'Sản phẩm cha cần hoạt động, được duyệt và xuất bản trước khi biến thể hiển thị trên website.',
+        suggestedAction: 'Mở sản phẩm cha, xử lý các điều kiện còn thiếu và xuất bản; sau đó quay lại xuất bản biến thể.'
       },
       normalized
     );

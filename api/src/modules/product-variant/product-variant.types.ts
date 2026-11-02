@@ -54,6 +54,9 @@ export interface ProductVariantRecord {
 export interface ProductVariantAdminRecord extends ProductVariantRecord {
   product_group_name: string | null;
   product_group_slug: string | null;
+  product_group_status: string | null;
+  product_group_review_status: string | null;
+  product_group_publish_status: string | null;
   image_file_id: string | null;
 }
 

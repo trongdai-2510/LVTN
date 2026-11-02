@@ -77,6 +77,7 @@ import {
 import {
   buildDisplayStatusPayload,
   displayStatusSuccessMessage,
+  getProductVariantParentPublishIssue,
   optimisticVersionPayload,
   supportsSimplifiedDisplayStatus,
   type DisplayStatusAction
@@ -100,7 +101,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, ApiClientError } from '@/lib/api-client';
 import { consumeAdminFlash, pushAdminFlash } from '@/lib/admin-flash';
 import { byId, endpoints } from '@/lib/api-endpoints';
 import { cn } from '@/lib/cn';
@@ -1304,6 +1305,12 @@ export function ProductBusinessDetailPage({
   }
 
   function openErrorDialog(err: unknown, context: 'module-save' | 'module-action') {
+    const parentId = err instanceof ApiClientError &&
+      err.code === 'PRODUCT_VARIANT_PUBLISH_REQUIRES_PUBLIC_GROUP' &&
+      typeof err.details?.product_group_id === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(err.details.product_group_id)
+        ? err.details.product_group_id
+        : null;
     setResultDialog({
       tone: 'error',
       title:
@@ -1311,7 +1318,13 @@ export function ProductBusinessDetailPage({
           ? 'Không lưu được bản ghi'
           : 'Không thực hiện được thao tác',
       error: err,
-      errorContext: context
+      errorContext: context,
+      primaryAction: parentId && permissions.includes(BUSINESS_CONFIGS.productGroup.readPermission)
+        ? {
+            label: 'Mở sản phẩm cha',
+            onSelect: () => router.push(`${BUSINESS_CONFIGS.productGroup.listPath}/${parentId}`)
+          }
+        : undefined
     });
   }
 
@@ -1551,7 +1564,9 @@ export function ProductBusinessDetailPage({
       inline={kind === 'productGroup'}
       kind={kind}
       form={form}
+      record={record}
       dependencies={asRecord(detail.dependency_counts)}
+      canOpenParent={permissions.includes(BUSINESS_CONFIGS.productGroup.readPermission)}
       canAct={canSave}
       canPrivilegedWorkflow={canPrivilegedWorkflow}
       hasUnsavedChanges={isDirty}
@@ -2566,7 +2581,9 @@ function DisplayStatusSection({
   inline = false,
   kind,
   form,
+  record,
   dependencies,
+  canOpenParent,
   canAct,
   canPrivilegedWorkflow,
   hasUnsavedChanges,
@@ -2577,7 +2594,9 @@ function DisplayStatusSection({
   inline?: boolean;
   kind: BusinessKind;
   form: Record<string, string>;
+  record: RecordMap;
   dependencies: Record<string, unknown>;
+  canOpenParent: boolean;
   canAct: boolean;
   canPrivilegedWorkflow: boolean;
   hasUnsavedChanges: boolean;
@@ -2585,6 +2604,11 @@ function DisplayStatusSection({
   onAction: (action: DisplayStatusAction) => void;
 }) {
   const status = displayStatusState(form, canPrivilegedWorkflow);
+  const parentIssue = kind === 'productVariant' ? getProductVariantParentPublishIssue(record) : null;
+  const parentId = typeof record.product_group_id === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(record.product_group_id)
+      ? record.product_group_id
+      : null;
   const publishBlockers =
     status.actions.includes('publish') ? getDisplayPublishBlockers(kind, form, dependencies) : [];
   const actionDisabled = pendingAction !== null || !canAct || hasUnsavedChanges;
@@ -2612,6 +2636,18 @@ function DisplayStatusSection({
           </p>
         ) : null}
 
+        {parentIssue ? (
+          <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900" data-variant-parent-publish-warning="true">
+            <p className="font-medium">{parentIssue}</p>
+            <p className="mt-1">Hoàn thiện và xuất bản sản phẩm cha, sau đó quay lại xuất bản biến thể này.</p>
+            {canOpenParent && parentId ? (
+              <LinkButton href={`${BUSINESS_CONFIGS.productGroup.listPath}/${parentId}`} variant="secondary" size="sm" className="mt-3">
+                Mở sản phẩm cha
+              </LinkButton>
+            ) : null}
+          </div>
+        ) : null}
+
         {publishBlockers.length > 0 ? (
           <div className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
             <div className="font-medium">Chưa thể xuất bản.</div>
@@ -2632,7 +2668,7 @@ function DisplayStatusSection({
                 variant={displayStatusActionVariant(action)}
                 className={displayStatusActionClassName(action)}
                 disabled={
-                  actionDisabled || (action === 'publish' && publishBlockers.length > 0)
+                  actionDisabled || (action === 'publish' && (publishBlockers.length > 0 || Boolean(parentIssue)))
                 }
                 data-display-status-action={action}
                 onClick={() => onAction(action)}
