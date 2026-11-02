@@ -3,6 +3,8 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicBrandListItem } from '@/types/contracts/public-brands';
+import type { PublicPartner } from '@/types/contracts/publicPartners';
+import { PartnerDirectory } from '@/features/partners/PartnerDirectory';
 import type {
   BrandsSectionConfig,
   CompanyOverviewSectionConfig,
@@ -466,8 +468,10 @@ export function HomeProjectsSection({
 }
 export function HomePartnersSection({
   brands,
+  partners = [],
   config
 }: Pick<HomeVisualSectionsProps, 'brands'> & {
+  partners?: PublicPartner[];
   config?: BrandsSectionConfig;
 }) {
   const mode = config?.mode ?? 'auto';
@@ -475,12 +479,12 @@ export function HomePartnersSection({
   const ids = config?.brand_ids ?? [];
   const autoscrollMs = config?.autoscroll_ms ?? 5000;
   const visibleBrands = applyListMode(brands, mode, ids, itemLimit);
-  if (visibleBrands.length === 0) {
+  if (visibleBrands.length === 0 && partners.length === 0) {
     return null;
   }
   return (
-    <section className="border-y border-borderBlue bg-white py-12">
-      <Container size="wide">
+    <div className="border-y border-borderBlue bg-white">
+      {visibleBrands.length > 0 ? <section className="py-12" aria-label="Thương hiệu sản phẩm"><Container size="wide">
         <HomeCarousel
           ariaLabel="Thương hiệu sản phẩm"
           autoScrollIntervalMs={autoscrollMs}
@@ -494,8 +498,12 @@ export function HomePartnersSection({
             <BrandLogoTile brand={brand} key={brand.id} />
           ))}
         </HomeCarousel>
-      </Container>
-    </section>
+      </Container></section> : null}
+      {partners.length > 0 ? <section className="border-t border-borderBlue py-12" aria-label="Đối tác của Song Thanh"><Container size="wide">
+        <h2 className="type-section-title mb-7 text-secondary">Đối tác của Song Thanh</h2>
+        <PartnerDirectory partners={partners} />
+      </Container></section> : null}
+    </div>
   );
 }
 function BrandLogoTile({

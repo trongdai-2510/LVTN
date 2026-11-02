@@ -10,6 +10,7 @@ const routePermissions: Array<{ prefix: string; permission?: string }> = [
   { prefix: '/files', permission: PERMISSIONS.fileRead },
   { prefix: '/product-categories', permission: PERMISSIONS.productCategoryRead },
   { prefix: '/brands', permission: PERMISSIONS.brandRead },
+  { prefix: '/partners', permission: PERMISSIONS.partnerRead },
   { prefix: '/product-groups', permission: PERMISSIONS.productGroupRead },
   { prefix: '/product-variants', permission: PERMISSIONS.productVariantRead },
   { prefix: '/technical-documents', permission: PERMISSIONS.technicalDocumentRead },

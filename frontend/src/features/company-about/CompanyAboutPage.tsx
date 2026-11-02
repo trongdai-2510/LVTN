@@ -18,6 +18,8 @@ import { formatWorkingHours } from '@/lib/format/text';
 import { resolvePublicFileSource } from '@/lib/public-file';
 import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicBrandListItem } from '@/types/contracts/public-brands';
+import type { PublicPartner } from '@/types/contracts/publicPartners';
+import { PartnerDirectory } from '@/features/partners/PartnerDirectory';
 import type { PublicPageContentDetailResponse } from '@/types/contracts/public-page-contents';
 import type { PublicCompanyInfo } from '@/types/contracts/public-site-shell';
 
@@ -26,6 +28,7 @@ import styles from './CompanyAboutPage.module.css';
 type Props = {
   banners: PublicBannerListItem[];
   brands: PublicBrandListItem[];
+  partners: PublicPartner[];
   companyInfo: PublicCompanyInfo | null;
   pageContent: PublicPageContentDetailResponse['page_content'] | null;
 };
@@ -120,7 +123,7 @@ function ContactItem({ icon, label, children }: { icon: ReactNode; label: string
   return <div className="flex gap-4 border-t border-borderBlue py-5"><span aria-hidden="true" className="mt-0.5 shrink-0 text-primary">{icon}</span><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">{label}</p><div className="mt-2 break-words text-[15px] font-medium leading-relaxed text-secondary">{children}</div></div></div>;
 }
 
-export function CompanyAboutPage({ banners, brands, companyInfo, pageContent }: Props) {
+export function CompanyAboutPage({ banners, brands, partners, companyInfo, pageContent }: Props) {
   const companyName = getPublicCompanyName(companyInfo);
   const heading = pageContent?.title?.trim() || 'Về ' + companyName;
   const summary = pageContent?.excerpt?.trim() || FALLBACK_SUMMARY;
@@ -148,7 +151,7 @@ export function CompanyAboutPage({ banners, brands, companyInfo, pageContent }: 
     <div className="bg-white">
       <PageSectionLayout
         blocks={pageContent?.extra_blocks}
-        defaults={['about-hero', 'about-company-content', 'about-core-capabilities', 'about-contact', 'about-brands']}
+        defaults={['about-hero', 'about-company-content', 'about-core-capabilities', 'about-contact', 'about-brands', 'about-partners']}
         required={['about-hero', 'about-company-content']}
         sections={{
           'about-hero': hasBanner ?
@@ -207,7 +210,11 @@ export function CompanyAboutPage({ banners, brands, companyInfo, pageContent }: 
               </Container>
             </section>
           ),
-          'about-brands': <HomePartnersSection brands={brands} />
+          'about-brands': <HomePartnersSection brands={brands} />,
+          'about-partners': partners.length > 0 ? <section className="bg-white py-12" aria-label="Đối tác của Song Thanh"><Container size="wide">
+            <h2 className="type-section-title mb-7 text-secondary">Đối tác của Song Thanh</h2>
+            <PartnerDirectory partners={partners} />
+          </Container></section> : null
         }}
       />
     </div>

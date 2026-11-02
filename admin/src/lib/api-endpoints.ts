@@ -27,6 +27,7 @@ export const endpoints = {
     fileUsages: '/song-thanh/file-usages',
     productCategories: '/song-thanh/product-categories',
     brands: '/song-thanh/brands',
+    partners: '/song-thanh/partners',
     productGroups: '/song-thanh/product-groups',
     productVariants: '/song-thanh/product-variants',
     variantAttributeNameSuggestions: '/admin/variant-attributes/name-suggestions',

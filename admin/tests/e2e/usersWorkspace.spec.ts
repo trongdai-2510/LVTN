@@ -13,7 +13,7 @@ const permissions = [
 ];
 const roles = [
   { id: 'super-role', code: 'super_admin', name: 'Super Admin', status: 'active',
-    description: 'Toàn quyền hệ thống', user_count: 1, permission_count: 118,
+    description: 'Toàn quyền hệ thống', user_count: 1, permission_count: 123,
     is_protected: true, is_super_admin: true, can_assign: true },
   { id: 'content-role', code: 'content_admin', name: 'Content Admin', status: 'active',
     description: 'Biên tập nội dung website', user_count: 1, permission_count: 60,

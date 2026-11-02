@@ -190,7 +190,7 @@ test('user assignment explains Super Admin impact before saving', async ({ page 
   await expect(
     dialog.getByText(/Toàn quyền hệ thống. Chỉ Super Admin được gán hoặc gỡ vai trò này/)
   ).toBeVisible();
-  await expect(dialog.getByText(/118 quyền/)).toBeVisible();
+  await expect(dialog.getByText(/123 quyền/)).toBeVisible();
 });
 
 test('an existing token follows role changes and cannot reach unauthorized API routes', async ({ request, page }) => {

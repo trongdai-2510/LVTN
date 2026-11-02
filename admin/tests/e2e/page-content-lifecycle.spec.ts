@@ -37,8 +37,8 @@ const SYSTEM_PAGE_TEMPLATE_CASES = [
   { id: 'projects', label: 'Dự án', formTitle: 'Thiết lập nội dung trang Dự án', slug: 'du-an' },
   {
     id: 'brands',
-    label: 'Thương hiệu sản phẩm',
-    formTitle: 'Thiết lập nội dung trang Thương hiệu',
+    label: 'Thương hiệu và đối tác',
+    formTitle: 'Thiết lập nội dung trang Thương hiệu & Đối tác',
     slug: 'doi-tac-thuong-hieu'
   },
   { id: 'news-index', label: 'Trang Tin tức', formTitle: 'Thiết lập nội dung trang Tin tức', slug: 'tin-tuc' },

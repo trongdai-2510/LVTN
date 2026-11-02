@@ -125,6 +125,7 @@ export interface HomePageAdminResponse {
     active_services_count: number;
     active_projects_count: number;
     active_brands_count: number;
+    active_partners_count: number;
   };
 }
 
@@ -188,8 +189,8 @@ export const SECTION_META: Record<
     canDisableWithoutWarning: true
   },
   brands: {
-    label: 'Thương hiệu đối tác',
-    description: 'Dải logo thương hiệu cuộn ngang.',
+    label: 'Thương hiệu và đối tác',
+    description: 'Dải logo thương hiệu và danh sách đối tác đang hiển thị.',
     icon: 'tag',
     supportsTitleOverride: false,
     defaultTitle: null,

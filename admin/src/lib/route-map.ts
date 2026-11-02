@@ -83,6 +83,12 @@ export const sidebarGroups: SidebarGroup[] = [
         icon: GalleryHorizontal
       },
       {
+        label: 'Đối tác',
+        href: '/partners',
+        permission: PERMISSIONS.partnerRead,
+        icon: Building2
+      },
+      {
         label: 'Chuyển hướng',
         href: '/redirects',
         permission: PERMISSIONS.redirectRead,

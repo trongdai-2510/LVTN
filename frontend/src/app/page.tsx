@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 
 import { getPublicBanners } from '@/lib/api/public-banners';
 import { getAllPublicBrands } from '@/lib/api/public-brands';
+import { getPublicPartners } from '@/lib/api/publicPartners';
 import { DEFAULT_HOME_LAYOUT, getPublicHomePage } from '@/lib/api/public-home-page';
 import { getPublicPageContentBySlug } from '@/lib/api/public-page-contents';
 import { getPublicProductCategories } from '@/lib/api/public-product-categories';
@@ -106,6 +107,7 @@ export default async function HomePage() {
     servicesResponse,
     projectsResponse,
     brandsResponse,
+    partnersResponse,
     heroBannersResponse,
     companyAboutPage,
     shell,
@@ -154,6 +156,7 @@ export default async function HomePage() {
       pagination: { page: 1, page_size: HOME_BRAND_PAGE_SIZE, total: 0, page_count: 1 },
       filters: { q: null }
     })),
+    getPublicPartners().catch(() => ({ items: [] })),
     heroFetch.catch(() => emptyPublicBannersForPlacement('HOME_HERO')),
     getPublicPageContentBySlug(companyOverviewSlug)
       .then((response) => response.page_content)
@@ -249,6 +252,7 @@ export default async function HomePage() {
                 key={section.id}
                 brands={brandsResponse.items}
                 config={configOf(section)}
+                partners={partnersResponse.items}
               />
             );
           case 'trust_strip':

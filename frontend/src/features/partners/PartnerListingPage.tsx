@@ -7,6 +7,8 @@ import { Container } from '@/components/ui/Container';
 import { HomeHeroBannerCarousel } from '@/features/home/HomeHeroBannerCarousel';
 import { BrandHero } from '@/features/partners/BrandHero';
 import { BrandDirectory } from '@/features/partners/BrandDirectory';
+import { PartnerDirectory } from '@/features/partners/PartnerDirectory';
+import type { PublicPartner } from '@/types/contracts/publicPartners';
 import { ExtraBlocksRenderer } from '@/features/page-content/ExtraBlocksRenderer';
 import { PageSectionLayout } from '@/features/page-content/PageSectionLayout';
 import { hasMeaningfulPublicContent } from '@/features/page-content/contentQuality';
@@ -14,18 +16,20 @@ import { resolvePublicFileSource } from '@/lib/public-file';
 
 type PartnerListingPageProps = {
   brands: PublicBrandListItem[];
+  partners: PublicPartner[];
   pageContent: PublicPageContentDetailResponse['page_content'] | null;
   banners?: PublicBannerListItem[];
 };
 
 export function PartnerListingPage({
   brands,
+  partners,
   pageContent,
   banners = []
 }: PartnerListingPageProps) {
   const adminHeroBanners = banners.filter((banner) => Boolean(resolvePublicFileSource(banner.image_file)));
   const hasAdminHeroBanner = adminHeroBanners.length > 0;
-  const heroTitle = pageContent?.title?.trim() || 'Thương hiệu sản phẩm';
+  const heroTitle = pageContent?.title?.trim() || 'Thương hiệu & Đối tác';
   const heroExcerpt = pageContent?.excerpt?.trim() || null;
   const hasEditorialIntro = hasMeaningfulPublicContent(pageContent?.content_html);
 
@@ -33,7 +37,7 @@ export function PartnerListingPage({
     <div className="bg-panel">
       <PageSectionLayout
         blocks={pageContent?.extra_blocks}
-        defaults={['brands-hero', 'brands-intro', 'brands-grid', 'brands-supporting', 'brands-cta']}
+        defaults={['brands-hero', 'brands-intro', 'brands-grid', 'partners-grid', 'brands-supporting', 'brands-cta']}
         required={['brands-hero', 'brands-intro', 'brands-grid']}
         sections={{
           'brands-hero': hasAdminHeroBanner ? (
@@ -44,11 +48,11 @@ export function PartnerListingPage({
                 Trang chủ
               </Link>
               <span aria-hidden="true">/</span>
-              <span className="font-semibold text-secondary">Thương hiệu</span>
+              <span className="font-semibold text-secondary">Thương hiệu &amp; Đối tác</span>
             </nav>
           </Container>
           <HomeHeroBannerCarousel
-            ariaLabel="Banner trang thương hiệu"
+            ariaLabel="Banner trang thương hiệu và đối tác"
             banners={adminHeroBanners}
             companyInfo={null}
             variant="page"
@@ -67,7 +71,7 @@ export function PartnerListingPage({
             <div className="space-y-4">
               {hasAdminHeroBanner ? (
                 <>
-                  <p className="type-eyebrow text-primary">Danh bạ hãng sản xuất</p>
+                  <p className="type-eyebrow text-primary">Thương hiệu và đối tác</p>
                   <h1 className="type-page-title text-secondary">{heroTitle}</h1>
                   {heroExcerpt ? <p className="type-body-lg max-w-[62ch] text-body">{heroExcerpt}</p> : null}
                 </>
@@ -88,6 +92,18 @@ export function PartnerListingPage({
       </section>
           ),
 
+          'partners-grid': partners.length > 0 ? (
+            <section id="danh-sach-doi-tac" className="scroll-mt-24 border-t border-borderBlue bg-white py-12 lg:py-20">
+              <Container size="wide">
+                <div className="mb-7 space-y-2">
+                  <p className="type-eyebrow text-primary">Cùng đồng hành</p>
+                  <h2 className="type-section-title text-secondary">Đối tác của Song Thanh</h2>
+                </div>
+                <PartnerDirectory partners={partners} />
+              </Container>
+            </section>
+          ) : null,
+
           'brands-supporting': (
             <ExtraBlocksRenderer blocks={pageContent?.extra_blocks ?? null} containerSize="narrow" />
           ),
@@ -96,7 +112,7 @@ export function PartnerListingPage({
       <section className="bg-white py-14 lg:py-24">
         <Container className="grid gap-5 rounded-md border border-borderBlue bg-primarySoft/55 px-6 py-8 sm:px-8 sm:py-10 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:px-10" size="wide">
           <div>
-            <h2 className="type-section-title text-secondary">Cần thêm thông tin về một thương hiệu?</h2>
+            <h2 className="type-section-title text-secondary">Cần thêm thông tin về thương hiệu hoặc đối tác?</h2>
           </div>
           <Link className="type-button inline-flex min-h-12 items-center justify-center rounded-xs bg-primary px-6 text-white transition-colors hover:bg-primaryStrong" href="/lien-he">
             Liên hệ Song Thanh

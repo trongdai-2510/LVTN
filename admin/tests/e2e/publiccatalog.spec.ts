@@ -364,7 +364,8 @@ test('brand directory hides placeholder copy and renders only public admin data'
     await page.setViewportSize({ width, height: 900 });
     await page.goto(`${frontend}/doi-tac-thuong-hieu`);
 
-    await expect(page.getByRole('heading', { level: 1, name: 'Thương hiệu sản phẩm' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: /Thương hiệu/ })).toBeVisible();
+    await expect(page.locator('[data-partner-directory]')).toHaveCount(0);
     await expect(page.locator('[data-brand-hero-stage]')).toHaveCount(0);
     await expect(page.getByText('Nội dung đang cập nhật', { exact: false })).toHaveCount(0);
     await expect(page.getByText('Sản phẩm và tài liệu đang cập nhật', { exact: false })).toHaveCount(0);

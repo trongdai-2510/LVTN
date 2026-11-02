@@ -121,6 +121,14 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       owner: 'module',
       ownerLabel: 'Thương hiệu',
       href: '/brands'
+    },
+    {
+      id: 'about-partners',
+      title: 'Đối tác của Song Thanh',
+      owner: 'module',
+      ownerLabel: 'Đối tác',
+      href: '/partners',
+      description: 'Chỉ hiện ngoài website khi có đối tác đang hoạt động. Có thể đổi vị trí tại đây.'
     }
   ],
   products: [
@@ -305,6 +313,14 @@ const PAGE_TEMPLATE_BLOCKS: Partial<Record<PageContentMode, PageTemplateBlock[]>
       ownerLabel: 'Thương hiệu',
       required: true,
       href: '/brands'
+    },
+    {
+      id: 'partners-grid',
+      title: 'Danh sách đối tác',
+      owner: 'module',
+      ownerLabel: 'Đối tác',
+      href: '/partners',
+      description: 'Chỉ hiển thị ngoài website khi có đối tác đang hoạt động. Có thể đổi thứ tự hoặc ẩn khối tại đây.'
     },
     {
       id: 'brands-supporting',
@@ -557,24 +573,25 @@ export const SYSTEM_PAGE_TEMPLATES: PageContentTemplate[] = [
     id: 'brands',
     mode: 'brands',
     group: 'system',
-    label: 'Thương hiệu sản phẩm',
-    shortLabel: 'Thương hiệu',
+    label: 'Thương hiệu và đối tác',
+    shortLabel: 'Thương hiệu & Đối tác',
     slug: 'doi-tac-thuong-hieu',
     publicPath: '/doi-tac-thuong-hieu',
     contentType: 'page',
-    description: 'Chỉnh lời giới thiệu trang thương hiệu. Hero/banner quản lý ở Banner, logo và danh sách brand nằm ở module Thương hiệu.',
-    formTitle: 'Chỉnh trang Thương hiệu sản phẩm',
-    titlePlaceholder: 'Thương hiệu sản phẩm',
-    excerptPlaceholder: 'Một câu giải thích đây là danh sách thương hiệu trong catalog.',
-    bodyLabel: 'Lời giới thiệu thương hiệu',
-    bodyHint: 'Viết trung tính, không claim đối tác chính thức nếu chưa xác nhận.',
+    description: 'Chỉnh lời giới thiệu và vị trí hai khối thương hiệu, đối tác. Banner, thương hiệu và đối tác được quản lý ở các mục riêng.',
+    formTitle: 'Chỉnh trang Thương hiệu và đối tác',
+    titlePlaceholder: 'Thương hiệu và đối tác',
+    excerptPlaceholder: 'Một câu giới thiệu thương hiệu sản phẩm và đối tác của Song Thanh.',
+    bodyLabel: 'Lời giới thiệu trang',
+    bodyHint: 'Chỉ mô tả quan hệ đối tác đã được Song Thanh xác nhận.',
     imageLabel: 'Ảnh chia sẻ & xem trước',
     imageHint: 'Ảnh này chỉ dùng khi chia sẻ đường dẫn hoặc xem trước; logo từng hãng và banner đầu trang được quản lý ở khu vực riêng.',
     seoHint: 'Tối ưu cho thương hiệu thiết bị điện, đèn LED và vật tư công nghiệp.',
-    primarySource: 'Màn này quản lý lời mở đầu, ảnh chia sẻ và SEO. Banner, logo và trạng thái từng thương hiệu được cập nhật ở các khu vực liên quan.',
+    primarySource: 'Màn này quản lý lời mở đầu, ảnh chia sẻ, SEO và thứ tự khối. Banner, thương hiệu và đối tác được cập nhật ở các mục liên quan.',
     relatedModules: [
       { label: 'Banner', href: '/banners?position=doi-tac-thuong-hieu', description: 'Hero trang thương hiệu' },
       { label: 'Thương hiệu', href: '/brands', description: 'Logo, slug và trạng thái brand' },
+      { label: 'Đối tác', href: '/partners', description: 'Logo, website và trạng thái đối tác' },
       { label: 'Trang thương hiệu chi tiết', href: '/page-contents/brand-pages', description: 'Hồ sơ, nguồn xác thực và nội dung riêng của từng brand' }
     ],
     defaultContent: {

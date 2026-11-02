@@ -27,6 +27,7 @@ import { getPublicAddress } from '@/features/site-shell/site-shell.public';
 import { resolvePublicFileSource } from '@/lib/public-file';
 import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicBrandListItem } from '@/types/contracts/public-brands';
+import type { PublicPartner } from '@/types/contracts/publicPartners';
 import type { PublicPageContentDetailResponse } from '@/types/contracts/public-page-contents';
 import type {
   PublicNewsCategoryItem,
@@ -59,6 +60,7 @@ export type PageContentPreviewDraft = PublicPageContentDetailResponse['page_cont
 type PreviewSupportData = {
   banners: PublicBannerListItem[];
   brands: PublicBrandListItem[];
+  partners: PublicPartner[];
   capabilityBanners: PublicBannerListItem[];
   contactBanners: PublicBannerListItem[];
   newsBanners: PublicBannerListItem[];
@@ -141,6 +143,7 @@ export function PageContentPreviewClient({
         brands={supportData.brands}
         companyInfo={supportData.companyInfo}
         pageContent={draft}
+        partners={supportData.partners}
       />
     );
   }
@@ -185,6 +188,7 @@ export function PageContentPreviewClient({
       <PartnerListingPage
         banners={supportData.brandBanners}
         brands={supportData.brands}
+        partners={supportData.partners}
         pageContent={draft}
       />
     );

@@ -78,6 +78,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   banner: 'banner',
   product_category: 'danh mục sản phẩm',
   brand: 'thương hiệu',
+  partner: 'đối tác',
   product_group: 'sản phẩm',
   product_variant: 'biến thể sản phẩm',
   technical_document: 'tài liệu kỹ thuật',
@@ -115,6 +116,7 @@ const PERMISSION_MODULES: readonly PermissionModuleDefinition[] = [
     prefixes: ['product_category']
   },
   { key: 'brand', label: 'Thương hiệu', prefixes: ['brand'] },
+  { key: 'partner', label: 'Đối tác', prefixes: ['partner'] },
   { key: 'product_group', label: 'Sản phẩm', prefixes: ['product_group'] },
   {
     key: 'product_variant',

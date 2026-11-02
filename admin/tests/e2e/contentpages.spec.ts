@@ -12,7 +12,7 @@ const CONTENT_PAGES = [
   { path: '/ho-so-nang-luc', proof: 'Tài liệu PDF' },
   { path: '/dich-vu', proof: 'Danh mục dịch vụ' },
   { path: '/du-an', proof: null },
-  { path: '/doi-tac-thuong-hieu', proof: 'Thương hiệu sản phẩm' },
+  { path: '/doi-tac-thuong-hieu', proof: 'Thương hiệu' },
   { path: '/tin-tuc', proof: 'Góc thông tin kỹ thuật' },
   { path: '/lien-he', proof: 'Phiếu tiếp nhận' }
 ] as const;

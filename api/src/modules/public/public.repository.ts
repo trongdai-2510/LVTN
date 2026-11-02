@@ -52,6 +52,7 @@ import { publicPriceAmountAtRequest } from './publicQuotePrice';
 import type { PublicFileSummary, PublicHighlightSpec, PublicProductPriceSummary } from "./public.types";
 const PROJECT_GALLERY_TABLE = "project_gallery";
 const FILE_USAGE_TABLE = "file_usage";
+const PARTNER_TABLE = "partner";
 const PRODUCT_SPEC_TABLE = "product_spec";
 const PRODUCT_HIGHLIGHT_SPEC_TABLE = "product_highlight_spec";
 const SPEC_GROUP_TABLE = "spec_group";
@@ -228,6 +229,12 @@ interface PublicBrandListRow {
   logo_file_id: string | null;
   sort_order: number;
   has_detail_page: boolean;
+}
+interface PublicPartnerRow {
+  id: string;
+  name: string;
+  website_url: string | null;
+  logo_file_id: string | null;
 }
 interface PublicBrandDetailRow {
   brand_id: string;
@@ -999,6 +1006,14 @@ export class PublicRepository {
         total,
       }),
     };
+  }
+  async listPublicPartners(): Promise<PublicPartnerRow[]> {
+    return this.knexService.db<PublicPartnerRow>(PARTNER_TABLE)
+      .where({ status: "active" })
+      .whereNull("deleted_at")
+      .select("id", "name", "website_url", "logo_file_id")
+      .orderBy("sort_order", "asc")
+      .orderBy("name", "asc");
   }
   async findPublicBrandDetailBySlug(
     slug: string,
@@ -3226,6 +3241,7 @@ export class PublicRepository {
       this.isCompanyInfoFilePublic(fileId),
       this.isCategoryIconFilePublic(fileId),
       this.isBrandLogoFilePublic(fileId),
+      this.isPartnerLogoFilePublic(fileId),
       this.isServiceFilePublic(fileId),
       this.isProjectFilePublic(fileId),
       this.isPageContentFilePublic(fileId),
@@ -3287,6 +3303,13 @@ export class PublicRepository {
       .whereNull(`${brandAlias}.deleted_at`)
       .where(`${brandAlias}.status`, "active")
       .first(`${brandAlias}.id`);
+    return Boolean(row);
+  }
+  private async isPartnerLogoFilePublic(fileId: string): Promise<boolean> {
+    const row = await this.knexService.db(PARTNER_TABLE)
+      .where({ logo_file_id: fileId, status: "active" })
+      .whereNull("deleted_at")
+      .first("id");
     return Boolean(row);
   }
   private async isServiceFilePublic(fileId: string): Promise<boolean> {

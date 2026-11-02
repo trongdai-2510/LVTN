@@ -31,6 +31,7 @@ import type {
   PublicBannerListResponse,
   PublicBrandDetailResponse,
   PublicBrandListResponse,
+  PublicPartnerListResponse,
   PublicCategoryListResponse,
   PublicContactRequestCreateResponse,
   PublicNewsCategoryListResponse,
@@ -148,6 +149,11 @@ export class PublicController {
     @Param("slug") slug: string,
   ): Promise<PublicBrandDetailResponse> {
     return this.publicService.getPublicBrandDetail(slug);
+  }
+
+  @Get("partners")
+  listPublicPartners(): Promise<PublicPartnerListResponse> {
+    return this.publicService.listPublicPartners();
   }
 
   @Get("news/related")

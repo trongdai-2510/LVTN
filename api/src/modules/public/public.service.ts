@@ -48,6 +48,7 @@ import type {
   PublicNewsListResponse,
   PublicPageContentDetailResponse,
   PublicProjectDetailResponse,
+  PublicPartnerListResponse,
   PublicProjectListResponse,
   PublicProductGroupDetailResponse,
   PublicProductGroupListResponse,
@@ -1949,6 +1950,21 @@ export class PublicService {
       filters: {
         q: query.q?.trim() ? query.q.trim() : null,
       },
+    };
+  }
+
+  async listPublicPartners(): Promise<PublicPartnerListResponse> {
+    const partners = await this.publicRepository.listPublicPartners();
+    const fileMap = await this.publicRepository.activeFileMap(
+      partners.map((partner) => partner.logo_file_id),
+    );
+    return {
+      items: partners.map((partner) => ({
+        ...partner,
+        logo_file: partner.logo_file_id
+          ? (fileMap.get(partner.logo_file_id) ?? null)
+          : null,
+      })),
     };
   }
 

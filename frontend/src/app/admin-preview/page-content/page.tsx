@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { getAllPublicBrands } from '@/lib/api/public-brands';
+import { getPublicPartners } from '@/lib/api/publicPartners';
 import { getPublicNewsCategories, getPublicNewsList } from '@/lib/api/public-news';
 import { getPublicProductCategories } from '@/lib/api/public-product-categories';
 import { getPublicProductGroups } from '@/lib/api/public-product-groups';
@@ -33,6 +34,7 @@ export default async function PageContentPreviewRoute() {
   };
   const [
     brandsResponse,
+    partnersResponse,
     servicesResponse,
     projectsResponse,
     productCategoriesResponse,
@@ -53,6 +55,7 @@ export default async function PageContentPreviewRoute() {
       pagination: { page: 1, page_size: 40, total: 0, page_count: 1 },
       filters: { q: null }
     })),
+    getPublicPartners().catch(() => ({ items: [] })),
     getPublicServices({ page: 1, page_size: 40 }).catch(() => ({
       items: [],
       pagination: { page: 1, page_size: 40, total: 0, page_count: 1 },
@@ -126,6 +129,7 @@ export default async function PageContentPreviewRoute() {
       supportData={{
         banners: aboutBannersResponse.items,
         brands: brandsResponse.items,
+        partners: partnersResponse.items,
         capabilityBanners: capabilityBannersResponse.items,
         contactBanners: contactBannersResponse.items,
         newsBanners: newsBannersResponse.items,

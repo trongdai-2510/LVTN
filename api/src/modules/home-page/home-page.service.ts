@@ -46,6 +46,7 @@ export interface AvailabilityCounts {
   active_services_count: number;
   active_projects_count: number;
   active_brands_count: number;
+  active_partners_count: number;
 }
 
 export interface ResolvedPicks {
@@ -316,13 +317,14 @@ export class HomePageService {
     const heroPosition = this.getHeroAutoPosition(rows);
     const db = this.knexService.db;
 
-    const [heroCount, categoriesCount, productGroupsCount, servicesCount, projectsCount, brandsCount] = await Promise.all([
+    const [heroCount, categoriesCount, productGroupsCount, servicesCount, projectsCount, brandsCount, partnersCount] = await Promise.all([
       db('banner').whereNull('deleted_at').where({ status: 'active', position: heroPosition }).count<{ count: string }>('* as count').first(),
       db('product_category').whereNull('deleted_at').where({ status: 'active' }).whereNull('parent_id').count<{ count: string }>('* as count').first(),
       db('product_group').whereNull('deleted_at').where({ status: 'active', publish_status: 'published' }).count<{ count: string }>('* as count').first(),
       db('service').whereNull('deleted_at').where({ publish_status: 'published' }).count<{ count: string }>('* as count').first(),
       db('project').whereNull('deleted_at').where({ publish_status: 'published' }).count<{ count: string }>('* as count').first(),
-      db('brand').whereNull('deleted_at').where({ status: 'active' }).count<{ count: string }>('* as count').first()
+      db('brand').whereNull('deleted_at').where({ status: 'active' }).count<{ count: string }>('* as count').first(),
+      db('partner').whereNull('deleted_at').where({ status: 'active' }).count<{ count: string }>('* as count').first()
     ]);
 
     return {
@@ -331,7 +333,8 @@ export class HomePageService {
       active_product_groups_count: Number(productGroupsCount?.count ?? 0),
       active_services_count: Number(servicesCount?.count ?? 0),
       active_projects_count: Number(projectsCount?.count ?? 0),
-      active_brands_count: Number(brandsCount?.count ?? 0)
+      active_brands_count: Number(brandsCount?.count ?? 0),
+      active_partners_count: Number(partnersCount?.count ?? 0)
     };
   }
 

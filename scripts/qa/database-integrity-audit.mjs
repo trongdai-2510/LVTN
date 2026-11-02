@@ -49,7 +49,7 @@ const SEEDED_ROLE_CODES = [
   'super_admin',
   'viewer'
 ];
-const EXPECTED_PERMISSION_COUNT = 118;
+const EXPECTED_PERMISSION_COUNT = 123;
 const KNEX_TABLES = ['knex_migrations', 'knex_migrations_lock'];
 
 const results = [];

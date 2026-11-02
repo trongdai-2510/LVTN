@@ -51,6 +51,13 @@ export const quickNavRoutes: QuickNavRoute[] = [
     permission: PERMISSIONS.bannerRead
   },
   {
+    label: 'Đối tác',
+    href: '/partners',
+    group: 'Nội dung website',
+    keywords: ['doi tac', 'partner', 'logo'],
+    permission: PERMISSIONS.partnerRead
+  },
+  {
     label: 'Chuyển hướng',
     href: '/redirects',
     group: 'Nội dung website',

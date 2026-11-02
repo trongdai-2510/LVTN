@@ -76,7 +76,7 @@ const fallbackHeaderItems: PublicMenuItemNode[] = [
   },
   {
     id: 'partners',
-    title: 'Thương hiệu',
+    title: 'Thương hiệu & Đối tác',
     link_type: 'internal',
     link_target: '/doi-tac-thuong-hieu',
     parent_id: null,

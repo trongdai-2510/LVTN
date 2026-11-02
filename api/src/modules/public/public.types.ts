@@ -420,6 +420,16 @@ export interface PublicBrandListResponse {
   };
 }
 
+export interface PublicPartnerListResponse {
+  items: Array<{
+    id: string;
+    name: string;
+    website_url: string | null;
+    logo_file_id: string | null;
+    logo_file: PublicFileSummary | null;
+  }>;
+}
+
 interface PublicBrandDetailBrand {
   id: string;
   name: string;
