@@ -39,6 +39,7 @@ import {
   ProductListSummary
 } from './ProductListSummary';
 import { ProductCatalogWorkspace } from './ProductCatalogWorkspace';
+import { ProductVariantCatalog, ProductVariantEmptyState, ProductVariantFilterToolbar } from './ProductVariantCatalog';
 import { ProductPicker } from './ProductPicker';
 import {
   BUSINESS_CONFIGS,
@@ -602,28 +603,54 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
             ) : null}
           </div>
         </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          {kind === 'productGroup' || kind === 'productVariant' ? (
-            <LinkButton href="/import/new" variant="secondary">
-              <FileText className="h-4 w-4" />
-              Nhập từ Excel
-            </LinkButton>
-          ) : null}
-          {isReviewOnlyProductSurface(kind) ? (
-            <LinkButton href="/product-groups">
-              <Package className="h-4 w-4" />
-              Quản lý theo sản phẩm
-            </LinkButton>
-          ) : null}
-          {canCreate ? (
-            <LinkButton
-              href={`${config.listPath}/new`}
-              variant={isReviewOnlyProductSurface(kind) ? 'secondary' : 'primary'}
-            >
-              <Plus className="h-4 w-4" />
-              {config.createLabel}
-            </LinkButton>
-          ) : null}
+        <div className={cn(
+          'gap-2',
+          kind === 'productVariant'
+            ? 'grid w-full grid-cols-2 md:flex md:w-auto md:flex-wrap md:justify-end'
+            : 'flex flex-wrap justify-end'
+        )}>
+          {kind === 'productVariant' ? (
+            <>
+              {canCreate ? (
+                <LinkButton href={`${config.listPath}/new`} className="col-span-2 md:col-auto">
+                  <Plus className="h-4 w-4" />
+                  {config.createLabel}
+                </LinkButton>
+              ) : null}
+              <LinkButton href="/product-groups" variant="secondary">
+                <Package className="h-4 w-4" />
+                Theo sản phẩm
+              </LinkButton>
+              <LinkButton href="/import/new" variant="secondary">
+                <FileText className="h-4 w-4" />
+                Nhập Excel
+              </LinkButton>
+            </>
+          ) : (
+            <>
+              {kind === 'productGroup' ? (
+                <LinkButton href="/import/new" variant="secondary">
+                  <FileText className="h-4 w-4" />
+                  Nhập từ Excel
+                </LinkButton>
+              ) : null}
+              {isReviewOnlyProductSurface(kind) ? (
+                <LinkButton href="/product-groups">
+                  <Package className="h-4 w-4" />
+                  Quản lý theo sản phẩm
+                </LinkButton>
+              ) : null}
+              {canCreate ? (
+                <LinkButton
+                  href={`${config.listPath}/new`}
+                  variant={isReviewOnlyProductSurface(kind) ? 'secondary' : 'primary'}
+                >
+                  <Plus className="h-4 w-4" />
+                  {config.createLabel}
+                </LinkButton>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
 
@@ -675,6 +702,18 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
               setPage(1);
             }}
           />
+        ) : kind === 'productVariant' ? (
+          <ProductVariantFilterToolbar
+            value={query}
+            onChange={(value) => { setQuery(value); setPage(1); }}
+            filters={filters}
+            updateFilters={updateFilters}
+            rootCategories={rootCategories}
+            childCategories={filteredLevel2Categories}
+            hasActiveFilters={hasActiveFilters}
+            hasAdvancedFilters={hasAdvancedFilters}
+            onClear={() => { setQuery(''); setFilters(defaultBusinessListFilters()); setPage(1); }}
+          />
         ) : (
           <TableToolbar
             value={query}
@@ -703,7 +742,7 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
           </TableToolbar>
         )}
 
-        {canBulkUpdate && (kind !== 'productGroup' || selectedIds.length > 0) ? (
+        {canBulkUpdate && ((kind !== 'productGroup' && kind !== 'productVariant') || selectedIds.length > 0) ? (
           kind === 'productGroup' || kind === 'productVariant' ? (
             (() => {
               const adminActions =
@@ -769,15 +808,19 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
             <ErrorState error={error} context={errorContext} />
           </div>
         ) : items.length === 0 ? (
-          <div className="p-4">
-            <EmptyState
-              description={
-                kind === 'productGroup'
-                  ? 'Không tìm thấy sản phẩm phù hợp với bộ lọc.'
-                  : 'Chưa có bản ghi phù hợp với bộ lọc hiện tại.'
-              }
+          kind === 'productVariant' ? (
+            <ProductVariantEmptyState
+              hasFilters={hasActiveFilters}
+              canCreate={canCreate}
+              onClear={() => { setQuery(''); setFilters(defaultBusinessListFilters()); setPage(1); }}
             />
-          </div>
+          ) : (
+            <div className="p-4">
+              <EmptyState
+                description={kind === 'productGroup' ? 'Không tìm thấy sản phẩm phù hợp với bộ lọc.' : 'Chưa có bản ghi phù hợp với bộ lọc hiện tại.'}
+              />
+            </div>
+          )
         ) : kind === 'productGroup' ? (
           <ProductCatalogWorkspace
             rows={items}
@@ -812,19 +855,35 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
               />
             }
           />
+        ) : kind === 'productVariant' ? (
+          <ProductVariantCatalog
+            rows={items}
+            total={pagination.total}
+            currentListHref={currentListHref}
+            canBulkUpdate={canBulkUpdate}
+            selectedIds={selectedIds}
+            selectableIds={selectableIds}
+            allSelectableSelected={allSelectableSelected}
+            onToggleSelected={toggleSelected}
+            onToggleSelectAll={toggleSelectAll}
+            pagination={
+              <Pagination
+                page={pagination.page}
+                pageSize={pagination.page_size}
+                total={pagination.total}
+                onPageChange={setPage}
+                pageSizeOptions={PAGE_SIZE_OPTIONS}
+                onPageSizeChange={(next) => { setPageSize(next); setPage(1); clearSelection(); }}
+              />
+            }
+          />
         ) : (
           <>
-            <div
-              className="admin-table-scroll hidden overflow-x-auto md:block"
-              {...(kind === 'productVariant'
-                ? { 'data-variant-catalog-layout': 'compact' }
-                : {})}
-            >
+            <div className="admin-table-scroll hidden overflow-x-auto md:block">
               <table
                 className={cn(
                   'min-w-full table-fixed divide-y divide-border text-sm',
-                  kind === 'brand' ? 'min-w-[1040px]' : '',
-                  kind === 'productVariant' ? 'min-w-[980px]' : ''
+                  kind === 'brand' ? 'min-w-[1040px]' : ''
                 )}
               >
                 <thead className="bg-muted">
@@ -887,8 +946,7 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
                           </td>
                         ) : null}
                         {renderListRow(kind, row, {
-                          canUpdateProductGroupStatus:
-                            kind === 'productVariant' && canUpdate,
+                          canUpdateProductGroupStatus: false,
                           inlineStatusRowId,
                           onProductGroupPublishStatusChange: (nextPublishStatus) =>
                             void updateProductGroupRowPublishStatus(row, nextPublishStatus),
@@ -904,9 +962,9 @@ export function ProductBusinessListPage({ kind }: { kind: BusinessKind }) {
                               variant="ghost"
                               size="sm"
                             >
-                              {kind === 'productVariant' ? 'Mở hồ sơ' : 'Xem'}
+                              Xem
                             </LinkButton>
-                            {kind !== 'productVariant' && !row.deleted_at && canArchive ? (
+                            {!row.deleted_at && canArchive ? (
                               <Button
                                 type="button"
                                 variant="ghost"
