@@ -1451,14 +1451,18 @@ CREATE TABLE public.tag (
     name character varying(64) NOT NULL,
     slug character varying(64) NOT NULL,
     status character varying(16) DEFAULT 'active'::character varying NOT NULL,
+    icon_key character varying(24),
+    tone_key character varying(16),
     created_by integer,
     updated_by integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     deleted_at timestamp with time zone,
     CONSTRAINT chk_tag_name_not_blank CHECK ((btrim((name)::text) <> ''::text)),
+    CONSTRAINT chk_tag_icon_key CHECK (((icon_key IS NULL) OR ((icon_key)::text = ANY ((ARRAY['none'::character varying, 'flame'::character varying, 'star'::character varying, 'sparkles'::character varying, 'shield'::character varying, 'leaf'::character varying, 'zap'::character varying])::text[])))),
     CONSTRAINT chk_tag_slug_format CHECK (((slug)::text ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'::text)),
-    CONSTRAINT chk_tag_status CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'inactive'::character varying])::text[])))
+    CONSTRAINT chk_tag_status CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'inactive'::character varying])::text[]))),
+    CONSTRAINT chk_tag_tone_key CHECK (((tone_key IS NULL) OR ((tone_key)::text = ANY ((ARRAY['blue'::character varying, 'amber'::character varying, 'green'::character varying, 'rose'::character varying, 'slate'::character varying])::text[]))))
 );
 
 

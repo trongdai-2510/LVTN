@@ -13,13 +13,15 @@ export class TagService {
   async create(body: CreateTagDto) {
     const name = this.name(body.name);
     const slug = await resolveAvailableSlug(name, (value) => this.repository.slugExists(value), 64);
-    return { tag: await this.repository.create(name, slug, body.status ?? 'active') };
+    return { tag: await this.repository.create(name, slug, body.status ?? 'active', body.icon_key ?? 'none', body.tone_key ?? 'blue') };
   }
   async update(id: string, body: UpdateTagDto) {
     const tag = await this.existing(id, false);
-    const input: { name?: string; status?: 'active' | 'inactive' } = {};
+    const input: { name?: string; status?: 'active' | 'inactive'; icon_key?: NonNullable<UpdateTagDto['icon_key']>; tone_key?: NonNullable<UpdateTagDto['tone_key']> } = {};
     if (body.name !== undefined) input.name = this.name(body.name);
     if (body.status !== undefined) input.status = body.status;
+    if (body.icon_key !== undefined) input.icon_key = body.icon_key ?? 'none';
+    if (body.tone_key !== undefined) input.tone_key = body.tone_key ?? 'blue';
     if (!Object.keys(input).length) throw this.invalid('No tag fields were provided.');
     await this.repository.update(tag.id, input);
     return { tag: await this.repository.find(tag.id) };

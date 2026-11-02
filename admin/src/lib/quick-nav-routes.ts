@@ -57,13 +57,13 @@ export const quickNavRoutes: QuickNavRoute[] = [
     keywords: ['doi tac', 'partner', 'logo'],
     permission: PERMISSIONS.partnerRead
   },
-    {
-      label: 'Chứng nhận',
-      href: '/certificates',
-      group: 'Nội dung website',
-      keywords: ['chung nhan', 'certificate', 'giay chung nhan'],
-      permission: PERMISSIONS.certificateRead
-    },
+  {
+    label: 'Chứng nhận',
+    href: '/certificates',
+    group: 'Nội dung website',
+    keywords: ['chung nhan', 'certificate', 'giay chung nhan'],
+    permission: PERMISSIONS.certificateRead
+  },
   {
     label: 'Chuyển hướng',
     href: '/redirects',
@@ -112,6 +112,13 @@ export const quickNavRoutes: QuickNavRoute[] = [
     group: 'Sản phẩm',
     keywords: ['product groups', 'nhom san pham', 'san pham', 'ten san pham'],
     permission: PERMISSIONS.productGroupRead
+  },
+  {
+    label: 'Nhãn sản phẩm',
+    href: '/tags',
+    group: 'Sản phẩm',
+    keywords: ['nhan', 'tag', 'ban chay', 'gan nhan'],
+    permission: PERMISSIONS.tagRead
   },
   {
     label: 'Biến thể / SKU',

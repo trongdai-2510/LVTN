@@ -1570,13 +1570,13 @@ export class PublicRepository {
       }),
     };
   }
-  async publicTagMap(productIds: string[]): Promise<Map<string, Array<{ id: string; name: string; slug: string }>>> {
-    const map = new Map<string, Array<{ id: string; name: string; slug: string }>>();
+  async publicTagMap(productIds: string[]): Promise<Map<string, Array<{ id: string; name: string; slug: string; icon_key: string | null; tone_key: string | null }>>> {
+    const map = new Map<string, Array<{ id: string; name: string; slug: string; icon_key: string | null; tone_key: string | null }>>();
     if (!productIds.length) return map;
     const rows = await this.knexService.db('product_group_tag as link').join('tag as t', 't.id', 'link.tag_id')
       .whereIn('link.product_group_id', productIds).whereNull('link.deleted_at').whereNull('t.deleted_at')
-      .where('t.status', 'active').select('link.product_group_id', 't.id', 't.name', 't.slug').orderBy('t.name');
-    for (const row of rows) map.set(row.product_group_id, [...(map.get(row.product_group_id) ?? []), { id: row.id, name: row.name, slug: row.slug }]);
+      .where('t.status', 'active').select('link.product_group_id', 't.id', 't.name', 't.slug', 't.icon_key', 't.tone_key').orderBy('t.name');
+    for (const row of rows) map.set(row.product_group_id, [...(map.get(row.product_group_id) ?? []), { id: row.id, name: row.name, slug: row.slug, icon_key: row.icon_key, tone_key: row.tone_key }]);
     return map;
   }
   async listPublicProductGroupSpecFacetRows(params: {

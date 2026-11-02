@@ -1,9 +1,11 @@
 import {
   BarChart3,
   Building2,
+  FileCheck2,
   FileText,
   FolderTree,
   GalleryHorizontal,
+  Handshake,
   History,
   Home,
   Image,
@@ -15,6 +17,7 @@ import {
   Route,
   Settings,
   Shield,
+  Tag,
   Tags,
   UploadCloud,
   Users,
@@ -86,20 +89,14 @@ export const sidebarGroups: SidebarGroup[] = [
         label: 'Đối tác',
         href: '/partners',
         permission: PERMISSIONS.partnerRead,
-        icon: Building2
+        icon: Handshake
       },
-        {
-          label: 'Chứng nhận',
-          href: '/certificates',
-          permission: PERMISSIONS.certificateRead,
-          icon: Building2
-        },
-        {
-          label: 'Nhãn sản phẩm',
-          href: '/tags',
-          permission: PERMISSIONS.tagRead,
-          icon: Building2
-        },
+      {
+        label: 'Chứng nhận',
+        href: '/certificates',
+        permission: PERMISSIONS.certificateRead,
+        icon: FileCheck2
+      },
       {
         label: 'Chuyển hướng',
         href: '/redirects',
@@ -152,6 +149,12 @@ export const sidebarGroups: SidebarGroup[] = [
             permission: PERMISSIONS.technicalDocumentRead
           }
         ]
+      },
+      {
+        label: 'Nhãn sản phẩm',
+        href: '/tags',
+        permission: PERMISSIONS.tagRead,
+        icon: Tag
       }
     ]
   },
