@@ -10,7 +10,7 @@ import { usePermissions } from '@/features/auth/useAuthState';
 import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
 import { PERMISSIONS } from '@/lib/permissions';
-import { TagGlyph, tagIconOptions, tagToneClass, tagToneOptions, type TagIconKey, type TagToneKey } from './tagAppearance';
+import { TagGlyph, normalizeTagTone, tagIconOptions, tagToneClass, tagToneOptions, type TagIconKey, type TagToneChoice, type TagToneKey } from './tagAppearance';
 
 export type Tag = {
   id: string;
@@ -30,7 +30,7 @@ export function TagManager() {
   const [name, setName] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
   const [iconKey, setIconKey] = useState<TagIconKey>('none');
-  const [toneKey, setToneKey] = useState<TagToneKey>('blue');
+  const [toneKey, setToneKey] = useState<TagToneChoice>('blue');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive' | 'unused' | 'archived'>('all');
   const [loading, setLoading] = useState(true);
@@ -66,7 +66,7 @@ export function TagManager() {
     setName(tag?.name ?? '');
     setStatus(tag?.status ?? 'active');
     setIconKey(tag?.icon_key ?? 'none');
-    setToneKey(tag?.tone_key ?? 'blue');
+    setToneKey(normalizeTagTone(tag?.tone_key));
     setError('');
     setNotice('');
     setEditorOpen(true);
@@ -173,7 +173,7 @@ export function TagManager() {
                     onClick={() => choose(item)}
                     type="button"
                   >
-                    <span className={'inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-semibold ' + tagToneClass(item.tone_key)}>
+                    <span className={'inline-flex min-h-9 items-center gap-1.5 rounded-sm border px-3 text-sm font-semibold ' + tagToneClass(item.tone_key)}>
                       <TagGlyph className="h-4 w-4 shrink-0" icon={item.icon_key} />{item.name}
                     </span>
                     <span className="mt-2 flex items-center justify-between gap-3 px-1 text-xs text-muted-foreground">
@@ -203,7 +203,7 @@ export function TagManager() {
 
               <div className="rounded-md border border-border bg-surface p-4">
                 <p className="text-sm font-semibold text-text">Xem trước trên thẻ sản phẩm</p>
-                <span className={'mt-3 inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ' + tagToneClass(toneKey)}>
+                <span className={'mt-3 inline-flex max-w-full items-center gap-1 rounded-sm border px-2.5 py-1 text-xs font-semibold ' + tagToneClass(toneKey)}>
                   <TagGlyph className="h-3.5 w-3.5 shrink-0" icon={iconKey} />
                   <span className="truncate">{name.trim() || 'Tên nhãn'}</span>
                 </span>
@@ -234,14 +234,14 @@ export function TagManager() {
 
               <fieldset className="space-y-2">
                 <legend className="text-sm font-semibold text-text">Màu nhãn</legend>
-                <p className="text-xs leading-5 text-muted-foreground">Màu giúp phân biệt nhãn trên website, không thay đổi thứ tự hay điều kiện hiển thị.</p>
-                <div className="flex flex-wrap gap-2">
+                <p className="text-xs leading-5 text-muted-foreground">Sáu màu có độ tương phản rõ trên thẻ sản phẩm. Màu không thay đổi điều kiện hiển thị.</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {tagToneOptions.map((option) => (
                     <button
                       aria-pressed={toneKey === option.value}
                       className={toneKey === option.value
-                        ? 'min-h-10 rounded-full border px-3 text-sm font-semibold ring-2 ring-primary ring-offset-1 ' + tagToneClass(option.value)
-                        : 'min-h-10 rounded-full border px-3 text-sm font-medium hover:brightness-95 ' + tagToneClass(option.value)}
+                        ? 'min-h-11 rounded-sm border px-3 text-sm font-semibold ring-2 ring-primary ring-offset-1 ' + tagToneClass(option.value)
+                        : 'min-h-11 rounded-sm border px-3 text-sm font-medium hover:brightness-95 ' + tagToneClass(option.value)}
                       disabled={!canSave || saving}
                       key={option.value}
                       onClick={() => setToneKey(option.value)}

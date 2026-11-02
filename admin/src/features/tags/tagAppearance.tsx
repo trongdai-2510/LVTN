@@ -16,30 +16,35 @@ export const tagIconOptions = [
 
 export const tagToneOptions = [
   { value: 'blue', label: 'Xanh dương' },
-  { value: 'amber', label: 'Vàng hổ phách' },
+  { value: 'amber', label: 'Vàng' },
   { value: 'green', label: 'Xanh lá' },
-  { value: 'rose', label: 'Hồng đỏ' },
-  { value: 'slate', label: 'Xám' },
+  { value: 'rose', label: 'Đỏ' },
   { value: 'violet', label: 'Tím' },
-  { value: 'cyan', label: 'Xanh ngọc' },
-  { value: 'orange', label: 'Cam' },
-  { value: 'teal', label: 'Xanh cổ vịt' }
+  { value: 'slate', label: 'Than' }
 ] as const;
 
 export type TagIconKey = typeof tagIconOptions[number]['value'];
-export type TagToneKey = typeof tagToneOptions[number]['value'];
+export type TagToneChoice = typeof tagToneOptions[number]['value'];
+export type TagToneKey = TagToneChoice | 'cyan' | 'orange' | 'teal';
 
 const toneClasses: Record<TagToneKey, string> = {
-  blue: 'border-blue-200 bg-blue-50 text-blue-800',
-  amber: 'border-amber-200 bg-amber-50 text-amber-900',
-  green: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-  rose: 'border-rose-200 bg-rose-50 text-rose-800',
-  slate: 'border-slate-200 bg-slate-50 text-slate-700',
-  violet: 'border-violet-200 bg-violet-50 text-violet-800',
-  cyan: 'border-cyan-200 bg-cyan-50 text-cyan-900',
-  orange: 'border-orange-200 bg-orange-50 text-orange-900',
-  teal: 'border-teal-200 bg-teal-50 text-teal-900'
+  blue: 'border-blue-700 bg-blue-700 text-white',
+  amber: 'border-amber-400 bg-amber-400 text-amber-950',
+  green: 'border-emerald-700 bg-emerald-700 text-white',
+  rose: 'border-rose-700 bg-rose-700 text-white',
+  violet: 'border-violet-700 bg-violet-700 text-white',
+  slate: 'border-slate-700 bg-slate-700 text-white',
+  cyan: 'border-blue-700 bg-blue-700 text-white',
+  orange: 'border-amber-400 bg-amber-400 text-amber-950',
+  teal: 'border-emerald-700 bg-emerald-700 text-white'
 };
+
+export function normalizeTagTone(value: TagToneKey | null | undefined): TagToneChoice {
+  if (value === 'cyan') return 'blue';
+  if (value === 'orange') return 'amber';
+  if (value === 'teal') return 'green';
+  return tagToneOptions.find((option) => option.value === value)?.value ?? 'blue';
+}
 
 export function tagToneClass(value: string | null | undefined) {
   return toneClasses[value as TagToneKey] ?? toneClasses.blue;

@@ -48,6 +48,7 @@ test('certificate and tag managers create records without horizontal overflow', 
   await expect(page.getByLabel('Tên nhãn')).toHaveCount(0);
   await page.getByRole('button', { name: 'Thêm nhãn' }).click();
   await expect(page.getByRole('dialog', { name: 'Tạo nhãn mới' })).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('group', { name: 'Màu nhãn' }).getByRole('button')).toHaveCount(6);
   await expect(page.getByText('Trên website, nhãn nằm gần tên sản phẩm')).toBeVisible();
   await page.getByLabel('Tên nhãn').fill('Nhãn thử');
   await page.getByRole('button', { name: /Huy chương/ }).click();

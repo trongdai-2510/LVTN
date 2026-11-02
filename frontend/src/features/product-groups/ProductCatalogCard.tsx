@@ -65,7 +65,7 @@ export function ProductCatalogCard({
           <p className="mt-1 line-clamp-1 text-xs text-body/70 sm:mt-2 sm:text-sm">{product.category_name}</p>
         ) : null}
         {product.tags?.length ? <div className="mt-2 flex flex-wrap gap-1.5">{product.tags.slice(0, 2).map((tag) =>
-          <Link className={'inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold hover:brightness-95 ' + tagToneClass(tag.tone_key)} href={`/san-pham/nhan/${encodeURIComponent(tag.slug)}`} key={tag.id}><TagGlyph className="h-3.5 w-3.5" icon={tag.icon_key} />{tag.name}</Link>
+          <Link className={'inline-flex items-center gap-1 rounded-sm border px-2 py-1 text-[11px] font-semibold hover:brightness-95 ' + tagToneClass(tag.tone_key)} href={`/san-pham/nhan/${encodeURIComponent(tag.slug)}`} key={tag.id}><TagGlyph className="h-3.5 w-3.5" icon={tag.icon_key} />{tag.name}</Link>
         )}</div> : null}
         <ProductCodeSummary product={product} />
 

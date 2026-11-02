@@ -162,7 +162,7 @@ export function ProductGroupCard({
         </Link>
 
         {productGroup.tags?.length ? <div className="mt-2 flex flex-wrap gap-1.5">{productGroup.tags.slice(0, 3).map((tag) =>
-          <Link className={'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold hover:brightness-95 ' + tagToneClass(tag.tone_key)} href={`/san-pham/nhan/${encodeURIComponent(tag.slug)}`} key={tag.id}><TagGlyph className="h-3.5 w-3.5" icon={tag.icon_key} />{tag.name}</Link>
+          <Link className={'inline-flex items-center gap-1 rounded-sm border px-2.5 py-1 text-xs font-semibold hover:brightness-95 ' + tagToneClass(tag.tone_key)} href={`/san-pham/nhan/${encodeURIComponent(tag.slug)}`} key={tag.id}><TagGlyph className="h-3.5 w-3.5" icon={tag.icon_key} />{tag.name}</Link>
         )}</div> : null}
 
         <ProductCodeSummary
