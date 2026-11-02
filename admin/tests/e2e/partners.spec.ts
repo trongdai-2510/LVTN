@@ -28,7 +28,8 @@ test('partner manager handles an empty list, a new partner and mobile layout', a
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${adminUrl}/admin/partners`);
   await expect(page.getByRole('heading', { name: 'Đối tác', exact: true })).toBeVisible();
-  await expect(page.getByText('Chưa có đối tác. Mục đối tác ngoài website sẽ được ẩn.')).toBeVisible();
+  await expect(page.getByText('Chưa có đối tác.')).toBeVisible();
+  await page.getByRole('button', { name: 'Thêm đối tác đầu tiên' }).click();
   await page.getByLabel('Tên đối tác').fill('Đối tác thử nghiệm');
   await page.getByLabel('Website đối tác').fill('https://example.com');
   await page.getByRole('button', { name: 'Lưu đối tác' }).click();
@@ -36,4 +37,8 @@ test('partner manager handles an empty list, a new partner and mobile layout', a
   await expect(page.getByRole('button', { name: /Đối tác thử nghiệm/ })).toBeVisible();
   expect(saved).toMatchObject({ name: 'Đối tác thử nghiệm', website_url: 'https://example.com', status: 'active' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  for (const width of [1440, 2560]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
 });
