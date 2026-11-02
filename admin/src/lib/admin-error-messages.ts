@@ -696,10 +696,21 @@ export function formatAdminError(
     );
   }
 
+  if (isNetworkError(normalized.message)) {
+    return withTechnicalDetail(
+      {
+        title: 'Kết nối đang bị gián đoạn',
+        message: 'Hệ thống chưa thể hoàn tất thao tác do kết nối tạm thời bị gián đoạn.',
+        suggestedAction: 'Kiểm tra kết nối mạng rồi bấm thử lại.'
+      },
+      normalized
+    );
+  }
+
   if (!normalized.status && !normalized.code && normalized.message.trim()) {
-    const visibleMessage = looksTechnicalMessage(normalized.message)
-      ? base.message
-      : normalized.message.trim();
+    const visibleMessage = !looksTechnicalMessage(normalized.message) && /[À-ỹĐđ]/u.test(normalized.message)
+      ? normalized.message.trim()
+      : base.message;
     return withTechnicalDetail(
       {
         title: base.title,
@@ -712,28 +723,14 @@ export function formatAdminError(
   }
 
   if (normalized.status === 400 || normalized.code === 'VALIDATION_ERROR') {
-    const visibleMessage = looksTechnicalMessage(normalized.message)
-      ? base.message
-      : normalized.message.trim() || base.message;
     return withTechnicalDetail(
       {
         title: base.title,
-        message: visibleMessage,
+        message: base.message,
         suggestedAction: base.suggestedAction
       },
       normalized,
       { hideTechnicalWhenSameAsMessage: true }
-    );
-  }
-
-  if (isNetworkError(normalized.message)) {
-    return withTechnicalDetail(
-      {
-        title: 'Kết nối đang bị gián đoạn',
-        message: 'Hệ thống chưa thể hoàn tất thao tác do kết nối tạm thời bị gián đoạn.',
-        suggestedAction: 'Kiểm tra kết nối mạng rồi bấm thử lại.'
-      },
-      normalized
     );
   }
 
@@ -759,7 +756,7 @@ function normalizeError(error: unknown): NormalizedError {
     return {
       status: error.status,
       code: error.code,
-      message: error.message,
+      message: error.serverMessage,
       details: error.details
     };
   }
@@ -1138,45 +1135,10 @@ function isNetworkError(message: string) {
 
 function withTechnicalDetail(
   presentation: PresentationDefaults,
-  error: NormalizedError,
-  options: { hideTechnicalWhenSameAsMessage?: boolean } = {}
+  _error: NormalizedError,
+  _options: { hideTechnicalWhenSameAsMessage?: boolean } = {}
 ): AdminErrorPresentation {
-  const technicalDetail = buildTechnicalDetail(
-    error,
-    presentation.message,
-    options.hideTechnicalWhenSameAsMessage
-  );
-  return {
-    ...presentation,
-    technicalDetail
-  };
-}
-
-function buildTechnicalDetail(
-  error: NormalizedError,
-  visibleMessage: string,
-  hideWhenSameAsMessage = false
-) {
-  const parts: string[] = [];
-
-  if (error.status) parts.push(`HTTP ${error.status}`);
-  if (error.code) parts.push(`code: ${error.code}`);
-  if (
-    error.message &&
-    (!hideWhenSameAsMessage ||
-      normalizeWhitespace(error.message) !== normalizeWhitespace(visibleMessage))
-  ) {
-    parts.push(error.message);
-  }
-  if (error.details && Object.keys(error.details).length > 0) {
-    parts.push(JSON.stringify(error.details, null, 2));
-  }
-
-  return parts.length > 0 ? parts.join('\n') : undefined;
-}
-
-function normalizeWhitespace(value: string) {
-  return value.replace(/\s+/g, ' ').trim();
+  return presentation;
 }
 
 function looksTechnicalMessage(message: string) {

@@ -18,14 +18,23 @@ type PublicApiEnvelope<T> = ApiSuccessEnvelope<T> | ApiErrorEnvelope;
 const IMPLICIT_LOCAL_API_BASE_URL = 'http://localhost:4000';
 
 export class PublicApiError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly details: unknown;
+
   constructor(
-    message: string,
-    public readonly status: number,
-    public readonly code: string,
-    public readonly details: unknown
+    _message: string,
+    status: number,
+    code: string,
+    details: unknown
   ) {
-    super(message);
+    super(status === 0
+      ? 'Không thể kết nối hệ thống lúc này. Vui lòng thử lại sau.'
+      : 'Không thể hoàn tất yêu cầu lúc này. Vui lòng kiểm tra thông tin và thử lại.');
     this.name = 'PublicApiError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
   }
 }
 

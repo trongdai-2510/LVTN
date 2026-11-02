@@ -677,9 +677,9 @@ export class ProductVariantService {
               message: 'Biến thể đang được tham chiếu nên chưa thể đổi trạng thái này.'
             };
           }
-          return { error_code: error.code, message: error.message };
+          return { error_code: error.code, message: 'Biến thể chưa đáp ứng điều kiện cho thao tác này.' };
         default:
-          return { error_code: error.code, message: error.message };
+          return { error_code: error.code, message: 'Biến thể chưa đáp ứng điều kiện cho thao tác này.' };
       }
     }
 

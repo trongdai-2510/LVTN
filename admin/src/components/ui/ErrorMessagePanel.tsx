@@ -46,7 +46,6 @@ export function ErrorMessagePanel({
   }, [
     presentation.message,
     presentation.suggestedAction,
-    presentation.technicalDetail,
     presentation.title,
     revealOnMount
   ]);
@@ -78,19 +77,6 @@ export function ErrorMessagePanel({
             <p className="mt-2 text-xs leading-5 text-red-700/90">
               Gợi ý: {presentation.suggestedAction}
             </p>
-          ) : null}
-          {presentation.technicalDetail ? (
-            <details
-              data-error-technical-details="true"
-              className="mt-3 rounded-sm border border-red-200 bg-white/60"
-            >
-              <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-red-700">
-                Chi tiết kỹ thuật dành cho quản trị hệ thống
-              </summary>
-              <pre className="overflow-auto whitespace-pre-wrap break-words border-t border-red-200 px-3 py-3 text-[12px] leading-5 text-red-900">
-                {presentation.technicalDetail}
-              </pre>
-            </details>
           ) : null}
         </div>
       </div>

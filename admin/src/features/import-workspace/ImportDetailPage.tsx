@@ -2326,28 +2326,6 @@ function ReadinessSummary({
           ) : null}
         </div>
 
-        <details
-          className="rounded-sm border border-amber-200 bg-white/60"
-          data-import-technical-details="true"
-        >
-          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-amber-700">
-            Chi tiết kỹ thuật dành cho quản trị hệ thống
-          </summary>
-          <div className="space-y-2 border-t border-amber-200 px-3 py-3 text-[12px] leading-5 text-amber-900">
-            <div>
-              <span className="font-semibold">Trạng thái lô hiện tại:</span>{' '}
-              {formatValue(readiness?.batch_status)}
-            </div>
-            <div>
-              <span className="font-semibold">Trạng thái cần có để áp dụng:</span>{' '}
-              {formatValue(readiness?.required_batch_status)}
-            </div>
-            <div>
-              <span className="font-semibold">Mã điều kiện chặn:</span>{' '}
-              {blockers.map((blocker) => blocker.code).filter(Boolean).join(', ')}
-            </div>
-          </div>
-        </details>
       </div>
     </Card>
   );
@@ -2666,27 +2644,6 @@ function ImportBlockerChecklist({
                   </div>
                 ))}
 
-                <details className="rounded-sm border border-border bg-muted/60">
-                  <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                    Chi tiết kỹ thuật
-                  </summary>
-                  <div className="space-y-2 border-t border-border px-3 py-3 text-[12px] leading-5 text-muted-foreground">
-                    {item.duplicates.map((duplicate) => (
-                      <div key={`${item.key}-technical-${duplicate.value}`}>
-                        <div>external_code: {formatValue(duplicate.value)}</div>
-                        {duplicate.blockers.map((blocker, index) => (
-                          <div
-                            key={`${item.key}-technical-row-${blocker.entityId || index}`}
-                            className="pl-3"
-                          >
-                            {blocker.code ? <div>Mã blocker: {blocker.code}</div> : null}
-                            {blocker.entityId ? <div>ID dòng tạm: {blocker.entityId}</div> : null}
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </details>
               </div>
             </details>
           </div>
@@ -3217,22 +3174,6 @@ function ImportBlockerRow({
                 </div>
               </div>
             ) : null}
-            <details className="mt-3 rounded-sm border border-border bg-muted/60">
-              <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-                Chi tiết kỹ thuật
-            </summary>
-            <div className="space-y-1 border-t border-border px-3 py-3 text-[12px] leading-5 text-muted-foreground">
-              {blocker.code ? <div>Mã blocker: {blocker.code}</div> : null}
-              {blocker.entityId ? <div>ID dòng tạm: {blocker.entityId}</div> : null}
-              {usesImportExternalCode(blocker) && blocker.pendingValue ? (
-                <div>external_code: {blocker.pendingValue}</div>
-              ) : null}
-              {blocker.matchedOfficialId ? (
-                <div>ID bản ghi chính thức: {blocker.matchedOfficialId}</div>
-              ) : null}
-              {blocker.message ? <div>Thông điệp gốc: {blocker.message}</div> : null}
-            </div>
-          </details>
         </div>
         {blocker.count !== undefined ? (
           <Badge tone={badgeTone}>{formatValue(blocker.count)}</Badge>
@@ -3290,29 +3231,6 @@ function ImportApplyBlockedAlert({
           <p className="mt-3 text-xs leading-5 text-red-700">
             Mở phần kiểm tra sẵn sàng để xem đầy đủ từng dòng cần chỉnh sửa hoặc tiếp tục bước duyệt dữ liệu tạm.
           </p>
-          <details
-            className="mt-3 rounded-sm border border-red-200 bg-white/60"
-            data-import-technical-details="true"
-          >
-            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-red-700">
-              Chi tiết kỹ thuật dành cho quản trị hệ thống
-            </summary>
-            <div className="space-y-2 border-t border-red-200 px-3 py-3 text-[12px] leading-5 text-red-900">
-              {error.technicalSummary.map((line) => (
-                <div key={line}>{line}</div>
-              ))}
-              {error.rawPayload ? (
-                <details className="rounded-sm border border-red-200 bg-white/70">
-                  <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-red-700">
-                    Dữ liệu lỗi gốc
-                  </summary>
-                  <pre className="overflow-auto whitespace-pre-wrap break-words border-t border-red-200 px-3 py-3 text-[11px] leading-5 text-red-900">
-                    {error.rawPayload}
-                  </pre>
-                </details>
-              ) : null}
-            </div>
-          </details>
         </div>
       </div>
     </Card>
@@ -3673,12 +3591,6 @@ function isExternalCodeDuplicateBlocker(blocker: ImportBlocker) {
   return code.includes('DUPLICATE') && code.includes('EXTERNAL_CODE');
 }
 
-function usesImportExternalCode(blocker: ImportBlocker) {
-  const code = String(blocker.code || '').toUpperCase();
-  const field = String(blocker.field || '').toUpperCase();
-  return field === 'EXTERNAL_CODE' || code.includes('EXTERNAL_CODE');
-}
-
 function formatImportBlockerFieldLabel(field: string | undefined) {
   const normalized = String(field || '').trim().toLowerCase();
 
@@ -3903,7 +3815,7 @@ function getImportBlockerPresentation(blocker: ImportBlocker) {
   }
 
   return {
-    message: blocker.message || 'Còn dữ liệu cần xử lý trước khi áp dụng.',
+    message: 'Còn dữ liệu cần xử lý trước khi áp dụng.',
     hint: blocker.suggestedAction
       ? `Gợi ý xử lý: ${formatSuggestedAction(blocker.suggestedAction)}.`
       : 'Mở dữ liệu tạm hoặc phần kiểm tra sẵn sàng để xử lý bản ghi liên quan.'

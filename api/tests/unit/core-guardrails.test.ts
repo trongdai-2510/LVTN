@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
+import { InternalServerErrorException } from '@nestjs/common';
 
 import { sanitizeRichTextHtml, sanitizeSvgMarkup } from '../../src/common/sanitize/html-sanitizer';
 import { slugifyText, resolveAvailableSlug } from '../../src/common/text/slugify-text';
@@ -11,6 +12,7 @@ import {
 } from '../../src/common/validation/date-filter';
 import { createValidationPipe } from '../../src/common/validation/validation';
 import { ApiErrorFilter } from '../../src/common/errors/error.filter';
+import { AppError } from '../../src/common/errors/app-error';
 import { PageContentListQueryDto } from '../../src/modules/page-content/page-content.dto';
 import {
   normalizeRedirectType,
@@ -203,5 +205,22 @@ test('database boundary and uniqueness errors become safe 4xx responses', () => 
     assert.equal(actualStatus, scenario.status);
     assert.equal(capturedBody?.error?.code, scenario.code);
     assert.ok(!JSON.stringify(actualBody).includes('stack'));
+  }
+});
+
+test('unexpected server failures do not return their internal cause in development', () => {
+  const filter = new ApiErrorFilter('development');
+  const normalize = (filter as unknown as {
+    normalizeException: (error: unknown) => { message: string; details: Record<string, unknown> | null };
+  }).normalizeException.bind(filter);
+  for (const error of [
+    new Error('select secret from private_table'),
+    new InternalServerErrorException({ message: 'select secret from private_table' }),
+    new AppError({ code: 'INTERNAL_TEST', statusCode: 500,
+      message: 'select secret from private_table', details: { cause: 'secret' } })
+  ]) {
+    const normalized = normalize(error);
+    assert.equal(normalized.message, 'Unexpected server error');
+    assert.equal(normalized.details, null);
   }
 });

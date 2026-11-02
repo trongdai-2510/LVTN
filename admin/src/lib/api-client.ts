@@ -13,12 +13,20 @@ type ApiEnvelope<T> =
 export class ApiClientError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly serverMessage: string;
   readonly details?: Record<string, unknown>;
 
   constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
-    super(message);
+    super(status >= 500
+      ? 'Hệ thống đang gặp lỗi xử lý. Vui lòng thử lại sau.'
+      : status === 0
+        ? 'Không thể kết nối hệ thống. Vui lòng kiểm tra mạng và thử lại.'
+      : status === 401 || status === 403
+        ? 'Phiên đăng nhập hoặc quyền thao tác chưa hợp lệ.'
+        : 'Chưa thể hoàn tất thao tác. Vui lòng kiểm tra dữ liệu và thử lại.');
     this.status = status;
     this.code = code;
+    this.serverMessage = message;
     this.details = details;
   }
 }
@@ -47,6 +55,8 @@ async function request<T>(
         : isFormData
           ? (body as FormData)
           : JSON.stringify(body)
+  }).catch(() => {
+    throw new ApiClientError(0, 'NETWORK_ERROR', 'Network request failed');
   });
 
   if (response.status === 401 && retry && authStore.getRefreshToken()) {
@@ -60,7 +70,7 @@ async function request<T>(
 
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json')
-    ? ((await response.json()) as ApiEnvelope<T>)
+    ? ((await response.json().catch(() => null)) as ApiEnvelope<T> | null)
     : null;
 
   if (!response.ok || !payload || payload.ok === false) {
@@ -79,6 +89,8 @@ async function requestBlob(path: string, retry = true): Promise<Blob> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: 'GET',
     headers: token ? { Authorization: `Bearer ${token}` } : {}
+  }).catch(() => {
+    throw new ApiClientError(0, 'NETWORK_ERROR', 'Network request failed');
   });
 
   if (response.status === 401 && retry && authStore.getRefreshToken()) {
@@ -93,7 +105,7 @@ async function requestBlob(path: string, retry = true): Promise<Blob> {
   if (!response.ok) {
     const contentType = response.headers.get('content-type') || '';
     const payload = contentType.includes('application/json')
-      ? ((await response.json()) as ApiEnvelope<never>)
+      ? ((await response.json().catch(() => null)) as ApiEnvelope<never> | null)
       : null;
     const error =
       payload && payload.ok === false

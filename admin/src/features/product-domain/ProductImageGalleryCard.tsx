@@ -106,7 +106,7 @@ export function ProductImageGalleryCard({ productGroupId, canEdit, onSaved }: Pr
       setDialog({
         tone: 'error',
         title: 'Không tải được thư viện ảnh',
-        description: error instanceof Error ? error.message : String(error)
+        description: error instanceof Error ? error.message : 'Vui lòng thử lại.'
       });
     } finally {
       setLoading(false);
@@ -192,7 +192,7 @@ export function ProductImageGalleryCard({ productGroupId, canEdit, onSaved }: Pr
       setDialog({
         tone: 'error',
         title: 'Lưu thất bại',
-        description: error instanceof Error ? error.message : String(error)
+        description: error instanceof Error ? error.message : 'Vui lòng thử lại.'
       });
     } finally {
       setSaving(false);

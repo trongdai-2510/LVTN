@@ -17,6 +17,7 @@ import {
   optimisticVersionPayload
 } from '../../src/features/product-domain/businessStatus';
 import { ApiClientError } from '../../src/lib/api-client';
+import { AuthRequestError } from '../../src/features/auth/auth.store';
 import { formatAdminError } from '../../src/lib/admin-error-messages';
 import {
   buildBusinessListHref,
@@ -79,6 +80,25 @@ test('variant publish explains an unpublished parent and the API error gives a u
   expect(presentation.title).toBe('Cần xuất bản sản phẩm cha trước');
   expect(presentation.message).toContain('chưa xuất bản');
   expect(presentation.suggestedAction).toContain('sản phẩm cha');
+});
+
+test('API error text shown directly in admin never exposes the server message', () => {
+  const error = new ApiClientError(409, 'PRODUCT_VARIANT_PUBLISH_REQUIRES_PUBLIC_GROUP',
+    'Product variant cannot be published before its product group is approved and published.',
+    { product_group_id: 'da7688ef-d748-4e15-b4d3-b6f85d8da55a' });
+  expect(error.message).not.toContain('Product variant cannot');
+  expect(error.message).not.toContain('PRODUCT_VARIANT');
+  expect(formatAdminError(error, 'module-action').title).toBe('Cần xuất bản sản phẩm cha trước');
+  expect(formatAdminError(error, 'module-action').technicalDetail).toBeUndefined();
+
+  const unknown = new ApiClientError(400, 'UNEXPECTED_VALIDATION', 'internal_column must match constraint',
+    { query: 'select secret from table' });
+  const safe = formatAdminError(unknown, 'module-save');
+  expect(JSON.stringify(safe)).not.toContain('internal_column');
+  expect(JSON.stringify(safe)).not.toContain('select secret');
+  expect(new ApiClientError(0, 'NETWORK_ERROR', 'Failed to fetch').message).toContain('kết nối');
+  expect(new AuthRequestError(500).message).not.toContain('HTTP');
+  expect(new AuthRequestError(401).message).toContain('mật khẩu');
 });
 
 test('a complete published product is ready and exposes every affected destination', () => {

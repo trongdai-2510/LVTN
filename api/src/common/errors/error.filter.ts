@@ -22,7 +22,7 @@ interface PostgresErrorLike {
 export class ApiErrorFilter implements ExceptionFilter {
   private readonly logger = new Logger('ApiErrorFilter');
 
-  constructor(private readonly nodeEnv: string) {}
+  constructor(_nodeEnv: string) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const httpContext = host.switchToHttp();
@@ -56,6 +56,18 @@ export class ApiErrorFilter implements ExceptionFilter {
     details: Record<string, unknown> | null;
   } {
     if (exception instanceof AppError) {
+      if (exception.statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
+        const failedStage = exception.code === 'IMPORT_APPLY_FAILED' &&
+          typeof exception.details?.failed_stage === 'string'
+            ? exception.details.failed_stage
+            : null;
+        return {
+          statusCode: exception.statusCode,
+          code: exception.code,
+          message: 'Unexpected server error',
+          details: failedStage ? { failed_stage: failedStage } : null
+        };
+      }
       return {
         statusCode: exception.statusCode,
         code: exception.code,
@@ -66,6 +78,14 @@ export class ApiErrorFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const statusCode = exception.getStatus();
+      if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
+        return {
+          statusCode,
+          code: this.codeFromStatus(statusCode),
+          message: 'Unexpected server error',
+          details: null
+        };
+      }
       const payload = exception.getResponse();
       const message =
         typeof payload === 'object' && payload !== null && 'message' in payload
@@ -89,13 +109,7 @@ export class ApiErrorFilter implements ExceptionFilter {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       code: ErrorCodes.INTERNAL_SERVER_ERROR,
       message: 'Unexpected server error',
-      details:
-        this.nodeEnv === 'production'
-          ? null
-          : {
-              cause:
-                exception instanceof Error ? exception.message : String(exception)
-            }
+      details: null
     };
   }
 

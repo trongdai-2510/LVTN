@@ -896,7 +896,7 @@ export class ProductGroupService {
           }
           return { error_code: error.code, message: 'Không tìm thấy sản phẩm.' };
         default:
-          return { error_code: error.code, message: error.message };
+          return { error_code: error.code, message: 'Sản phẩm chưa đáp ứng điều kiện cho thao tác này.' };
       }
     }
 

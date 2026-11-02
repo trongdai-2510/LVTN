@@ -155,17 +155,6 @@ export function ActionResultDialog({
           </div>
         ) : null}
 
-        {presentation?.technicalDetail ? (
-          <details className="mt-4 rounded-sm border border-slate-200 bg-slate-50">
-            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-slate-600">
-              Chi tiết kỹ thuật
-            </summary>
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-slate-200 px-3 py-3 text-[12px] leading-5 text-slate-700">
-              {presentation.technicalDetail}
-            </pre>
-          </details>
-        ) : null}
-
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           {state?.secondaryAction ? (
             <Button
