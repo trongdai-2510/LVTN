@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicBrandListItem } from '@/types/contracts/public-brands';
 import type { PublicPartner } from '@/types/contracts/publicPartners';
-import { PartnerShowcase } from '@/features/partners/PartnerShowcase';
+import { HomePartnerShowcase } from '@/features/partners/PartnerShowcase';
 import type {
   BrandsSectionConfig,
   CompanyOverviewSectionConfig,
@@ -499,7 +499,7 @@ export function HomePartnersSection({
           ))}
         </HomeCarousel>
       </Container></section> : null}
-      <PartnerShowcase className={visibleBrands.length > 0 ? 'border-t border-borderBlue' : ''} partners={partners} />
+      <HomePartnerShowcase className={visibleBrands.length > 0 ? 'border-t border-borderBlue' : ''} partners={partners} />
     </div>
   );
 }

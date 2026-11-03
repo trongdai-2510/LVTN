@@ -7,7 +7,7 @@ import { Container } from '@/components/ui/Container';
 import { HomeHeroBannerCarousel } from '@/features/home/HomeHeroBannerCarousel';
 import { BrandHero } from '@/features/partners/BrandHero';
 import { BrandDirectory } from '@/features/partners/BrandDirectory';
-import { PartnerShowcase } from '@/features/partners/PartnerShowcase';
+import { PartnerDirectory } from '@/features/partners/PartnerDirectory';
 import type { PublicPartner } from '@/types/contracts/publicPartners';
 import { ExtraBlocksRenderer } from '@/features/page-content/ExtraBlocksRenderer';
 import { PageSectionLayout } from '@/features/page-content/PageSectionLayout';
@@ -92,7 +92,7 @@ export function PartnerListingPage({
       </section>
           ),
 
-          'partners-grid': <PartnerShowcase className="border-t border-borderBlue bg-white" id="danh-sach-doi-tac" partners={partners} />,
+          'partners-grid': <PartnerDirectory partners={partners} />,
 
           'brands-supporting': (
             <ExtraBlocksRenderer blocks={pageContent?.extra_blocks ?? null} containerSize="narrow" />
