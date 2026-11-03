@@ -16,7 +16,7 @@ export function PartnerLogo({ partner, className, sizes }: PartnerLogoProps) {
       {source ? (
         <Image alt="" className="object-contain" fill sizes={sizes} src={source} />
       ) : (
-        <span aria-hidden="true" className="flex h-12 w-12 items-center justify-center rounded-full bg-primarySoft/60 font-display text-xl font-semibold text-primary">
+        <span aria-hidden="true" className="flex h-14 w-14 items-center justify-center rounded-sm border border-primary/15 bg-primarySoft font-display text-2xl font-semibold text-primary">
           {partner.name.trim().charAt(0).toLocaleUpperCase('vi')}
         </span>
       )}
