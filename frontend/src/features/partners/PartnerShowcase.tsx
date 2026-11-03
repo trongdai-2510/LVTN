@@ -10,9 +10,9 @@ const focusRing = 'focus-visible:outline focus-visible:outline-2 focus-visible:o
 function HomePartnerItem({ partner }: { partner: PublicPartner }) {
   const website = partnerWebsite(partner.website_url);
   const content = (
-    <span className={`group flex h-full min-h-32 w-full flex-col items-center justify-center gap-2 rounded-sm border border-borderBlue bg-white p-3 sm:w-52 ${website ? 'transition-colors hover:border-primary' : ''}`}>
-      <PartnerLogo className="h-[72px] w-full bg-white" imageClassName="p-1" partner={partner} sizes="208px" />
-      <span className={`min-w-0 break-words text-center font-display text-[15px] font-semibold leading-snug text-secondary ${website ? 'transition-colors group-hover:text-primary' : ''}`}>
+    <span className={`group flex h-full min-h-40 w-full flex-col items-center gap-2 rounded-sm border border-borderBlue bg-white p-3 sm:w-52 ${website ? 'transition-colors hover:border-primary' : ''}`}>
+      <PartnerLogo className="h-20 w-full bg-white" imageClassName="p-1" partner={partner} sizes="208px" />
+      <span className={`flex min-h-11 w-full min-w-0 items-center justify-center break-words border-t border-borderBlue pt-2 text-center font-display text-lg font-bold leading-tight text-secondary ${website ? 'transition-colors group-hover:text-primary' : ''}`}>
         {partner.name}
       </span>
     </span>
@@ -34,9 +34,9 @@ export function HomePartnerShowcase({ partners, className = '' }: { partners: Pu
           <h2>Đối tác</h2>
           <span aria-hidden="true" className="text-base text-primary transition-transform group-hover:translate-x-0.5">↗</span>
         </Link>
-        <ul className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3" data-partner-home-count={visible.length}>
+        <ul className="flex min-w-0 flex-wrap items-stretch gap-x-5 gap-y-3" data-partner-home-count={visible.length}>
           {visible.map((partner) => <li className={`min-w-0 ${visible.length === 1 ? 'w-48' : 'w-[calc((100%-1.25rem)/2)]'} sm:w-auto`} key={partner.id}><HomePartnerItem partner={partner} /></li>)}
-          {partners.length > visible.length ? <li className="w-[calc((100%-1.25rem)/2)] sm:w-auto"><Link aria-label={`Xem thêm ${partners.length - visible.length} đối tác`} className={`flex min-h-32 w-full items-center justify-center rounded-sm border border-borderBlue font-display text-2xl font-semibold text-primary transition-colors hover:border-primary hover:bg-subtle sm:w-52 ${focusRing}`} href={directoryHref}>+{partners.length - visible.length}</Link></li> : null}
+          {partners.length > visible.length ? <li className="w-[calc((100%-1.25rem)/2)] sm:w-auto"><Link aria-label={`Xem thêm ${partners.length - visible.length} đối tác`} className={`flex h-full min-h-40 w-full items-center justify-center rounded-sm border border-borderBlue font-display text-2xl font-semibold text-primary transition-colors hover:border-primary hover:bg-subtle sm:w-52 ${focusRing}`} href={directoryHref}>+{partners.length - visible.length}</Link></li> : null}
         </ul>
       </div>
     </section>
