@@ -486,22 +486,14 @@ export function HomePartnersSection({
   }
   return (
     <div className="border-y border-borderBlue bg-white">
-      <Container className={hasBrands ? `grid gap-y-6 py-9 lg:py-12 ${hasPartners ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,560px)] lg:items-center lg:gap-x-10' : ''}` : 'py-9 lg:py-12'} size="wide">
-        {hasBrands ? <>
-          <div className={`min-w-0 lg:col-start-1 lg:row-start-1 ${!hasPartners ? 'sm:flex sm:items-end sm:justify-between sm:gap-6' : ''}`}>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Danh mục phân phối</p>
-              <h2 className="mt-2 font-display text-2xl font-semibold leading-tight text-secondary sm:text-3xl">Thương hiệu sản phẩm</h2>
-            </div>
-            <Link className="mt-2 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary transition-colors hover:text-primaryStrong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" href="/doi-tac-thuong-hieu#danh-ba-thuong-hieu">
-              Xem thương hiệu <span aria-hidden="true">↗</span>
-            </Link>
-          </div>
-          <section aria-label="Thương hiệu sản phẩm" className="min-w-0 lg:col-span-2 lg:row-start-2">
+      <Container className="py-6 sm:py-8" size="wide">
+        {hasBrands ? (
+          <section aria-label="Thương hiệu sản phẩm" className="min-w-0">
+            <h2 className="mb-5 font-display text-2xl font-semibold leading-tight text-secondary sm:text-[1.75rem]">Thương hiệu</h2>
             <HomeCarousel
               ariaLabel="Thương hiệu sản phẩm"
               autoScrollIntervalMs={autoscrollMs}
-              controlsPlacement="outside"
+              controlsPlacement="below"
               desktopVisibleCount={4}
               hideControlsWhenStatic
               layout="brand-strip"
@@ -512,8 +504,8 @@ export function HomePartnersSection({
               ))}
             </HomeCarousel>
           </section>
-        </> : null}
-        <HomePartnerShowcase className={hasBrands ? 'lg:col-start-2 lg:row-start-1 lg:border-l lg:border-t-0 lg:pl-8' : 'max-w-[560px]'} partners={partners} />
+        ) : null}
+        <HomePartnerShowcase className={hasBrands ? 'mt-5 border-t border-borderBlue pt-3' : ''} partners={partners} />
       </Container>
     </div>
   );
@@ -529,7 +521,7 @@ function BrandLogoTile({
     <Image
       alt={brand.name}
       fill
-      className="object-contain p-4"
+      className="object-contain p-2"
       loading="lazy"
       sizes="200px"
       src={logoSource}
@@ -538,7 +530,7 @@ function BrandLogoTile({
     <span className="type-label font-bold uppercase text-body">{brand.name}</span>
   );
   const className =
-    'relative flex h-full min-h-[96px] w-full items-center justify-center border-b border-borderBlue bg-white px-6 py-4 transition-colors duration-200 hover:bg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
+    'relative flex h-full min-h-[84px] w-full items-center justify-center bg-white px-3 py-2 transition-colors duration-200 hover:bg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
   if (websiteUrl) {
     return (
       <a className={className} href={websiteUrl} rel="noreferrer" target="_blank">

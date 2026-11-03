@@ -24,7 +24,7 @@ type HomeCarouselProps = {
   desktopVisibleCount?: 2 | 3 | 4;
   hideControlsWhenStatic?: boolean;
   layout?: 'default' | 'fixed-gap' | 'brand-strip';
-  controlsPlacement?: 'outside' | 'inside';
+  controlsPlacement?: 'outside' | 'inside' | 'below';
   autoScrollIntervalMs?: number;
   loop?: boolean;
 };
@@ -428,7 +428,8 @@ export function HomeCarousel({
     shouldLoop ? 'select-none' : ''
   ].join(' ');
   const desktopControlsClassName = [
-    'pointer-events-none absolute inset-y-0 hidden items-center justify-between md:flex',
+    'pointer-events-none absolute inset-y-0 hidden items-center justify-between',
+    controlsPlacement === 'below' ? '' : 'md:flex',
     controlsPlacement === 'inside' ? 'left-2 right-2 z-10' : 'left-0 right-0'
   ].join(' ');
   const previousButtonClassName = [
@@ -557,7 +558,7 @@ export function HomeCarousel({
       ) : null}
 
       {showControls ? (
-        <div className="mt-5 flex justify-end gap-2 md:hidden">
+        <div className={`mt-3 flex justify-end gap-2 ${controlsPlacement === 'below' ? '' : 'md:hidden'}`}>
           <button
             aria-label="Xem mục trước"
             className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-borderBlue bg-white text-primary shadow-soft transition hover:border-primary hover:bg-primary hover:text-white disabled:cursor-not-allowed disabled:border-borderSoft disabled:bg-white/80 disabled:text-body/40"
