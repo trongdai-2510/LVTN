@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const adminUrl = (process.env.ADMIN_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
 const apiUrl = (process.env.API_BASE_URL || 'http://localhost:4000').replace(/\/$/, '');
 
-async function openWithStaleAccess(page: Page, meStatus: number) {
+async function openWithStaleAccess(page: Page, meStatus: number, successfulDelayMs = 0) {
   let currentStatus = meStatus;
   await page.addInitScript(() => {
     window.sessionStorage.setItem('song-thanh-admin-auth', JSON.stringify({
@@ -13,10 +13,11 @@ async function openWithStaleAccess(page: Page, meStatus: number) {
       roles: ['super_admin']
     }));
   });
-  await page.route(`${apiUrl}/**`, (route) => {
+  await page.route(`${apiUrl}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/auth/me') {
       if (currentStatus === 200) {
+        if (successfulDelayMs) await new Promise((resolve) => setTimeout(resolve, successfulDelayMs));
         return route.fulfill({ json: { ok: true, data: {
           user: { id: 'old-admin', display_name: 'Old Admin', email: 'old@example.com' },
           permissions: ['admin_user.read', 'admin_role.read'], roles: ['super_admin']
@@ -46,13 +47,15 @@ test('a revoked admin session does not show cached system rights', async ({ page
 });
 
 test('verification outage blocks stale access but offers a retry', async ({ page }) => {
-  const setStatus = await openWithStaleAccess(page, 503);
+  const setStatus = await openWithStaleAccess(page, 503, 500);
   await expect(page.getByRole('heading', { name: 'Chưa thể xác minh quyền truy cập' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Người dùng' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Tạo người dùng' })).toHaveCount(0);
   setStatus(200);
   await page.getByRole('button', { name: 'Thử lại' }).click();
+  await expect(page.getByRole('heading', { name: 'Chưa thể xác minh quyền truy cập' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Tạo người dùng' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Chưa thể xác minh quyền truy cập' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Người dùng' }).first()).toBeVisible();
 });

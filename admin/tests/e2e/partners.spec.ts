@@ -61,11 +61,15 @@ test('partner manager handles an empty list, a new partner and mobile layout', a
 test('selecting a new partner logo keeps the unsaved editor open', async ({ page }) => {
   let saves = 0;
   let uploads = 0;
+  let slowRecheck = false;
   await page.addInitScript((state) => window.sessionStorage.setItem('song-thanh-admin-auth', JSON.stringify(state)),
     { accessToken: 'partner-qa-token', refreshToken: 'partner-qa-refresh', user, permissions: [...permissions, 'file.create'], roles: ['super_admin'] });
   await page.route(`${apiUrl}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/auth/me') return route.fulfill({ json: { ok: true, data: { user, permissions: [...permissions, 'file.create'], roles: ['super_admin'] } } });
+    if (path === '/auth/me') {
+      if (slowRecheck) await new Promise((resolve) => setTimeout(resolve, 250));
+      return route.fulfill({ json: { ok: true, data: { user, permissions: [...permissions, 'file.create'], roles: ['super_admin'] } } });
+    }
     if (path === '/song-thanh/partners' && route.request().method() === 'GET') return route.fulfill({ json: { ok: true, data: { items: [] } } });
     if (path === '/song-thanh/partners' && route.request().method() === 'POST') saves += 1;
     if (path === '/song-thanh/files/upload') { uploads += 1; return route.fulfill({ json: { ok: true, data: { file: { id: 'qa-logo', original_filename: 'logo.png', mime_type: 'image/png' } } } }); }
@@ -80,6 +84,14 @@ test('selecting a new partner logo keeps the unsaved editor open', async ({ page
   const upload = page.getByRole('dialog', { name: 'Tải ảnh mới' });
   await expect(upload).toBeVisible();
   expect(await upload.locator('form').count()).toBe(0);
+  slowRecheck = true;
+  const recheck = page.waitForResponse((response) => new URL(response.url()).pathname === '/auth/me');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(upload).toBeVisible();
+  await expect(editor.getByLabel('Tên đối tác')).toHaveValue('Đang nhập đối tác');
+  await recheck;
+  await expect(upload).toBeVisible();
+  await expect(editor.getByLabel('Tên đối tác')).toHaveValue('Đang nhập đối tác');
   const fileChooser = page.waitForEvent('filechooser');
   await upload.locator('[data-file-upload-input]').click();
   await (await fileChooser).setFiles({ name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==', 'base64') });

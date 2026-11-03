@@ -18,7 +18,6 @@ export function ProtectedRoute({ permission, children }: ProtectedRouteProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [state, setState] = useState<AuthState>(() => authStore.getState());
-  const [checking, setChecking] = useState(true);
   const [verificationError, setVerificationError] = useState(false);
   const [checkVersion, setCheckVersion] = useState(0);
   const [verifiedPath, setVerifiedPath] = useState<string | null>(null);
@@ -33,10 +32,6 @@ export function ProtectedRoute({ permission, children }: ProtectedRouteProps) {
     if (!state.hydrated) return;
     let active = true;
     async function check() {
-      if (active) {
-        setChecking(true);
-        setVerificationError(false);
-      }
       const currentSearch = typeof window === 'undefined' ? '' : window.location.search;
       const returnTo = `${pathname}${currentSearch}`;
       if (!authStore.getAccessToken()) {
@@ -61,14 +56,13 @@ export function ProtectedRoute({ permission, children }: ProtectedRouteProps) {
         } else {
           if (active) {
             setVerificationError(true);
-            setChecking(false);
           }
           return;
         }
       }
       if (active) {
         setVerifiedPath(pathname);
-        setChecking(false);
+        setVerificationError(false);
       }
     }
     check();
@@ -80,7 +74,7 @@ export function ProtectedRoute({ permission, children }: ProtectedRouteProps) {
   useEffect(() => {
     function refreshAccess() {
       if (authStore.getAccessToken()) {
-        setChecking(true);
+        // Keep the current editor mounted while a native file picker returns focus.
         setCheckVersion((version) => version + 1);
       }
     }
@@ -93,14 +87,14 @@ export function ProtectedRoute({ permission, children }: ProtectedRouteProps) {
     [permission, state.permissions]
   );
 
-  if (checking || (!verificationError && verifiedPath !== pathname)) {
+  if (!verificationError && verifiedPath !== pathname) {
     const placeholder = (
       <div className="space-y-4 p-5">
         <Skeleton className="h-10 w-72" />
         <Skeleton className="h-72 w-full" />
       </div>
     );
-    // Keep the already verified shell mounted while validating the next route.
+    // A different route stays hidden until its permissions are verified.
     return verifiedPath ? <AdminShell>{placeholder}</AdminShell> : placeholder;
   }
 

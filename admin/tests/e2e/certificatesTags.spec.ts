@@ -70,12 +70,16 @@ test('certificate and tag managers create records without horizontal overflow', 
 test('selecting a certificate file keeps the draft open on mobile', async ({ page }) => {
   let saves = 0;
   let uploads = 0;
+  let slowRecheck = false;
   const filePermissions = [...permissions, 'file.create'];
   await page.addInitScript((state) => window.sessionStorage.setItem('song-thanh-admin-auth', JSON.stringify(state)),
     { accessToken: 'qa-token', refreshToken: 'qa-refresh', user, permissions: filePermissions, roles: ['super_admin'] });
   await page.route(`${api}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/auth/me') return route.fulfill({ json: { ok: true, data: { user, permissions: filePermissions, roles: ['super_admin'] } } });
+    if (path === '/auth/me') {
+      if (slowRecheck) await new Promise((resolve) => setTimeout(resolve, 250));
+      return route.fulfill({ json: { ok: true, data: { user, permissions: filePermissions, roles: ['super_admin'] } } });
+    }
     if (path === '/song-thanh/certificates' && route.request().method() === 'GET') return route.fulfill({ json: { ok: true, data: { items: [] } } });
     if (path === '/song-thanh/certificates' && route.request().method() === 'POST') saves += 1;
     if (path === '/song-thanh/files/upload') {
@@ -95,6 +99,14 @@ test('selecting a certificate file keeps the draft open on mobile', async ({ pag
   await editor.getByLabel('Tên chứng nhận').fill('Đang nhập chứng nhận');
   await editor.getByRole('button', { name: 'Tải tệp mới' }).click();
   const upload = page.getByRole('dialog', { name: 'Tải tệp mới' });
+  slowRecheck = true;
+  const recheck = page.waitForResponse((response) => new URL(response.url()).pathname === '/auth/me');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(upload).toBeVisible();
+  await expect(editor.getByLabel('Tên chứng nhận')).toHaveValue('Đang nhập chứng nhận');
+  await recheck;
+  await expect(upload).toBeVisible();
+  await expect(editor.getByLabel('Tên chứng nhận')).toHaveValue('Đang nhập chứng nhận');
   const fileChooser = page.waitForEvent('filechooser');
   await upload.locator('[data-file-upload-input]').click();
   await (await fileChooser).setFiles({ name: 'certificate.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n') });
