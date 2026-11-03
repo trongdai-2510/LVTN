@@ -10,9 +10,9 @@ const focusRing = 'focus-visible:outline focus-visible:outline-2 focus-visible:o
 function HomePartnerItem({ partner }: { partner: PublicPartner }) {
   const website = partnerWebsite(partner.website_url);
   const content = (
-    <span className="group flex min-h-14 min-w-0 items-center gap-3">
-      <PartnerLogo className="h-12 w-20 bg-white" partner={partner} sizes="80px" />
-      <span className="min-w-0 break-words font-display text-sm font-semibold leading-snug text-secondary transition-colors group-hover:text-primary">
+    <span className={`group flex h-full min-h-32 w-full flex-col items-center justify-center gap-2 rounded-sm border border-borderBlue bg-white p-3 sm:w-52 ${website ? 'transition-colors hover:border-primary' : ''}`}>
+      <PartnerLogo className="h-[72px] w-full bg-white" imageClassName="p-1" partner={partner} sizes="208px" />
+      <span className={`min-w-0 break-words text-center font-display text-[15px] font-semibold leading-snug text-secondary ${website ? 'transition-colors group-hover:text-primary' : ''}`}>
         {partner.name}
       </span>
     </span>
@@ -29,14 +29,14 @@ export function HomePartnerShowcase({ partners, className = '' }: { partners: Pu
 
   return (
     <section aria-label="Đối tác của Song Thanh" className={`min-w-0 ${className}`}>
-      <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
-        <Link aria-label="Mở trang đối tác" className={`group inline-flex min-h-12 shrink-0 items-center gap-2 font-display text-lg font-semibold text-secondary transition-colors hover:text-primary ${focusRing}`} href={directoryHref}>
+      <div className="grid gap-3 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-center sm:gap-8">
+        <Link aria-label="Mở trang đối tác" className={`group inline-flex min-h-12 w-fit items-center gap-2 font-display text-2xl font-semibold text-secondary transition-colors hover:text-primary ${focusRing}`} href={directoryHref}>
           <h2>Đối tác</h2>
           <span aria-hidden="true" className="text-base text-primary transition-transform group-hover:translate-x-0.5">↗</span>
         </Link>
-        <ul className="flex min-w-0 flex-wrap items-center gap-x-8 gap-y-2" data-partner-home-count={visible.length}>
-          {visible.map((partner) => <li className="min-w-0" key={partner.id}><HomePartnerItem partner={partner} /></li>)}
-          {partners.length > visible.length ? <li><Link aria-label={`Xem thêm ${partners.length - visible.length} đối tác`} className={`inline-flex min-h-11 items-center font-display text-sm font-semibold text-primary hover:underline ${focusRing}`} href={directoryHref}>+{partners.length - visible.length}</Link></li> : null}
+        <ul className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3" data-partner-home-count={visible.length}>
+          {visible.map((partner) => <li className={`min-w-0 ${visible.length === 1 ? 'w-48' : 'w-[calc((100%-1.25rem)/2)]'} sm:w-auto`} key={partner.id}><HomePartnerItem partner={partner} /></li>)}
+          {partners.length > visible.length ? <li className="w-[calc((100%-1.25rem)/2)] sm:w-auto"><Link aria-label={`Xem thêm ${partners.length - visible.length} đối tác`} className={`flex min-h-32 w-full items-center justify-center rounded-sm border border-borderBlue font-display text-2xl font-semibold text-primary transition-colors hover:border-primary hover:bg-subtle sm:w-52 ${focusRing}`} href={directoryHref}>+{partners.length - visible.length}</Link></li> : null}
         </ul>
       </div>
     </section>

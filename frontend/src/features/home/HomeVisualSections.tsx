@@ -486,7 +486,7 @@ export function HomePartnersSection({
   }
   return (
     <div className="border-y border-borderBlue bg-white">
-      <Container className="py-6 sm:py-8" size="wide">
+      <Container className="py-6 sm:py-8" size="narrow">
         {hasBrands ? (
           <section aria-label="Thương hiệu sản phẩm" className="min-w-0">
             <h2 className="mb-5 font-display text-2xl font-semibold leading-tight text-secondary sm:text-[1.75rem]">Thương hiệu</h2>
