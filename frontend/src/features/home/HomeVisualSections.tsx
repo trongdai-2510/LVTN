@@ -484,22 +484,33 @@ export function HomePartnersSection({
   }
   return (
     <div className="border-y border-borderBlue bg-white">
-      {visibleBrands.length > 0 ? <section className="py-12" aria-label="Thương hiệu sản phẩm"><Container size="wide">
-        <HomeCarousel
-          ariaLabel="Thương hiệu sản phẩm"
-          autoScrollIntervalMs={autoscrollMs}
-          controlsPlacement="inside"
-          desktopVisibleCount={4}
-          hideControlsWhenStatic
-          layout="brand-strip"
-          loop
-        >
-          {visibleBrands.map((brand) => (
-            <BrandLogoTile brand={brand} key={brand.id} />
-          ))}
-        </HomeCarousel>
-      </Container></section> : null}
-      <HomePartnerShowcase className={visibleBrands.length > 0 ? 'border-t border-borderBlue' : ''} partners={partners} />
+      <Container className={partners.length > 0 && visibleBrands.length > 0 ? 'grid gap-7 py-9 lg:grid-cols-[minmax(0,1fr)_minmax(340px,410px)] lg:items-stretch lg:gap-10 lg:py-11' : 'py-9 lg:py-11'} size="wide">
+        {visibleBrands.length > 0 ? <section aria-label="Thương hiệu sản phẩm" className="min-w-0">
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Danh mục phân phối</p>
+              <h2 className="mt-2 font-display text-2xl font-semibold leading-tight text-secondary sm:text-3xl">Thương hiệu sản phẩm</h2>
+            </div>
+            <Link className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary transition-colors hover:text-primaryStrong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary" href="/doi-tac-thuong-hieu#danh-ba-thuong-hieu">
+              Xem thương hiệu <span aria-hidden="true">↗</span>
+            </Link>
+          </div>
+          <HomeCarousel
+            ariaLabel="Thương hiệu sản phẩm"
+            autoScrollIntervalMs={autoscrollMs}
+            controlsPlacement="inside"
+            desktopVisibleCount={partners.length > 0 ? 3 : 4}
+            hideControlsWhenStatic
+            layout={partners.length > 0 ? 'default' : 'brand-strip'}
+            loop
+          >
+            {visibleBrands.map((brand) => (
+              <BrandLogoTile brand={brand} key={brand.id} />
+            ))}
+          </HomeCarousel>
+        </section> : null}
+        <HomePartnerShowcase className={visibleBrands.length === 0 ? 'max-w-[540px]' : ''} partners={partners} />
+      </Container>
     </div>
   );
 }

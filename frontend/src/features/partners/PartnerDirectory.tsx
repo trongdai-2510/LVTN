@@ -3,14 +3,13 @@ import type { PublicPartner } from '@/types/contracts/publicPartners';
 import { PartnerLogo } from './PartnerLogo';
 import { partnerWebsite } from './partnerWebsite';
 
-function DirectoryItem({ partner }: { partner: PublicPartner }) {
+function PartnerTile({ partner }: { partner: PublicPartner }) {
   const website = partnerWebsite(partner.website_url);
-  const hasLogo = Boolean(partner.logo_file?.url?.trim());
   const content = (
-    <article className="group flex h-full flex-col border-t border-borderBlue pt-5 sm:pt-6">
-      <PartnerLogo className={`${hasLogo ? 'h-28 sm:h-32' : 'h-16 sm:h-20'} w-full max-w-48`} partner={partner} sizes="192px" />
-      <div className="mt-4 flex min-w-0 items-start justify-between gap-4">
-        <h3 className="min-w-0 font-display text-lg font-semibold leading-snug text-secondary transition-colors group-hover:text-primary sm:text-xl">{partner.name}</h3>
+    <article className="group flex h-full min-h-48 flex-col border border-borderBlue bg-white p-5 transition-[border-color,box-shadow] duration-200 group-hover:border-primary/40 group-hover:shadow-[0_12px_28px_-20px_rgba(0,74,180,0.4)] sm:p-6">
+      <PartnerLogo className="h-20 w-full max-w-44 sm:h-24" partner={partner} sizes="176px" />
+      <div className="mt-auto flex min-w-0 items-end justify-between gap-3 pt-5">
+        <h3 className="min-w-0 font-display text-base font-semibold leading-snug text-secondary transition-colors duration-200 group-hover:text-primary sm:text-lg">{partner.name}</h3>
         {website ? <span aria-hidden="true" className="shrink-0 text-lg text-primary">↗</span> : null}
       </div>
     </article>
@@ -23,18 +22,21 @@ function DirectoryItem({ partner }: { partner: PublicPartner }) {
 
 export function PartnerDirectory({ partners }: { partners: PublicPartner[] }) {
   if (partners.length === 0) return null;
-  const columns = partners.length === 1 ? 'max-w-[420px]' : partners.length === 2 ? 'max-w-[760px] sm:grid-cols-2' : 'max-w-[900px] sm:grid-cols-2 xl:grid-cols-3';
+  const width = partners.length === 1 ? 'max-w-[400px]' : partners.length === 2 ? 'max-w-[820px]' : '';
+  const columns = partners.length === 1 ? '' : partners.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
 
   return (
-    <section aria-label="Đối tác của Song Thanh" className="scroll-mt-24 border-t border-borderBlue bg-[#f8faff] py-12 sm:py-16" id="danh-sach-doi-tac">
-      <Container className="grid gap-8 lg:grid-cols-[minmax(0,0.48fr)_minmax(0,1fr)] lg:gap-14" size="narrow">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.18em] text-primary">Danh bạ đối tác</p>
-          <h2 className="mt-3 max-w-[14ch] font-display text-[clamp(2rem,3vw,2.75rem)] font-semibold leading-[1.14] tracking-[-0.035em] text-secondary">Đối tác của Song Thanh</h2>
-          {partners.length > 1 ? <p className="mt-4 text-sm text-body">{partners.length} đối tác</p> : null}
+    <section aria-label="Đối tác của Song Thanh" className="scroll-mt-24 border-t border-borderBlue bg-white py-10 sm:py-14" id="danh-sach-doi-tac">
+      <Container size="wide">
+        <div className="mb-7 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Danh bạ</p>
+            <h2 className="mt-2 font-display text-[clamp(1.9rem,2.6vw,2.5rem)] font-semibold leading-tight text-secondary">Đối tác của Song Thanh</h2>
+          </div>
+          {partners.length > 1 ? <p className="text-sm text-body">{partners.length} đối tác</p> : null}
         </div>
-        <ul className={`grid w-full gap-x-7 gap-y-8 ${columns}`} data-partner-directory="true" data-partner-count={partners.length}>
-          {partners.map((partner) => <li className="min-w-0" key={partner.id}><DirectoryItem partner={partner} /></li>)}
+        <ul className={`grid gap-4 sm:gap-5 ${width} ${columns}`} data-partner-directory="true" data-partner-count={partners.length}>
+          {partners.map((partner) => <li className="min-w-0" key={partner.id}><PartnerTile partner={partner} /></li>)}
         </ul>
       </Container>
     </section>
