@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicBrandListItem } from '@/types/contracts/public-brands';
 import type { PublicPartner } from '@/types/contracts/publicPartners';
-import { PartnerDirectory } from '@/features/partners/PartnerDirectory';
+import { PartnerShowcase } from '@/features/partners/PartnerShowcase';
 import type {
   BrandsSectionConfig,
   CompanyOverviewSectionConfig,
@@ -499,10 +499,7 @@ export function HomePartnersSection({
           ))}
         </HomeCarousel>
       </Container></section> : null}
-      {partners.length > 0 ? <section className="border-t border-borderBlue py-12" aria-label="Đối tác của Song Thanh"><Container size="wide">
-        <h2 className="type-section-title mb-7 text-secondary">Đối tác của Song Thanh</h2>
-        <PartnerDirectory partners={partners} />
-      </Container></section> : null}
+      <PartnerShowcase className={visibleBrands.length > 0 ? 'border-t border-borderBlue' : ''} partners={partners} />
     </div>
   );
 }

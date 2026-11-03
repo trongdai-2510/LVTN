@@ -19,7 +19,7 @@ import { resolvePublicFileSource } from '@/lib/public-file';
 import type { PublicBannerListItem } from '@/types/contracts/public-banners';
 import type { PublicBrandListItem } from '@/types/contracts/public-brands';
 import type { PublicPartner } from '@/types/contracts/publicPartners';
-import { PartnerDirectory } from '@/features/partners/PartnerDirectory';
+import { PartnerShowcase } from '@/features/partners/PartnerShowcase';
 import { CertificateDirectory } from '@/features/certificates/CertificateDirectory';
 import type { PublicCertificate } from '@/types/contracts/publicCertificates';
 import type { PublicPageContentDetailResponse } from '@/types/contracts/public-page-contents';
@@ -215,10 +215,7 @@ export function CompanyAboutPage({ banners, brands, partners, certificates, comp
           ),
           'about-brands': <HomePartnersSection brands={brands} />,
           'about-certificates': <CertificateDirectory certificates={certificates} />,
-          'about-partners': partners.length > 0 ? <section className="bg-white py-12" aria-label="Đối tác của Song Thanh"><Container size="wide">
-            <h2 className="type-section-title mb-7 text-secondary">Đối tác của Song Thanh</h2>
-            <PartnerDirectory partners={partners} />
-          </Container></section> : null
+          'about-partners': <PartnerShowcase className="border-t border-borderBlue bg-white" partners={partners} />
         }}
       />
     </div>

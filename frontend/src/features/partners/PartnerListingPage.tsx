@@ -7,7 +7,7 @@ import { Container } from '@/components/ui/Container';
 import { HomeHeroBannerCarousel } from '@/features/home/HomeHeroBannerCarousel';
 import { BrandHero } from '@/features/partners/BrandHero';
 import { BrandDirectory } from '@/features/partners/BrandDirectory';
-import { PartnerDirectory } from '@/features/partners/PartnerDirectory';
+import { PartnerShowcase } from '@/features/partners/PartnerShowcase';
 import type { PublicPartner } from '@/types/contracts/publicPartners';
 import { ExtraBlocksRenderer } from '@/features/page-content/ExtraBlocksRenderer';
 import { PageSectionLayout } from '@/features/page-content/PageSectionLayout';
@@ -92,17 +92,7 @@ export function PartnerListingPage({
       </section>
           ),
 
-          'partners-grid': partners.length > 0 ? (
-            <section id="danh-sach-doi-tac" className="scroll-mt-24 border-t border-borderBlue bg-white py-12 lg:py-20">
-              <Container size="wide">
-                <div className="mb-7 space-y-2">
-                  <p className="type-eyebrow text-primary">Cùng đồng hành</p>
-                  <h2 className="type-section-title text-secondary">Đối tác của Song Thanh</h2>
-                </div>
-                <PartnerDirectory partners={partners} />
-              </Container>
-            </section>
-          ) : null,
+          'partners-grid': <PartnerShowcase className="border-t border-borderBlue bg-white" id="danh-sach-doi-tac" partners={partners} />,
 
           'brands-supporting': (
             <ExtraBlocksRenderer blocks={pageContent?.extra_blocks ?? null} containerSize="narrow" />
