@@ -52,13 +52,15 @@ export function AdminFileThumbnail({
   alt,
   className,
   enabled = true,
-  emptyLabel = 'Chưa có preview'
+  emptyLabel = 'Chưa có preview',
+  onDimensions
 }: {
   file: AdminPreviewFile | null;
   alt: string;
   className?: string;
   enabled?: boolean;
   emptyLabel?: string;
+  onDimensions?: (width: number, height: number) => void;
 }) {
   const previewableFile =
     file && file.mime_type.startsWith('image/') ? file : null;
@@ -126,6 +128,7 @@ export function AdminFileThumbnail({
           alt={alt}
           className="h-full w-full object-cover"
           loading="lazy"
+          onLoad={(event) => onDimensions?.(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
           onError={() => setImageFailed(true)}
         />
       ) : loading ? (

@@ -4,6 +4,7 @@ import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 import { useEffect, useState } from 'react';
 
 import Link from 'next/link';
+import { getImageProps } from 'next/image';
 import { useRouter } from 'next/navigation';
 
 import { Container } from '@/components/ui/Container';
@@ -24,6 +25,15 @@ type HeroAction = PublicCtaButton & {
 };
 
 const AUTO_SLIDE_INTERVAL_MS = 5000;
+const OPTIMIZABLE_BANNER_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);
+
+function getBannerImageProps(source: string, mimeType: string | null | undefined, alt: string, width: number, height: number) {
+  if (source.startsWith('/public/files/') && OPTIMIZABLE_BANNER_MIME_TYPES.has(mimeType ?? '')) {
+    return getImageProps({ src: source, alt, width, height, sizes: '100vw', quality: 75 }).props;
+  }
+
+  return { src: source, srcSet: source };
+}
 
 const HERO_TITLE_SIZE_CLASS: Record<BannerTitleSize, string> = {
   small: 'text-[22px] leading-[28px] sm:text-[28px] sm:leading-[34px] md:text-[32px] md:leading-[38px]',
@@ -38,9 +48,15 @@ const PAGE_HERO_TITLE_SIZE_CLASS: Record<BannerTitleSize, string> = {
 };
 
 const HERO_FRAME_CLASS: Record<HeroBannerVariant, string> = {
-  home: 'min-h-[280px] md:min-h-[400px] lg:min-h-[560px]',
-  page: 'min-h-[240px] md:min-h-[340px] lg:min-h-[480px]',
+  home: 'min-h-[420px] sm:min-h-[480px] md:min-h-[520px] lg:min-h-[560px] lg:aspect-[12/5]',
+  page: 'min-h-[420px] sm:min-h-[480px] md:min-h-[520px] lg:min-h-[560px] lg:aspect-[12/5]',
   listing: 'min-h-[220px] sm:min-h-[250px] lg:min-h-[280px]'
+};
+
+const HERO_CONTENT_CLASS: Record<HeroBannerVariant, string> = {
+  home: 'h-full min-h-[420px] sm:min-h-[480px] md:min-h-[520px] lg:min-h-[560px]',
+  page: 'h-full min-h-[420px] sm:min-h-[480px] md:min-h-[520px] lg:min-h-[560px]',
+  listing: 'h-full min-h-[220px] sm:min-h-[250px] lg:min-h-[280px]'
 };
 
 const HERO_OVERLAY_CLASS: Record<HeroBannerVariant, string> = {
@@ -63,7 +79,6 @@ export function HomeHeroBannerCarousel({
   const router = useRouter();
   const companyName = getPublicCompanyName(companyInfo);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [imageRatios, setImageRatios] = useState<Record<string, number>>({});
   const [paused, setPaused] = useState(false);
   const [timerKey, setTimerKey] = useState(0);
   const prefersReducedMotion = usePrefersReducedMotion();
@@ -73,22 +88,12 @@ export function HomeHeroBannerCarousel({
   const listingImageOnlyActions = variant === 'listing' && banners[activeIndex]?.display_mode === 'image_only'
     ? resolveBannerActions(banners[activeIndex])
     : [];
+  const imageOnlyHasMobileArt = banners.every((banner) => Boolean(banner.image_mobile_file));
   const frameClass = useImageOnlyFrame
-    ? variant === 'page'
-      ? 'mx-auto grid w-full max-w-wide grid-cols-1 grid-rows-1'
-      : variant === 'listing'
-        ? 'grid grid-cols-1 grid-rows-1 min-h-[220px] sm:min-h-[250px] lg:min-h-[280px]'
-      : 'grid grid-cols-1 grid-rows-1'
-    : `${HERO_FRAME_CLASS[variant]} ${
-        hasMultipleBanners
-          ? variant === 'home'
-            ? 'max-sm:min-h-[340px]'
-            : 'max-sm:min-h-[300px]'
-          : ''
-      }`;
-  const frameStyle: CSSProperties | undefined = useImageOnlyFrame && variant === 'page'
-    ? { aspectRatio: imageRatios[banners[activeIndex]?.id] ?? 12 / 5 }
-    : undefined;
+    ? variant === 'listing'
+      ? HERO_FRAME_CLASS.listing
+      : `w-full aspect-[12/5] ${imageOnlyHasMobileArt ? 'max-md:aspect-[3/4]' : ''}`
+    : HERO_FRAME_CLASS[variant];
 
   useEffect(() => {
     setActiveIndex((current) => Math.min(current, Math.max(banners.length - 1, 0)));
@@ -150,8 +155,7 @@ export function HomeHeroBannerCarousel({
     <section
       aria-label={ariaLabel}
       aria-roledescription="carousel"
-      className={`relative overflow-hidden ${useImageOnlyFrame ? (variant === 'page' ? 'bg-[#eaf2fd]' : 'bg-white') : 'bg-slate-900'} ${frameClass}`}
-      style={frameStyle}
+      className={`relative overflow-hidden ${useImageOnlyFrame ? 'bg-white' : 'bg-slate-900'} ${frameClass}`}
       onBlur={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onMouseEnter={() => setPaused(true)}
@@ -166,9 +170,6 @@ export function HomeHeroBannerCarousel({
           hasNavButtons={hasMultipleBanners}
           key={banner.id}
           onOpenBanner={openBannerHref}
-          onImageLoad={(ratio) => {
-            setImageRatios((current) => current[banner.id] === ratio ? current : { ...current, [banner.id]: ratio });
-          }}
           variant={variant}
         />
       ))}
@@ -258,7 +259,6 @@ function HeroBannerSlide({
   companyName,
   eager,
   hasNavButtons,
-  onImageLoad,
   onOpenBanner,
   variant
 }: {
@@ -267,13 +267,20 @@ function HeroBannerSlide({
   companyName: string;
   eager: boolean;
   hasNavButtons: boolean;
-  onImageLoad: (ratio: number) => void;
   onOpenBanner: (href: string, linkType: PublicBannerListItem['link_type']) => void;
   variant: HeroBannerVariant;
 }) {
   const heroImageSource = resolvePublicFileSource(banner.image_file);
   const heroMobileImageSource = resolvePublicFileSource(banner.image_mobile_file ?? null);
   const headline = banner.title?.trim() || companyName;
+  const imageSource = heroImageSource || heroMobileImageSource;
+  const imageFile = heroImageSource ? banner.image_file : banner.image_mobile_file;
+  const imageProps = imageSource
+    ? getBannerImageProps(imageSource, imageFile?.mime_type, headline, heroImageSource ? 1920 : 750, heroImageSource ? 800 : 1000)
+    : null;
+  const mobileImageSrcSet = heroMobileImageSource
+    ? getBannerImageProps(heroMobileImageSource, banner.image_mobile_file?.mime_type, headline, 750, 1000).srcSet
+    : null;
   const TitleTag = variant === 'listing' ? 'h2' : 'h1';
   const heroHref = resolveBannerHref(banner);
   const heroTitleSize = resolveBannerTitleSize(banner.title_size);
@@ -325,9 +332,7 @@ function HeroBannerSlide({
       aria-label={clickable ? `Mở banner: ${headline}` : undefined}
       className={[
         'transition-opacity duration-700 motion-reduce:transition-none',
-        isImageOnly
-          ? `col-start-1 row-start-1 relative ${variant === 'page' || variant === 'listing' ? 'h-full' : ''}`
-          : 'absolute inset-0',
+        'absolute inset-0',
         active ? 'z-10 opacity-100' : 'z-0 opacity-0 pointer-events-none',
         clickable ? 'cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/70' : ''
       ].join(' ')}
@@ -337,37 +342,22 @@ function HeroBannerSlide({
       tabIndex={clickable ? 0 : undefined}
       title={clickable ? `Mở banner: ${headline}` : undefined}
     >
-      {heroMobileImageSource || heroImageSource ? (
+      {imageProps ? (
         <picture>
-          {heroMobileImageSource ? <source media="(max-width: 767px)" srcSet={heroMobileImageSource} /> : null}
-          {heroImageSource ? <source media="(min-width: 768px)" srcSet={heroImageSource} /> : null}
+          {mobileImageSrcSet ? <source media="(max-width: 767px)" sizes="100vw" srcSet={mobileImageSrcSet} /> : null}
           <img
+            {...imageProps}
             alt={headline}
-            className={
-              isImageOnly
-                ? variant === 'page'
-                  ? 'absolute inset-0 h-full w-full object-contain'
-                  : variant === 'listing'
-                    ? 'absolute inset-0 h-full w-full object-cover'
-                  : 'block h-auto w-full'
-                : 'absolute inset-0 h-full w-full object-cover'
-            }
+            className="absolute inset-0 h-full w-full object-cover"
             decoding={eager ? 'sync' : 'async'}
             fetchPriority={eager ? 'high' : 'auto'}
             loading={eager ? 'eager' : 'lazy'}
-            onLoad={(event) => {
-              const image = event.currentTarget;
-              if (isImageOnly && variant === 'page' && image.naturalWidth > 0 && image.naturalHeight > 0) {
-                onImageLoad(image.naturalWidth / image.naturalHeight);
-              }
-            }}
-            src={heroImageSource || heroMobileImageSource || ''}
           />
         </picture>
       ) : null}
       {!isImageOnly ? <div className={`absolute inset-0 ${HERO_OVERLAY_CLASS[variant]}`} /> : null}
       {active && !isImageOnly ? (
-        <Container className={`relative z-10 flex flex-col ${HERO_FRAME_CLASS[variant]} ${verticalClass}${hasNavButtons ? ` ${variant === 'listing' ? 'max-sm:pb-12' : `max-sm:pb-20 ${variant === 'home' ? 'max-sm:min-h-[340px]' : 'max-sm:min-h-[300px]'}`}` : ''}`}>
+        <Container className={`relative z-10 flex flex-col ${HERO_CONTENT_CLASS[variant]} ${verticalClass}${hasNavButtons && contentPosition.startsWith('bot-') ? ` ${variant === 'listing' ? 'max-sm:pb-12' : 'max-sm:pb-20'}` : ''}`}>
           <div className={`flex flex-col gap-4 ${horizontalClass}`}>
             <TitleTag
               className={`max-w-full sm:max-w-[600px] lg:max-w-[760px] text-balance font-display font-bold tracking-[0] ${titleSizeClass}`}

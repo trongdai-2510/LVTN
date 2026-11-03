@@ -618,6 +618,7 @@ function BrandHero({ brandDetail, brandProducts = [], tone, archetype }: BrandDe
   const { brand, brand_page: page, hero_banner: heroBanner } = brandDetail;
   const heroImageSource = resolvePublicImageSource(heroBanner?.image_file);
   const mobileHeroImageSource = resolvePublicImageSource(heroBanner?.image_mobile_file) ?? heroImageSource;
+  const hasMobileHeroImage = Boolean(heroBanner?.image_mobile_file);
   const eyebrowColor = readableHeroColor(page.hero_eyebrow_color, '#004ab4');
   const titleColor = readableHeroColor(page.hero_title_color, '#0b1c30');
   const excerptColor = readableHeroColor(page.hero_excerpt_color, '#334155');
@@ -639,19 +640,21 @@ function BrandHero({ brandDetail, brandProducts = [], tone, archetype }: BrandDe
         <section className="bg-white">
           <h1 className="sr-only">{page.title}</h1>
           {bannerImageHref && bannerActions.length === 0 ? (
-            <BrandBannerLink className="block focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" href={bannerImageHref} label={`Mở banner ${heroBanner.title?.trim() || page.title}`}>
+            <BrandBannerLink className={`relative block aspect-[12/5] w-full bg-white ${hasMobileHeroImage ? 'max-md:aspect-[3/4]' : ''} focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`} href={bannerImageHref} label={`Mở banner ${heroBanner.title?.trim() || page.title}`}>
               <picture>
-                {mobileHeroImageSource ? <source media="(max-width: 767px)" srcSet={mobileHeroImageSource} /> : null}
+                {hasMobileHeroImage && mobileHeroImageSource ? <source media="(max-width: 767px)" srcSet={mobileHeroImageSource} /> : null}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img alt={heroBanner.title?.trim() || page.title} className="block h-auto w-full" decoding="async" src={heroImageSource} />
+                <img alt={heroBanner.title?.trim() || page.title} className="absolute inset-0 h-full w-full object-cover" decoding="async" src={heroImageSource} />
               </picture>
             </BrandBannerLink>
           ) : (
-            <picture>
-              {mobileHeroImageSource ? <source media="(max-width: 767px)" srcSet={mobileHeroImageSource} /> : null}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img alt={heroBanner.title?.trim() || page.title} className="block h-auto w-full" decoding="async" src={heroImageSource} />
-            </picture>
+            <div className={`relative aspect-[12/5] w-full bg-white ${hasMobileHeroImage ? 'max-md:aspect-[3/4]' : ''}`}>
+              <picture>
+                {hasMobileHeroImage && mobileHeroImageSource ? <source media="(max-width: 767px)" srcSet={mobileHeroImageSource} /> : null}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img alt={heroBanner.title?.trim() || page.title} className="absolute inset-0 h-full w-full object-cover" decoding="async" src={heroImageSource} />
+              </picture>
+            </div>
           )}
           {bannerActions.length > 0 ? (
             <Container className="flex flex-wrap gap-3 py-4" size="wide">
