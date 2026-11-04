@@ -6,6 +6,7 @@ import {
   VARIANT_ATTRIBUTE_TABLE,
   type VariantAttributeRecord
 } from '../product-variant/product-variant.types';
+import { syncVariantGroupReferences } from '../product-variant/variantGroupReferences';
 import type { ImportColumnMappingConfig } from './import-column-mapping';
 import {
   CONFLICT_RESOLUTION_TABLE,
@@ -1618,7 +1619,16 @@ export class ImportWorkspaceRepository {
       payload.public_price_amount = input.public_price_amount;
     }
     if (Object.keys(payload).length === 1) return;
+    const current = await db(PRODUCT_VARIANT_TABLE)
+      .where({ id })
+      .whereNull('deleted_at')
+      .forUpdate()
+      .first<{ product_group_id: string }>('product_group_id');
+    if (!current) return;
     await db(PRODUCT_VARIANT_TABLE).where({ id }).whereNull('deleted_at').update(payload);
+    if (typeof payload.product_group_id === 'string' && payload.product_group_id !== current.product_group_id) {
+      await syncVariantGroupReferences(db, id, payload.product_group_id);
+    }
   }
 
   async markPendingProductGroupApplied(id: string, officialId: string, db: Knex.Transaction): Promise<void> {

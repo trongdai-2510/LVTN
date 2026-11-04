@@ -91,6 +91,8 @@ Mỗi hàng đọc từ phía bản ghi con: `1` nghĩa là cột FK `NOT NULL`;
 | 83 | `variant_attribute` | `product_variant_id` | `product_variant.id` | 1 | CASCADE |
 | 84 | `variant_spec` | `variant_spec_group_id` | `variant_spec_group.id` | 1 | CASCADE |
 | 85 | `variant_spec_group` | `product_variant_id` | `product_variant.id` | 1 | CASCADE |
+| 86 | `product_highlight_spec` | `product_variant_id`, `product_group_id` | `product_variant(id, product_group_id)` | 0..1 | NO ACTION, hoãn đến cuối giao dịch |
+| 87 | `product_image` | `product_variant_id`, `product_group_id` | `product_variant(id, product_group_id)` | 0..1 | NO ACTION, hoãn đến cuối giao dịch |
 
 ## Ràng buộc vượt quy tắc FK đơn lẻ
 
@@ -98,4 +100,5 @@ Mỗi hàng đọc từ phía bản ghi con: `1` nghĩa là cột FK `NOT NULL`;
 - `brand_page.brand_id` có unique một phần `WHERE deleted_at IS NULL`: mỗi thương hiệu tối đa một trang chưa lưu trữ.
 - `company_info` có unique một phần trên hằng số `1` khi `deleted_at IS NULL`: tối đa một hồ sơ công ty chưa lưu trữ.
 - Các bảng nối `admin_role_permission`, `product_group_tag`, `service_product_group`, `project_product_group`, `brand_page_featured_product_group` hiện thực hóa quan hệ nhiều–nhiều. `admin_user_role` là ngoại lệ 1:N do unique ở phía user.
-- `audit_log.actor_id`, các cột số nguyên `created_by`/`updated_by`/`approved_by`/`assigned_to`/`uploaded_by`, `file_usage.entity_id`, `import_mapping.official_id`, `product_highlight_spec.source_id` và `data_conflict.entity_id` không có FK vật lý cố định đến đối tượng được biểu thị. Không thêm chúng vào 85 FK.
+- Hai FK ghép ở hàng 86–87 không tạo thêm một loại quan hệ nghiệp vụ: chúng bảo đảm nhóm trên ảnh/thông số bằng nhóm hiện tại của biến thể khi `product_variant_id` khác `NULL`.
+- `audit_log.actor_id`, các cột số nguyên `created_by`/`updated_by`/`approved_by`/`assigned_to`/`uploaded_by`, `file_usage.entity_id`, `import_mapping.official_id`, `product_highlight_spec.source_id` và `data_conflict.entity_id` không có FK vật lý cố định đến đối tượng được biểu thị. Không thêm chúng vào 87 FK.

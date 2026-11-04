@@ -43,9 +43,26 @@ async function repair() {
         AND highlight.product_group_id <> variant.product_group_id
       ORDER BY highlight.id
     `)).rows;
+    const archivedImages = (await db.query(`
+      SELECT image.*, variant.product_group_id AS target_group_id
+      FROM product_image AS image
+      JOIN product_variant AS variant ON variant.id = image.product_variant_id
+      WHERE image.deleted_at IS NOT NULL
+        AND image.product_group_id <> variant.product_group_id
+      ORDER BY image.id
+    `)).rows;
+    const archivedHighlightRows = (await db.query(`
+      SELECT highlight.*, variant.product_group_id AS target_group_id
+      FROM product_highlight_spec AS highlight
+      JOIN product_variant AS variant ON variant.id = highlight.product_variant_id
+      WHERE highlight.deleted_at IS NOT NULL
+        AND highlight.product_group_id <> variant.product_group_id
+      ORDER BY highlight.id
+    `)).rows;
 
-    if (images.length === 0 && highlights.length === 0) {
-      console.log('No active group/variant mismatches.');
+    if (images.length === 0 && highlights.length === 0 &&
+        archivedImages.length === 0 && archivedHighlightRows.length === 0) {
+      console.log('No group/variant mismatches.');
       await db.query('ROLLBACK');
       return;
     }
@@ -153,7 +170,9 @@ async function repair() {
       duplicate_images_to_archive: duplicateIds.length,
       highlight_mismatches: highlights.length,
       highlights_to_move_and_relink: mappedHighlights.length,
-      highlights_to_archive: archivedHighlights.length
+      highlights_to_archive: archivedHighlights.length,
+      archived_images_to_align: archivedImages.length,
+      archived_highlights_to_align: archivedHighlightRows.length
     };
     console.log(JSON.stringify(summary));
     if (!apply) {
@@ -166,7 +185,9 @@ async function repair() {
     mkdirSync(backupDir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
     const backupPath = path.join(backupDir, `variantLinkBackup${stamp}.json`);
-    writeFileSync(backupPath, JSON.stringify({ summary, images, highlights, fileUsages }, null, 2), {
+    writeFileSync(backupPath, JSON.stringify({
+      summary, images, highlights, archivedImages, archivedHighlightRows, fileUsages
+    }, null, 2), {
       flag: 'wx'
     });
     console.log(`Backup: ${backupPath}`);
@@ -211,16 +232,37 @@ async function repair() {
       `, [row.id]);
       if (archived.rowCount !== 1) throw new Error(`Highlight changed during archive: ${row.id}`);
     }
+    const alignedArchivedImages = await db.query(`
+      UPDATE product_image AS image
+      SET product_group_id = variant.product_group_id
+      FROM product_variant AS variant
+      WHERE image.product_variant_id = variant.id
+        AND image.deleted_at IS NOT NULL
+        AND image.product_group_id <> variant.product_group_id
+    `);
+    if (alignedArchivedImages.rowCount !== summary.archived_images_to_align) {
+      throw new Error('Archived image alignment count changed.');
+    }
+    const alignedArchivedHighlights = await db.query(`
+      UPDATE product_highlight_spec AS highlight
+      SET product_group_id = variant.product_group_id
+      FROM product_variant AS variant
+      WHERE highlight.product_variant_id = variant.id
+        AND highlight.deleted_at IS NOT NULL
+        AND highlight.product_group_id <> variant.product_group_id
+    `);
+    if (alignedArchivedHighlights.rowCount !== summary.archived_highlights_to_align) {
+      throw new Error('Archived highlight alignment count changed.');
+    }
 
     const remaining = (await db.query(`
       SELECT
         (SELECT count(*)::int FROM product_image AS image JOIN product_variant AS variant
-          ON variant.id = image.product_variant_id WHERE image.deleted_at IS NULL
-          AND image.product_group_id <> variant.product_group_id) AS images,
+          ON variant.id = image.product_variant_id
+          WHERE image.product_group_id <> variant.product_group_id) AS images,
         (SELECT count(*)::int FROM product_highlight_spec AS highlight
           JOIN product_variant AS variant ON variant.id = highlight.product_variant_id
-          WHERE highlight.deleted_at IS NULL
-          AND highlight.product_group_id <> variant.product_group_id) AS highlights
+          WHERE highlight.product_group_id <> variant.product_group_id) AS highlights
     `)).rows[0];
     if (remaining.images !== 0 || remaining.highlights !== 0) {
       throw new Error(`Mismatches remain: ${JSON.stringify(remaining)}`);

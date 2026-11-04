@@ -2,7 +2,7 @@
 
 **Ngày đối chiếu:** 04/11/2026. **Nguồn:** catalog PostgreSQL local kết nối qua `api/.env`; kiểm lại với `api/migrations/` và `database/ddl/schema.sql`. Đây là bản chụp kỹ thuật, cần người làm luận văn xác nhận phạm vi trước khi dùng làm đặc tả nghiệp vụ.
 
-Có **60 bảng ứng dụng**, **2 bảng metadata Knex**, **715 cột** và **85 khóa ngoại**. Danh sách cột dưới đây giữ đúng thứ tự trong DB. `?` sau tên cột nghĩa là cột cho phép `NULL`; không có `?` nghĩa là `NOT NULL`. FK ghi nguyên quy tắc `ON DELETE` từ PostgreSQL. Các ràng buộc `UNIQUE`/`CHECK` và kiểu dữ liệu cần xem thêm trong `database/ddl/schema.sql` hoặc catalog DB.
+Có **60 bảng ứng dụng**, **2 bảng metadata Knex**, **715 cột** và **87 khóa ngoại**. Danh sách cột dưới đây giữ đúng thứ tự trong DB. `?` sau tên cột nghĩa là cột cho phép `NULL`; không có `?` nghĩa là `NOT NULL`. FK ghi nguyên quy tắc `ON DELETE` từ PostgreSQL. Các ràng buộc `UNIQUE`/`CHECK` và kiểu dữ liệu cần xem thêm trong `database/ddl/schema.sql` hoặc catalog DB.
 
 ## 60 bảng ứng dụng
 
@@ -392,6 +392,7 @@ FK:
 
 - `FOREIGN KEY (product_group_id) REFERENCES product_group(id) ON DELETE CASCADE`.
 - `FOREIGN KEY (product_variant_id) REFERENCES product_variant(id) ON DELETE CASCADE`.
+- `FOREIGN KEY (product_variant_id, product_group_id) REFERENCES product_variant(id, product_group_id) DEFERRABLE INITIALLY DEFERRED`.
 
 ### `product_image`
 
@@ -404,6 +405,7 @@ FK:
 - `FOREIGN KEY (file_id) REFERENCES file_metadata(id) ON DELETE RESTRICT`.
 - `FOREIGN KEY (product_group_id) REFERENCES product_group(id) ON DELETE CASCADE`.
 - `FOREIGN KEY (product_variant_id) REFERENCES product_variant(id) ON DELETE RESTRICT`.
+- `FOREIGN KEY (product_variant_id, product_group_id) REFERENCES product_variant(id, product_group_id) DEFERRABLE INITIALLY DEFERRED`.
 
 ### `product_spec`
 

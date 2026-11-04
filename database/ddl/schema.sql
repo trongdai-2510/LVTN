@@ -1945,6 +1945,14 @@ ALTER TABLE ONLY public.product_variant
 
 
 --
+-- Name: product_variant uq_product_variant_id_group; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_variant
+    ADD CONSTRAINT uq_product_variant_id_group UNIQUE (id, product_group_id);
+
+
+--
 -- Name: project_gallery project_gallery_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4219,6 +4227,14 @@ ALTER TABLE ONLY public.product_highlight_spec
 
 
 --
+-- Name: product_highlight_spec fk_product_highlight_spec_variant_group; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_highlight_spec
+    ADD CONSTRAINT fk_product_highlight_spec_variant_group FOREIGN KEY (product_variant_id, product_group_id) REFERENCES public.product_variant(id, product_group_id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
 -- Name: product_image fk_product_image_file; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4240,6 +4256,14 @@ ALTER TABLE ONLY public.product_image
 
 ALTER TABLE ONLY public.product_image
     ADD CONSTRAINT fk_product_image_variant FOREIGN KEY (product_variant_id) REFERENCES public.product_variant(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: product_image fk_product_image_variant_group; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_image
+    ADD CONSTRAINT fk_product_image_variant_group FOREIGN KEY (product_variant_id, product_group_id) REFERENCES public.product_variant(id, product_group_id) DEFERRABLE INITIALLY DEFERRED;
 
 
 --

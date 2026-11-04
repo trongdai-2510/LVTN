@@ -67,9 +67,9 @@ Ký hiệu `1` ở phía bản ghi con nghĩa là FK `NOT NULL`; `0..1` nghĩa l
 | `spec_group` – `product_group`; `product_spec` – `spec_group` | Mỗi nhóm thông số `1` nhóm sản phẩm; mỗi thông số `1` nhóm thông số. | Cấu trúc thông số dùng chung của nhóm. |
 | `variant_spec_group` – `product_variant`; `variant_spec` – `variant_spec_group` | Mỗi nhóm thông số biến thể `1` biến thể; mỗi thông số `1` nhóm thông số biến thể. | Khác `variant_attribute`; cả hai đang được code/API dùng. |
 | `variant_attribute` – `product_variant` | Thuộc tính `1` biến thể. | Không gộp với `variant_spec` nếu viết theo DB hiện tại. |
-| `product_image` – `product_group`/`product_variant`/`file_metadata` | Ảnh `1` nhóm, `0..1` biến thể, `1` tệp. | FK đơn lẻ không tự chứng minh biến thể thuộc đúng nhóm; code phải kiểm. |
+| `product_image` – `product_group`/`product_variant`/`file_metadata` | Ảnh `1` nhóm, `0..1` biến thể, `1` tệp. | FK ghép `(product_variant_id, product_group_id)` hiện bảo đảm ảnh gắn biến thể nằm cùng nhóm với biến thể. |
 | `technical_document` – `product_group`/`product_variant`/`file_metadata` | Tài liệu `1` nhóm, `0..1` biến thể, `1` tệp. | `file_id` bắt buộc. |
-| `product_highlight_spec` – `product_group`/`product_variant` | Thông số nổi bật `1` nhóm, `0..1` biến thể. | `source_type`/`source_id` chọn nguồn đa hình, `source_id` không có FK cố định. |
+| `product_highlight_spec` – `product_group`/`product_variant` | Thông số nổi bật `1` nhóm, `0..1` biến thể. | FK ghép bảo đảm cùng nhóm với biến thể; `source_type`/`source_id` vẫn là nguồn đa hình, `source_id` không có FK cố định. |
 | `product_group` – `tag` | M:N qua `product_group_tag`. | Không vẽ bảng nối thành loại thực thể nếu dùng hình thoi quan hệ. |
 
 ### Nội dung website
@@ -122,7 +122,7 @@ Ký hiệu `1` ở phía bản ghi con nghĩa là FK `NOT NULL`; `0..1` nghĩa l
 
 ## 5. Trạng thái xác minh
 
-- Tên bảng, cột nullable, PK và 85 FK: catalog PostgreSQL local đã đối chiếu với `database/ddl/schema.sql` và 51/51 migration; danh mục tại `tasks/erdRelations.md`.
+- Tên bảng, cột nullable, PK và 87 FK: catalog PostgreSQL local đã đối chiếu với `database/ddl/schema.sql` và 52/52 migration; danh mục tại `tasks/erdRelations.md`.
 - `admin_user_role` unique một vai trò tối đa: `database/ddl/schema.sql` có `uq_admin_user_role_single_role`; API `admin-user.service.ts` yêu cầu đúng một vai trò khi tạo/cập nhật.
 - `brand_page` unique có điều kiện: `uq_brand_page_brand_active` chỉ áp dụng `deleted_at IS NULL`.
 - Thông số nhóm/biến thể, đối tác/chứng nhận và nguồn trang thương hiệu có truy vấn API và sử dụng ở frontend hiện tại; không loại chỉ vì bảng local rỗng.

@@ -13,6 +13,7 @@ import {
   assertLockedProductGroupReadyForPublishedVariant,
   lockUsableProductGroupForChildMutation
 } from '../product-group/productGroupTransactionGuard';
+import { syncVariantGroupReferences } from './variantGroupReferences';
 import {
   FILE_METADATA_TABLE,
   FILE_USAGE_TABLE,
@@ -334,8 +335,8 @@ export class ProductVariantRepository {
       if (Object.keys(patch).length > 0) {
         await trx(PRODUCT_VARIANT_TABLE).where({ id }).whereNull('deleted_at').update(patch);
       }
-      if (typeof input.product_group_id !== 'undefined') {
-        await this.updateVariantDependentsProductGroup(trx, id, input.product_group_id);
+      if (typeof input.product_group_id !== 'undefined' && input.product_group_id !== existing.product_group_id) {
+        await syncVariantGroupReferences(trx, id, input.product_group_id);
       }
       if (typeof imageFileId !== 'undefined') {
         await this.syncPrimaryVariantImageInTransaction(trx, {
@@ -667,21 +668,6 @@ export class ProductVariantRepository {
         'image_file_id'
       ]
     );
-  }
-
-  private async updateVariantDependentsProductGroup(
-    trx: Knex.Transaction,
-    productVariantId: string,
-    productGroupId: string
-  ): Promise<void> {
-    await trx(PRODUCT_IMAGE_TABLE)
-      .where({ product_variant_id: productVariantId })
-      .whereNull('deleted_at')
-      .update({ product_group_id: productGroupId });
-    await trx(PRODUCT_HIGHLIGHT_SPEC_TABLE)
-      .where({ product_variant_id: productVariantId })
-      .whereNull('deleted_at')
-      .update({ product_group_id: productGroupId });
   }
 
   private async syncProductImageFileUsage(

@@ -11,6 +11,7 @@ import { normalizeWorkbookHeader } from '../src/modules/import-workspace/import-
 import { readWorkbookFixture } from '../src/modules/import-workspace/intake/workbook-reader';
 import type { ParsedWorkbookRow } from '../src/modules/import-workspace/import-workspace.types';
 import { extractImportedVariantAttributesFromCells } from '../src/modules/import-workspace/variant-spec-sync';
+import { syncVariantGroupReferences } from '../src/modules/product-variant/variantGroupReferences';
 import {
   BRAND_TABLE,
   FILE_METADATA_TABLE,
@@ -1416,6 +1417,9 @@ async function ensureProductVariant(
 
     if (Object.keys(patch).length > 0) {
       await trx(PRODUCT_VARIANT_TABLE).where({ id: existing.id }).update(patch);
+      if (typeof patch.product_group_id === 'string') {
+        await syncVariantGroupReferences(trx, existing.id, patch.product_group_id);
+      }
       const refreshed = await loadProductVariantById(trx, existing.id);
       return { action: 'update', record: refreshed };
     }

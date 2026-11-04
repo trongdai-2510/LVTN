@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
-import { ProductVariantRepository } from '../../src/modules/product-variant/product-variant.repository';
+import { syncVariantGroupReferences } from '../../src/modules/product-variant/variantGroupReferences';
 
 type ChildRow = {
   product_variant_id: string;
@@ -9,7 +9,7 @@ type ChildRow = {
   deleted_at: Date | null;
 };
 
-test('moving a variant also moves its active images and highlights', async () => {
+test('moving a variant also moves active and archived images and highlights', async () => {
   const imageRows: ChildRow[] = [
     { product_variant_id: 'moving', product_group_id: 'old', deleted_at: null },
     { product_variant_id: 'moving', product_group_id: 'old', deleted_at: new Date() },
@@ -27,20 +27,19 @@ test('moving a variant also moves its active images and highlights', async () =>
 
   const transaction = (table: string) => {
     let variantId: string | null = null;
-    let activeOnly = false;
+    let excludedGroup: string | null = null;
     return {
       where(filter: { product_variant_id: string }) {
         variantId = filter.product_variant_id;
         return this;
       },
-      whereNull(field: string) {
-        assert.equal(field, 'deleted_at');
-        activeOnly = true;
+      whereNot(filter: { product_group_id: string }) {
+        excludedGroup = filter.product_group_id;
         return this;
       },
       async update(patch: { product_group_id: string }) {
         const matching = (rowsByTable[table] ?? []).filter((row) =>
-          row.product_variant_id === variantId && (!activeOnly || row.deleted_at === null)
+          row.product_variant_id === variantId && row.product_group_id !== excludedGroup
         );
         for (const row of matching) row.product_group_id = patch.product_group_id;
         return matching.length;
@@ -48,16 +47,8 @@ test('moving a variant also moves its active images and highlights', async () =>
     };
   };
 
-  const repository = new ProductVariantRepository({} as never);
-  const move = repository as unknown as {
-    updateVariantDependentsProductGroup: (
-      trx: typeof transaction,
-      variantId: string,
-      productGroupId: string
-    ) => Promise<void>;
-  };
-  await move.updateVariantDependentsProductGroup(transaction, 'moving', 'new');
+  await syncVariantGroupReferences(transaction as never, 'moving', 'new');
 
-  assert.deepEqual(imageRows.map((row) => row.product_group_id), ['new', 'old', 'old']);
-  assert.deepEqual(highlightRows.map((row) => row.product_group_id), ['new', 'old', 'old']);
+  assert.deepEqual(imageRows.map((row) => row.product_group_id), ['new', 'new', 'old']);
+  assert.deepEqual(highlightRows.map((row) => row.product_group_id), ['new', 'new', 'old']);
 });
