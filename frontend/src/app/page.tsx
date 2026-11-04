@@ -5,7 +5,7 @@ import { getPublicBanners } from '@/lib/api/public-banners';
 import { getAllPublicBrands } from '@/lib/api/public-brands';
 import { getPublicPartners } from '@/lib/api/publicPartners';
 import { getPublicCertificates } from '@/lib/api/publicCertificates';
-import { CertificateDirectory } from '@/features/certificates/CertificateDirectory';
+import { HomeCertificates } from '@/features/certificates/HomeCertificates';
 import { DEFAULT_HOME_LAYOUT, getPublicHomePage } from '@/lib/api/public-home-page';
 import { getPublicPageContentBySlug } from '@/lib/api/public-page-contents';
 import { getPublicProductCategories } from '@/lib/api/public-product-categories';
@@ -222,7 +222,7 @@ export default async function HomePage() {
                 titleOverride={section.title_override}
                 config={configOf(section)}
               />
-              <CertificateDirectory certificates={certificatesResponse.items} />
+              <HomeCertificates certificates={certificatesResponse.items} />
               </Fragment>
             );
           case 'featured_products':
