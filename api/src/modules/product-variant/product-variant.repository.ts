@@ -335,7 +335,7 @@ export class ProductVariantRepository {
         await trx(PRODUCT_VARIANT_TABLE).where({ id }).whereNull('deleted_at').update(patch);
       }
       if (typeof input.product_group_id !== 'undefined') {
-        await this.updateVariantImagesProductGroup(trx, id, input.product_group_id);
+        await this.updateVariantDependentsProductGroup(trx, id, input.product_group_id);
       }
       if (typeof imageFileId !== 'undefined') {
         await this.syncPrimaryVariantImageInTransaction(trx, {
@@ -669,12 +669,16 @@ export class ProductVariantRepository {
     );
   }
 
-  private async updateVariantImagesProductGroup(
+  private async updateVariantDependentsProductGroup(
     trx: Knex.Transaction,
     productVariantId: string,
     productGroupId: string
   ): Promise<void> {
     await trx(PRODUCT_IMAGE_TABLE)
+      .where({ product_variant_id: productVariantId })
+      .whereNull('deleted_at')
+      .update({ product_group_id: productGroupId });
+    await trx(PRODUCT_HIGHLIGHT_SPEC_TABLE)
       .where({ product_variant_id: productVariantId })
       .whereNull('deleted_at')
       .update({ product_group_id: productGroupId });
