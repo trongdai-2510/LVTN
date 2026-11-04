@@ -1,14 +1,20 @@
 # Xác định lại thực thể và quan hệ cho mục 3.1.1.1
 
-**Ngày chụp hiện trạng:** 04/11/2026. **Nguồn:** `D:\Song_thanh_3_1_1_1.zip` (Chương 1–2 và Hình 3-1 chỉ để xác định phạm vi), PostgreSQL local qua cấu hình API, `database/ddl/schema.sql`, migration và code API/website/admin đang có. Không dùng tài liệu `docs/` cũ hoặc bản Word khác trong Downloads. Theo `AGENTS.md`, tài liệu này là **đề xuất có đối chiếu**, chỉ trở thành đặc tả luận văn sau khi sinh viên xác nhận. Không thay đổi schema hay code.
+**Ngày chụp hiện trạng:** 04/11/2026. **Nguồn:** `D:\Song_thanh_3_1_1_1.zip` (Chương 1–2 và Hình 3-1 chỉ để xác định phạm vi), PostgreSQL local qua cấu hình API, `database/ddl/schema.sql`, migration và code API/website/admin đang có. Không dùng tài liệu `docs/` cũ hoặc bản Word khác trong Downloads. Theo `AGENTS.md`, tài liệu này là **bản kiểm kê và đề xuất để thảo luận**, chỉ trở thành đặc tả luận văn sau khi sinh viên xác nhận. Không thay đổi schema hay code.
+
+## Đính chính phạm vi kết luận
+
+**50 không phải số thực thể ERD đã chốt.** Đó là kết quả của một cách phân loại 60 bảng ứng dụng thành 50 đối tượng có dữ liệu riêng, 6 bảng quan hệ và 4 bảng hỗ trợ. Kiểm kê này bảo đảm không bỏ sót bảng khi chuyển sang lược đồ luận lý/vật lý, nhưng **không chứng minh mọi đối tượng trong nhóm 50 đều phải là hộp ở mức ý niệm**, cũng không chứng minh 31 hộp cũ đều phải giữ. Việc chọn hộp của Hình 3-1 cần nhất quán theo phạm vi Chương 1–2 và định nghĩa mức ý niệm, rồi giải thích rõ đối tượng nào được thể hiện ở mức luận lý/vật lý.
+
+Hình 31 hộp hiện tại có các cặp quan hệ đã vẽ dựa trên FK hoặc bảng nối, nhưng cách chọn quan hệ chưa nhất quán: `admin_user` nối riêng với `page_content` qua liên hệ logic trong khi nhiều bảng khác có cột người thao tác tương tự; `file_metadata` chỉ được nối với vài bảng có FK tệp; nhập Excel có bản tạm nhưng thiếu dữ liệu nguồn và xung đột. **Không sửa hình bằng cách thêm lần lượt 19 hộp**; trước hết phải chọn mức mô hình và quy tắc thể hiện đường nối. Đường logic cần có chú giải riêng, không đặt lẫn với đường FK vật lý như thể chúng có cùng ràng buộc.
 
 ## 1. Tiêu chí chọn thực thể
 
 Mục 3.1.1.1 cần mô tả các đối tượng dữ liệu tồn tại bền vững mà người dùng hoặc hệ thống đọc, quản lý hay dùng trong các quy trình ở Chương 1–2. Một thực thể có thể phụ thuộc thực thể khác nhưng vẫn cần mô tả nếu nó có định danh, thuộc tính và ý nghĩa riêng (dòng báo giá, biến thể tạm, ghi chú nội bộ, thông số). **Bảng không tự động đồng nghĩa với thực thể**: bảng nối thuần quan hệ được biểu diễn bằng liên kết; bảng phiên đăng nhập, chỉ mục sử dụng tệp và bảng đếm ngày được giải thích ở mức triển khai. Hai bảng Knex thuộc công cụ migration.
 
-Theo tiêu chí này, mô hình hiện tại có **50 loại thực thể dữ liệu, 6 bảng hiện thực hóa quan hệ, 4 bảng hỗ trợ triển khai và 2 bảng Knex**: tổng đúng 62 bảng vật lý. Con số 50 là kết quả của quy tắc phân loại vừa nêu, không phải yêu cầu cố định của trường. Đây là danh sách để em hiểu và vẽ lại ERD; chưa phải hình cần chèn vào Word. Mọi nhóm dưới đây phải có đường chuyển sang lược đồ quan hệ.
+Theo tiêu chí kiểm kê này, **60 bảng ứng dụng** được tạm chia thành **50 đối tượng dữ liệu có ý nghĩa riêng, 6 bảng hiện thực hóa quan hệ và 4 bảng hỗ trợ triển khai**; thêm 2 bảng Knex thành 62 bảng vật lý. Đây là danh sách **ứng viên để xét ở ERD ý niệm**, không phải chỉ dẫn vẽ đúng 50 hộp. Mọi bảng vẫn phải có vị trí trong lược đồ quan hệ hoặc phần mô tả mức vật lý.
 
-| Miền | Số | Loại thực thể có trên mô hình ý niệm |
+| Miền | Số | Đối tượng ứng viên cần xét ở mức ý niệm |
 | --- | ---: | --- |
 | Quản trị và truy vết | 4 | `admin_user`, `admin_role`, `admin_permission`, `audit_log` |
 | Tệp | 1 | `file_metadata` |
@@ -19,7 +25,7 @@ Theo tiêu chí này, mô hình hiện tại có **50 loại thực thể dữ l
 
 ### So với 31 thực thể cũ
 
-Giữ cả **31/31 loại thực thể** trong hình cũ vì đều có vai trò thực tế và không có tên nào là bảng giả. Thêm **19 loại** theo cùng tiêu chí:
+Cả **31/31 nhãn** trong hình cũ đều là tên bảng có thật, nhưng điều đó **không tự quyết định** phải giữ cả 31 ở ERD ý niệm. Có thêm **19 đối tượng cần cân nhắc** khi kiểm tra độ bao phủ toàn hệ thống; chúng không mặc nhiên là 19 hộp phải thêm vào hình:
 
 | Miền | Loại bổ sung | Lý do |
 | --- | --- | --- |
@@ -32,7 +38,7 @@ Giữ cả **31/31 loại thực thể** trong hình cũ vì đều có vai trò
 
 Nếu GVHD muốn ERD ý niệm gọn hơn, có thể chuyển một số đối tượng vận hành như `redirect_rule` hoặc `import_mapping_profile` sang phần lược đồ luận lý. Khi đó phải ghi tiêu chí rút gọn và vẫn liệt kê chúng ở lược đồ quan hệ; không tuyên bố con số ít hơn là toàn bộ bảng CSDL.
 
-**Sáu bảng biểu diễn quan hệ, không cộng vào 50 hộp:** `admin_user_role` (phân vai 1:N do unique ở phía user), `admin_role_permission`, `product_group_tag`, `service_product_group`, `project_product_group`, `brand_page_featured_product_group` (năm bảng sau là nhiều–nhiều). `brand_page_featured_product_group` còn giữ thứ tự hiển thị, cần mô tả thuộc tính `sort_order` của quan hệ khi chuyển mức.
+**Sáu bảng hiện thực hóa quan hệ, không cộng vào 50 ứng viên:** `admin_user_role` (phân vai 1:N do unique ở phía user), `admin_role_permission`, `product_group_tag`, `service_product_group`, `project_product_group`, `brand_page_featured_product_group` (năm bảng sau là nhiều–nhiều). `brand_page_featured_product_group` còn giữ thứ tự hiển thị, cần mô tả thuộc tính `sort_order` của quan hệ khi chuyển mức.
 
 **Bốn bảng chỉ trình bày ở mức vật lý/triển khai:** `admin_refresh_session` (phiên làm mới xác thực), `file_usage` (theo dõi tệp dùng ở nhiều loại đối tượng), `product_group_daily_view` và `site_daily_view` (số liệu tổng hợp theo ngày). Chúng vẫn phải có trong kiểm kê lược đồ đầy đủ; không gọi chúng là dữ liệu không dùng. `knex_migrations` và `knex_migrations_lock` là hai bảng metadata của Knex, trình bày riêng.
 
@@ -111,7 +117,7 @@ Ký hiệu `1` ở phía bản ghi con nghĩa là FK `NOT NULL`; `0..1` nghĩa l
 - `review_status` (duyệt nội bộ), `publish_status` (công bố) và `status` (hoạt động) là những chiều khác nhau. Duyệt xong không đồng nghĩa hiển thị công khai; nhóm công khai không tự công bố mọi biến thể.
 - `deleted_at` là dấu lưu trữ/xóa mềm ở các bảng có cột này. Không mô tả hard-delete dữ liệu nghiệp vụ là mặc định.
 - Ghi lực lượng quan hệ dựa trên FK/NULL/UNIQUE hiện tại, rồi ghi riêng quy tắc mà API áp dụng chặt hơn. Đặc biệt: user–role, brand–brand_page, company_info.
-- Đoạn dẫn của 3.1.1.1 phải nói rõ hình ở mức **ý niệm**, sáu quan hệ được chuyển thành bảng nối ở mức luận lý, còn bốn bảng hỗ trợ và hai bảng Knex nằm trong kiểm kê vật lý. Không gọi 50 là tổng số bảng DB.
+- Đoạn dẫn của 3.1.1.1 phải nói rõ hình ở mức **ý niệm** và tiêu chí chọn thực thể/quan hệ; sáu bảng hiện thực hóa quan hệ phải xuất hiện ở mức luận lý, còn bốn bảng hỗ trợ và hai bảng Knex nằm trong kiểm kê vật lý. Không gọi 50 là tổng số bảng DB hoặc số hộp ERD bắt buộc.
 - Mẫu trường quy định trang A4. Một hình chứa 50 hộp và đủ quan hệ sẽ quá nhỏ để đọc; bản 31 hộp cũ đã có dấu hiệu này. Khi em vẽ lại, ưu tiên tính đúng của mô hình và khả năng đọc. Nếu vẫn chọn một hình như quyết định trước đây trong chat LVTN, phải thử in A4 trước khi nộp; đừng giảm chữ đến mức không đọc được chỉ để giữ một hình.
 
 ## 5. Trạng thái xác minh
