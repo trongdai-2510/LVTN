@@ -68,7 +68,7 @@ test('robot opens from another admin page', async ({ page, request }, testInfo) 
   await launcher.click();
   const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
   await expect(assistant.getByRole('heading', { level: 3 })).toBeVisible();
-  await expect(assistant.getByRole('button', { name: 'Sản phẩm nào thiếu tài liệu kỹ thuật?' })).toBeInViewport();
+  await expect(assistant.getByLabel('Hỏi trợ lý sản phẩm')).toBeInViewport();
   const desktopBounds = await assistant.boundingBox();
   expect(desktopBounds).not.toBeNull();
   expect(desktopBounds!.height).toBeLessThanOrEqual(860);
@@ -121,7 +121,9 @@ test('an old file batch does not take over a new product question', async ({ pag
   await page.goto('/admin/dashboard');
   await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
   const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
-  await assistant.getByRole('button', { name: 'Sản phẩm nào thiếu ảnh?' }).click();
+  await expect(assistant.locator('header').getByRole('link', { name: 'Xem lượt file đã gửi' })).toBeVisible();
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Sản phẩm nào thiếu ảnh?');
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');
   await expect(assistant.getByText('Có 516 sản phẩm thiếu ảnh.')).toBeVisible();
   await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Còn tài liệu thì sao?');
   await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');

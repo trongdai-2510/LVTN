@@ -148,30 +148,6 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     catch { setStatus({ available: false, busy: false, model: 'qwen3-vl:2b-instruct', locality: 'localhost', message: 'Không kết nối được AI cục bộ.' }); }
   }
 
-  async function chooseBatch(id: string) {
-    if (busy) return;
-    if (!id) {
-      setDetail(null);
-      setQuestionScope('project');
-      setMessages([]);
-      window.sessionStorage.removeItem(MEDIA_BATCH_SELECTION_KEY);
-      window.dispatchEvent(new CustomEvent(MEDIA_BATCH_SELECTED_EVENT, { detail: '' }));
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try {
-      const selected = await apiClient.get<MediaBatchDetail>(`${batchEndpoint}/${id}`);
-      setDetail(selected);
-      setQuestionScope(selected.items.length ? 'batch' : 'project');
-      setMessages([]);
-      window.sessionStorage.setItem(MEDIA_BATCH_SELECTION_KEY, id);
-      window.dispatchEvent(new CustomEvent(MEDIA_BATCH_SELECTED_EVENT, { detail: id }));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Không mở được lượt ảnh/PDF.');
-    } finally { setBusy(false); }
-  }
-
   async function ask(text: string, scope = questionScope) {
     const prompt = text.trim();
     if (!prompt || busy) return;
@@ -282,18 +258,15 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   const unresolved = detail?.items.filter((item) => ['pending', 'suggested', 'unmatched', 'failed'].includes(item.status)) ?? [];
   const unread = unresolved.filter((item) => !item.local_analysis && item.mime_type !== 'image/svg+xml');
   const usableBatches = batches.filter((batch) => (batch.item_count ?? 0) > 0);
-  const quickQuestions = questionScope === 'batch' && detail?.items.length
-    ? ['Tóm tắt lượt này', 'File nào cần xử lý trước?', 'File nào chưa rõ sản phẩm?', 'Có mã nào mâu thuẫn không?']
-    : ['Sản phẩm nào thiếu ảnh?', 'Sản phẩm nào thiếu tài liệu kỹ thuật?'];
   const latestAssistantId = [...messages].reverse().find((message) => message.role === 'assistant')?.id;
   const onImportDetail = /\/import\/[0-9a-f-]{36}\/?$/i.test(pathname ?? '');
   const welcomeTitle = detail?.items.length
     ? unresolved.length ? `Mình thấy ${unresolved.length} file cần bạn xem.` : 'Lượt file này đã xử lý xong.'
-    : onImportDetail ? 'Mình xem ảnh/PDF cho lô Excel này.' : 'Chào bạn, mình là Songbot.';
+    : onImportDetail ? 'Mình xem ảnh/PDF cho lô Excel này.' : 'Chào bạn!';
   const welcomeDescription = detail?.items.length
     ? 'Bạn có thể hỏi file nào cần xử lý trước, hoặc mở từng gợi ý để duyệt.'
     : onImportDetail ? 'Gửi file tại đây. Mình sẽ tìm sản phẩm từ dữ liệu đã nhập và nêu chỗ chưa chắc chắn.'
-      : 'Bạn hỏi về sản phẩm hoặc gửi ảnh/PDF. Mình tìm trong dữ liệu Song Thanh và nêu lý do cho từng gợi ý.';
+      : 'Mình có thể kiểm tra sản phẩm còn thiếu ảnh, tài liệu kỹ thuật hoặc tìm sản phẩm phù hợp với file bạn gửi.';
   const activityTitle = robotState === 'working' ? 'Mình đang nhận file'
     : robotState === 'searching' ? 'Mình đang tìm mã sản phẩm'
       : robotState === 'thinking' ? 'Mình đang đọc và đối chiếu' : 'Mình đang xử lý';
@@ -306,6 +279,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           <h2>Songbot <span>Trợ lý sản phẩm</span></h2>
           <span className={styles.eyebrow}><i className={`${styles.statusDot} ${status?.available ? styles.statusDotOnline : ''}`} aria-hidden="true" />{busy ? activityTitle : loading ? 'Đang kết nối…' : status?.available ? 'Sẵn sàng đọc ảnh và PDF' : 'Tra sản phẩm đang sẵn sàng'}</span>
         </div>
+        {usableBatches.length > 0 && <Link href="/media" onClick={close} aria-label="Xem lượt file đã gửi" className={styles.historyLink}>File đã gửi</Link>}
         {(messages.length > 0 || Boolean(detail?.items.length)) && <button type="button" onClick={() => setExpanded((current) => !current)} aria-label={expanded ? 'Thu gọn trợ lý' : 'Mở rộng trợ lý'} aria-pressed={expanded} className={styles.expand}>
           {expanded ? <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M8 4v4H4m12 12v-4h4M4 8l5 5m11 3-5-5" /></svg>
             : <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 10V4h6m10 10v6h-6M4 4l6 6m10 10-6-6" /></svg>}
@@ -331,21 +305,12 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         {!loading && messages.length === 0 && <div className={styles.welcome}>
           <span className={styles.welcomeRobot}><AssistantMascot state={robotState} size={78} label="Robot trợ lý" /></span>
           <div className={styles.welcomeCopy}>
-            <span className={styles.welcomeByline}>Songbot</span>
             <h3>{welcomeTitle}</h3>
             <p className={styles.welcomeDescription}>{welcomeDescription}</p>
             {!status?.available && !loading && <><p className={styles.offlineNote}>AI chưa đọc nội dung ảnh/PDF. Mình vẫn có thể tra dữ liệu sản phẩm và đối chiếu mã trong tên file.</p>
               <button type="button" className={styles.statusRetry} onClick={() => void refreshStatus()}>Kiểm tra lại AI đọc file</button></>}
           </div>
         </div>}
-
-        {usableBatches.length > 0 && <details className={styles.switchBatch}>
-          <summary>{detail?.items.length ? 'Đổi lượt đang hỗ trợ' : 'Lượt file đã lưu'}</summary>
-          <select aria-label="Chọn lượt ảnh/PDF" value={detail?.batch.id ?? ''} onChange={(event) => void chooseBatch(event.target.value)} disabled={busy}>
-            <option value="">Lượt mới · hỏi dữ liệu sản phẩm</option>
-            {usableBatches.map((batch) => <option key={batch.id} value={batch.id}>{mediaBatchLabel(batch)} · {batch.item_count ?? 0} file</option>)}
-          </select>
-        </details>}
 
         {messages.map((message) => <div key={message.id} className={`${styles.message} ${message.role === 'user' ? styles.userMessage : styles.assistantMessage} ${message.illustration ? styles.resultMessage : ''}`}>
           {message.illustration ? <div className={styles.resultIntro}>
@@ -376,10 +341,8 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         </div>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
 
-        {!loading && !busy && (messages.length === 0 || unread.length > 0) && <div className={styles.suggestions}>
-          {messages.length === 0 && <span className={styles.suggestionLabel}>Thử hỏi mình</span>}
-          {messages.length === 0 && quickQuestions.map((prompt) => <button type="button" key={prompt} onClick={() => void ask(prompt, questionScope)}>{prompt}</button>)}
-          {unread.length > 0 && status?.available && <button type="button" className={styles.analyzePrompt} onClick={() => void analyzeMany()}>Robot đọc {Math.min(unread.length, 5)} file tiếp</button>}
+        {!loading && !busy && unread.length > 0 && status?.available && <div className={styles.suggestions}>
+          <button type="button" className={styles.analyzePrompt} onClick={() => void analyzeMany()}>Robot đọc {Math.min(unread.length, 5)} file tiếp</button>
         </div>}
         <div ref={bottomRef} />
       </div>
