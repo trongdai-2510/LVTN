@@ -8,9 +8,10 @@ import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
 import { PERMISSIONS } from '@/lib/permissions';
 import { AssistantMascot, type MascotState } from './AssistantMascot';
+import { MediaItemCard } from './MediaItemCard';
 import { mediaBatchLabel } from './mediaBatchLabel';
 import { MEDIA_ASSISTANT_OPEN_EVENT, MEDIA_BATCH_SELECTED_EVENT, MEDIA_BATCH_SELECTION_KEY, MEDIA_BATCH_UPDATED_EVENT,
-  type AssistantAnswer, type LocalAiStatus, type MediaBatch, type MediaBatchDetail } from './mediaAssistantTypes';
+  type AssistantAnswer, type LocalAiStatus, type MediaAttachment, type MediaBatch, type MediaBatchDetail } from './mediaAssistantTypes';
 import { uploadMediaFiles } from './uploadMediaFiles';
 import styles from './mediaAssistant.module.css';
 
@@ -39,6 +40,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   const [detail, setDetail] = useState<MediaBatchDetail | null>(null);
   const [status, setStatus] = useState<LocalAiStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [reviewItemId, setReviewItemId] = useState('');
   const [question, setQuestion] = useState('');
   const [questionScope, setQuestionScope] = useState<'project' | 'batch'>('project');
   const [robotState, setRobotState] = useState<MascotState>('idle');
@@ -53,6 +55,8 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const reviewBackRef = useRef<HTMLButtonElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageId = useRef(0);
 
@@ -95,7 +99,12 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   }, [open, allowed]);
 
   useEffect(() => { if (open) closeRef.current?.focus(); }, [open]);
-  useEffect(() => { if (open && (messages.length > 0 || progress || busy)) bottomRef.current?.scrollIntoView({ block: 'end' }); }, [messages.length, progress, busy]);
+  useEffect(() => {
+    if (!open || !reviewItemId) return;
+    bodyRef.current?.scrollTo({ top: 0 });
+    reviewBackRef.current?.focus();
+  }, [open, reviewItemId]);
+  useEffect(() => { if (open && !reviewItemId && (messages.length > 0 || progress || busy)) bottomRef.current?.scrollIntoView({ block: 'end' }); }, [messages.length, progress, busy, reviewItemId, open]);
   useEffect(() => {
     if (!['speaking', 'happy', 'error'].includes(robotState)) return;
     const timeout = window.setTimeout(() => setRobotState(questionRef.current === document.activeElement ? 'listening' : 'idle'), robotState === 'error' ? 3200 : 2400);
@@ -113,12 +122,14 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       if (!open || busy) return;
       if (!id) {
         setDetail(null);
+        setReviewItemId('');
         setQuestionScope('project');
         setMessages([]);
         return;
       }
       void apiClient.get<MediaBatchDetail>(`${batchEndpoint}/${id}`).then((selected) => {
         setDetail(selected);
+        setReviewItemId('');
         setQuestionScope(selected.items.length ? 'batch' : 'project');
         setMessages([]);
       }).catch(() => undefined);
@@ -199,6 +210,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         onDetail: setDetail
       });
       setDetail(result.detail);
+      setReviewItemId('');
       setQuestionScope('batch');
       void apiClient.get<{ items: MediaBatch[] }>(batchEndpoint).then((list) => setBatches(list.items ?? [])).catch(() => undefined);
       if (result.aiStatus) setStatus(result.aiStatus);
@@ -254,7 +266,70 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     await refreshStatus();
   }
 
+  async function analyzeOne(itemId: string) {
+    if (!detail || !status?.available || busy) return;
+    setBusy(true);
+    setError('');
+    setProgress('Mình đang đọc nội dung file để kiểm tra mã.');
+    setRobotState('thinking');
+    try {
+      setDetail(await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/items/${itemId}/analyze-local`));
+      window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
+      setRobotState('happy');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Chưa đọc được nội dung file.');
+      setRobotState('error');
+    } finally { setBusy(false); setProgress(''); }
+  }
+
+  async function confirmItem(itemId: string, decision: { mode: 'skip' | 'attach'; attachments?: MediaAttachment[] }) {
+    if (!detail || busy) return;
+    const item = detail.items.find((entry) => entry.id === itemId);
+    const allowedToAttach = item?.mime_type.startsWith('image/')
+      ? permissions.includes(PERMISSIONS.productGroupUpdate) : permissions.includes(PERMISSIONS.technicalDocumentCreate);
+    if (!item || (decision.mode === 'attach' && !allowedToAttach)) {
+      setError('Bạn chưa có quyền xác nhận file này.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      setDetail(await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/items/${itemId}/confirm`, { decision }));
+      window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
+      append('assistant', decision.mode === 'skip' ? 'Mình đã bỏ qua file này.' : 'Mình đã lưu quyết định. Bấm áp dụng để gắn file vào sản phẩm.', { scope: 'batch', references: [itemId] });
+      setRobotState('happy');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Chưa lưu được quyết định cho file.');
+      setRobotState('error');
+    } finally { setBusy(false); }
+  }
+
+  async function applyBatch() {
+    if (!detail || busy) return;
+    setBusy(true);
+    setError('');
+    setProgress('Mình đang gắn các file đã xác nhận vào sản phẩm.');
+    setRobotState('working');
+    try {
+      const result = await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/apply`);
+      setDetail(result);
+      window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
+      append('assistant', `Đã gán ${result.applied ?? 0} file vào sản phẩm.${result.errors?.length ? ` ${result.errors.length} file cần xem lại.` : ''}`, { scope: 'batch' });
+      setRobotState(result.errors?.length ? 'error' : 'happy');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Chưa áp dụng được các file đã xác nhận.');
+      setRobotState('error');
+    } finally { setBusy(false); setProgress(''); }
+  }
+
   if (!allowed) return null;
+  const reviewItem = detail?.items.find((item) => item.id === reviewItemId);
+  const confirmedCount = detail?.items.filter((item) => item.status === 'confirmed').length ?? 0;
+  const reviewCanConfirm = reviewItem?.mime_type.startsWith('image/')
+    ? permissions.includes(PERMISSIONS.productGroupUpdate) : permissions.includes(PERMISSIONS.technicalDocumentCreate);
+  const canApplyConfirmed = detail?.items.every((item) => item.status !== 'confirmed' ||
+    (item.mime_type.startsWith('image/') ? permissions.includes(PERMISSIONS.productGroupUpdate)
+      : permissions.includes(PERMISSIONS.technicalDocumentCreate))) ?? false;
   const unresolved = detail?.items.filter((item) => ['pending', 'suggested', 'unmatched', 'failed'].includes(item.status)) ?? [];
   const unread = unresolved.filter((item) => !item.local_analysis && item.mime_type !== 'image/svg+xml');
   const usableBatches = batches.filter((batch) => (batch.item_count ?? 0) > 0);
@@ -272,8 +347,8 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       : robotState === 'thinking' ? 'Mình đang đọc và đối chiếu' : 'Mình đang xử lý';
 
   return <>
-    {open && <section id="floating-media-assistant" role="dialog" aria-label="Trợ lý sản phẩm" aria-modal="false" data-robot-state={robotState} data-mode={messages.length ? 'conversation' : 'welcome'} data-has-batch={Boolean(detail?.items.length)} data-expanded={expanded} data-dragging={dragging}
-      onKeyDown={(event) => { if (event.key === 'Escape') close(); }} className={styles.panel}>
+    {open && <section id="floating-media-assistant" role="dialog" aria-label="Trợ lý sản phẩm" aria-modal="false" data-robot-state={robotState} data-mode={messages.length ? 'conversation' : 'welcome'} data-has-batch={Boolean(detail?.items.length)} data-expanded={expanded} data-review={Boolean(reviewItem)} data-dragging={dragging}
+      onKeyDown={(event) => { if (event.key === 'Escape') reviewItem ? setReviewItemId('') : close(); }} className={styles.panel}>
       <header className={styles.header}>
         <div className={styles.identity}>
           <h2>Songbot <span>Trợ lý sản phẩm</span></h2>
@@ -287,16 +362,36 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         <button ref={closeRef} type="button" onClick={close} aria-label="Đóng trợ lý" className={styles.close}>×</button>
       </header>
 
-      {detail && detail.items.length > 0 && <div className={styles.batch}>
+      {detail && detail.items.length > 0 && !reviewItem && <div className={styles.batch}>
         <div><span className={styles.batchLabel}>Lượt file đang xem</span><strong title={mediaBatchLabel(detail.batch)}>{mediaBatchLabel(detail.batch)}</strong>
           <span>{detail.items.length} file · {unresolved.length} cần xem</span></div>
-        <Link href="/media" onClick={close}>Duyệt file</Link>
+        <button type="button" onClick={() => setReviewItemId((unresolved[0] ?? detail.items[0]).id)}>Xem file</button>
       </div>}
 
-      <div className={styles.body} onDragOver={(event) => event.preventDefault()}
+      <div ref={bodyRef} className={styles.body} onDragOver={(event) => event.preventDefault()}
         onDragEnter={(event) => { if (event.dataTransfer.types.includes('Files')) setDragging(true); }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
         onDrop={(event) => { event.preventDefault(); setDragging(false); if (canUpload) void intake(Array.from(event.dataTransfer.files)); }}>
+        {reviewItem && <section className={styles.reviewMode} aria-label="Kiểm tra file trong trợ lý">
+          <button ref={reviewBackRef} type="button" className={styles.reviewBack} onClick={() => setReviewItemId('')}>Trở lại trò chuyện</button>
+          <div className={styles.reviewIntro}>
+            <AssistantMascot state={robotState} size={56} paused />
+            <div><strong>{reviewItem.candidates.length === 1 ? 'Mình có một gợi ý cho file này' : reviewItem.candidates.length > 1 ? 'Mình thấy vài sản phẩm có thể khớp' : 'Mình chưa tìm được sản phẩm phù hợp'}</strong><p>So lại file và sản phẩm. Bạn quyết định trước khi mình gắn.</p></div>
+          </div>
+          {busy && <p role="status" className={styles.reviewProgress}>{progress || 'Mình đang xử lý file.'}</p>}
+          {error && <p role="alert" className={styles.error}>{error}</p>}
+          <MediaItemCard key={reviewItem.id} item={reviewItem} embedded canConfirm={Boolean(reviewCanConfirm)}
+            canAnalyzeLocally={Boolean(status?.available) && ['pending', 'suggested', 'unmatched'].includes(reviewItem.status) && !reviewItem.local_analysis && reviewItem.mime_type !== 'image/svg+xml'}
+            busy={busy} onConfirm={confirmItem} onAnalyzeLocally={analyzeOne} />
+          {detail && detail.items.length > 1 && <div className={styles.reviewNext}>
+            <label htmlFor="assistant-review-next">Chuyển sang file khác trong lượt này</label>
+            <select id="assistant-review-next" value="" onChange={(event) => { if (event.target.value) setReviewItemId(event.target.value); }}>
+              <option value="">Chọn file…</option>
+              {detail.items.filter((item) => item.id !== reviewItem.id).map((item) => <option key={item.id} value={item.id}>{item.source_path} · {item.status === 'applied' ? 'Đã gán' : item.status === 'confirmed' ? 'Đã xác nhận' : 'Cần xem'}</option>)}
+            </select>
+          </div>}
+        </section>}
+        {!reviewItem && <>
         {dragging && <div className={styles.dropHint}>Thả ảnh hoặc PDF để mình bắt đầu</div>}
         {loading && messages.length === 0 && <div className={styles.loadingState} role="status">
           <AssistantMascot state="thinking" size={72} label="Robot trợ lý" />
@@ -325,11 +420,11 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
             {message.references.map((id) => {
               const item = detail?.items.find((entry) => entry.id === id);
               const candidate = item?.candidates.length === 1 ? item.candidates[0] : null;
-              return <Link key={id} href={`/media?batch_id=${detail?.batch.id ?? ''}&item_id=${id}`} onClick={close} className={styles.referenceItem}>
+              return <button key={id} type="button" onClick={() => setReviewItemId(id)} className={styles.referenceItem}>
                 <strong>{item?.source_path.split('/').at(-1) ?? id}</strong>
                 <span>{candidate ? `${candidate.groupName}${candidate.variantName && candidate.variantName !== candidate.groupName ? ` · ${candidate.variantName}` : ''}` : item?.candidates.length ? 'Nhiều sản phẩm có thể khớp' : 'Cần chọn sản phẩm'}</span>
                 {candidate?.evidence.length ? <small>{[...new Set(candidate.evidence.map((entry) => `${entry.value} từ ${describeEvidence(entry.source)}`))].join(' · ')}</small> : null}
-              </Link>;
+              </button>;
             })}
           </div> : null}
           {message.products?.length ? <div className={styles.products}>{message.products.map((product) => <Link key={product.id} href={`/product-groups/${product.id}`} onClick={close}>{product.name}</Link>)}</div> : null}
@@ -345,9 +440,14 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           <button type="button" className={styles.analyzePrompt} onClick={() => void analyzeMany()}>Robot đọc {Math.min(unread.length, 5)} file tiếp</button>
         </div>}
         <div ref={bottomRef} />
+        </>}
       </div>
 
-      <form onSubmit={(event) => { event.preventDefault(); void ask(question); }} className={styles.composer}>
+      {reviewItem && confirmedCount > 0 && <div className={styles.reviewApply}>
+        <p>{confirmedCount} file đã xác nhận, đang chờ gắn vào sản phẩm.</p>
+        <button type="button" disabled={busy || !canApplyConfirmed} onClick={() => void applyBatch()}>Áp dụng {confirmedCount} file đã xác nhận</button>
+      </div>}
+      {!reviewItem && <form onSubmit={(event) => { event.preventDefault(); void ask(question); }} className={styles.composer}>
         {Boolean(detail?.items.length) && <div className={styles.questionScope} role="group" aria-label="Phạm vi câu hỏi">
           <span>Hỏi về</span>
           <button type="button" aria-pressed={questionScope === 'project'} onClick={() => setQuestionScope('project')} disabled={busy}>Sản phẩm</button>
@@ -377,7 +477,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           </button>
           <button type="button" className={styles.fileTool} disabled={busy || loading} onClick={() => folderRef.current?.click()}>Chọn thư mục ảnh/PDF</button>
         </div>}
-      </form>
+      </form>}
     </section>}
     {!open && !pathname?.endsWith('/media') && <button ref={toggleRef} type="button" onClick={() => { setLoading(true); setOpen(true); }} aria-label="Mở trợ lý sản phẩm"
       onPointerEnter={() => setLauncherActive(true)} onPointerLeave={() => setLauncherActive(false)}

@@ -282,16 +282,24 @@ test('admin reviews a suggested image before applying the batch', async ({ page,
   await page.getByRole('dialog', { name: 'Trợ lý sản phẩm' }).screenshot({ path: testInfo.outputPath('assistant-with-suggestion.png'), animations: 'disabled' });
   await page.screenshot({ path: testInfo.outputPath('assistant-result-mobile.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.getByRole('dialog', { name: 'Trợ lý sản phẩm' }).locator('a[href*="item_id="]').first().click();
-  await expect(page).toHaveURL(new RegExp(`/admin/media\\?batch_id=${batchId}&item_id=${itemId}`));
-  await expect(page.getByRole('heading', { name: 'Đợt kiểm tra' })).toBeVisible();
-  await expect(page.getByText('ABC-100/front.jpg')).toBeVisible();
-  await expect(page.getByText('Ảnh chụp sản phẩm có mã ABC-100.')).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath('media-with-file.png'), fullPage: true });
+  await assistant.getByRole('button', { name: /front.jpg.*Sản phẩm A/ }).first().click();
+  await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  const review = assistant.getByRole('region', { name: 'Kiểm tra file trong trợ lý' });
+  await expect(review.getByText('ABC-100/front.jpg')).toBeVisible();
+  await expect(review.getByText('Ảnh chụp sản phẩm có mã ABC-100.')).toBeVisible();
+  await expect(review.getByRole('button', { name: 'Xác nhận gán file' })).toBeEnabled();
+  await assistant.screenshot({ path: testInfo.outputPath('assistant-review-desktop.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath('media-with-file-mobile.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Hỏi trợ lý' }).click();
+  await assistant.screenshot({ path: testInfo.outputPath('assistant-review-mobile.png'), animations: 'disabled' });
+  await review.getByRole('button', { name: 'Xác nhận gán file' }).click();
+  await expect(assistant.getByRole('button', { name: 'Áp dụng 1 file đã xác nhận' })).toBeVisible();
+  await assistant.screenshot({ path: testInfo.outputPath('assistant-confirmed-mobile.png'), animations: 'disabled' });
+  await assistant.getByRole('button', { name: 'Áp dụng 1 file đã xác nhận' }).click();
+  await expect(review.getByText('Ảnh sản phẩm · Đã gán')).toBeVisible();
+  await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  await review.getByRole('button', { name: 'Trở lại trò chuyện' }).click();
+  await expect(assistant.getByText('Đã gán 1 file vào sản phẩm.')).toBeVisible();
   await page.getByLabel('Hỏi trợ lý sản phẩm').fill('Vì sao file này được gợi ý?');
   await page.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(page.getByText('File front.jpg đang được gợi ý cho Sản phẩm A vì mã ABC-100.')).toBeVisible();
@@ -303,13 +311,6 @@ test('admin reviews a suggested image before applying the batch', async ({ page,
     { role: 'user', text: 'Vì sao file này được gợi ý?' },
     { role: 'assistant', text: 'File front.jpg đang được gợi ý cho Sản phẩm A vì mã ABC-100.' }
   ]));
-  await page.getByRole('button', { name: 'Đóng trợ lý' }).click();
-  await expect(page.getByText('Dự kiến gán vào — kiểm tra trước khi xác nhận')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Xác nhận gán file' })).toBeEnabled();
-  await page.getByRole('button', { name: 'Xác nhận gán file' }).click();
-  await expect(page.getByText('Đã xác nhận, vẫn có thể sửa đích trước khi áp dụng đợt.')).toBeVisible();
-  await page.getByRole('button', { name: 'Áp dụng 1 file đã xác nhận' }).click();
-  await expect(page.getByText('Đã áp dụng 1 file.')).toBeVisible();
 });
 
 test('files opened from an Excel import keep the link without an ID field', async ({ page, request }) => {
