@@ -19,6 +19,7 @@ import { HealthModule } from './modules/health/health.module';
 import { HomePageModule } from './modules/home-page/home-page.module';
 import { ImportWorkspaceModule } from './modules/import-workspace/import-workspace.module';
 import { MenuModule } from './modules/menu/menu.module';
+import { MediaIntakeModule } from './modules/mediaIntake/mediaIntakeModule';
 import { NewsCategoryModule } from './modules/news-category/news-category.module';
 import { PageContentModule } from './modules/page-content/page-content.module';
 import { PartnerModule } from './modules/partner/partnerModule';
@@ -73,7 +74,8 @@ import { AuditTrailInterceptor } from './common/audit/audit-trail.interceptor';
     RedirectModule,
     AuditLogModule,
     HomePageModule,
-    ImportWorkspaceModule
+    ImportWorkspaceModule,
+    MediaIntakeModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

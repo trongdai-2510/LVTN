@@ -22,6 +22,7 @@ const routePermissions: Array<{ prefix: string; permission?: string }> = [
   { prefix: '/contacts', permission: PERMISSIONS.contactRead },
   { prefix: '/quotes', permission: PERMISSIONS.quoteRead },
   { prefix: '/import', permission: PERMISSIONS.importRead },
+  { prefix: '/media', permission: PERMISSIONS.productGroupRead },
   { prefix: '/audit-logs', permission: PERMISSIONS.auditLogRead },
   { prefix: '/users', permission: PERMISSIONS.adminUserRead },
   { prefix: '/roles', permission: PERMISSIONS.adminRoleRead },

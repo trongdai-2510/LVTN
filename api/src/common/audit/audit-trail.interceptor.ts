@@ -59,6 +59,7 @@ const ENTITY_TARGETS: AuditTarget[] = [
   { fragment: '/customers', entityType: 'customer_profile', table: 'customer_profile' },
   { fragment: '/quotes', entityType: 'quote_request', table: 'quote_request' },
   { fragment: '/import-batches', entityType: 'import_batch', table: 'import_batch' },
+  { fragment: '/media-batches', entityType: 'media_intake_batch', table: 'media_intake_batch' },
   { fragment: '/import-conflicts', entityType: 'data_conflict', table: 'data_conflict' },
   { fragment: '/files', entityType: 'file_metadata', table: 'file_metadata' },
   { fragment: '/news-categories', entityType: 'news_category', table: 'news_category' },

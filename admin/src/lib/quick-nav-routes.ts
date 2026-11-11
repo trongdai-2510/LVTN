@@ -177,6 +177,13 @@ export const quickNavRoutes: QuickNavRoute[] = [
     permission: PERMISSIONS.importRead
   },
   {
+    label: 'Gán ảnh & tài liệu hàng loạt',
+    href: '/media',
+    group: 'Nhập dữ liệu',
+    keywords: ['anh san pham', 'pdf', 'ghep anh', 'media', 'tro ly'],
+    permission: PERMISSIONS.productGroupRead
+  },
+  {
     label: 'Nhật ký hệ thống',
     href: '/audit-logs',
     group: 'Hệ thống',
