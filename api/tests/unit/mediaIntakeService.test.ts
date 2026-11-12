@@ -139,6 +139,47 @@ test('assistant answers catalogue questions from current project records', async
   assert.deepEqual(result.products, [{ id: 'group-a', name: 'Đèn báo dọn phòng' }]);
 });
 
+test('project assistant responds to short greetings without repeating a generic request', async () => {
+  const instance = service({}, { answerProjectQuestion: async () => { throw new Error('Greeting should not invoke the model.'); } });
+  const first = await instance.askProject('hi');
+  assert.match(first.answer, /Songbot|mình/i);
+  assert.match(first.answer, /ảnh|PDF|sản phẩm/i);
+  assert.ok(first.answer.length < 220);
+  const next = await instance.askProject('hihi', [
+    { role: 'user', text: 'hi' }, { role: 'assistant', text: first.answer }
+  ]);
+  assert.notEqual(next.answer, first.answer);
+  assert.doesNotMatch(next.answer, /đang phân tích yêu cầu|cung cấp thêm thông tin chi tiết/i);
+  const named = await instance.askProject('Hi Songbot');
+  assert.match(named.answer, /ảnh|PDF|sản phẩm/i);
+  const laughing = await instance.askProject('hihihi', [
+    { role: 'user', text: 'hi' }, { role: 'assistant', text: first.answer }
+  ]);
+  assert.match(laughing.answer, /Hihi/);
+  const remembered = await instance.askProject('hihi', [
+    { role: 'user', text: 'A6CLR có ảnh chưa?' }, { role: 'assistant', text: 'Mã A6CLR đã có ảnh.' }
+  ]);
+  assert.match(remembered.answer, /A6CLR/);
+  const acknowledged = await instance.askProject('ok', [
+    { role: 'user', text: 'hi' }, { role: 'assistant', text: first.answer }
+  ]);
+  assert.doesNotMatch(acknowledged.answer, /cung cấp thêm thông tin chi tiết/i);
+});
+
+test('project assistant gives an actionable first step and a specific fallback', async () => {
+  const instance = service({
+    assistantCatalog: async () => ({ activeProducts: 12, missingThumbnails: 3, missingDocuments: 5,
+      examplesMissingThumbnails: [], examplesMissingDocuments: [], matches: [] }),
+    assistantNamedProducts: async () => []
+  }, { answerProjectQuestion: async () => { throw new Error('Model unavailable'); } });
+  const start = await instance.askProject('Mình chưa biết bắt đầu từ đâu');
+  assert.match(start.answer, /gửi một ảnh\/PDF/);
+  assert.match(start.answer, /Đồng ý/);
+  assert.doesNotMatch(start.answer, /12 sản phẩm|cung cấp thêm thông tin chi tiết/);
+  const fallback = await instance.askProject('Mình cần xử lý file này thế nào nhỉ?');
+  assert.match(fallback.answer, /gửi ảnh\/PDF kèm mã/);
+});
+
 test('project assistant recalls the last product code from this conversation only', async () => {
   const instance = service({});
   const remembered = await instance.askProject('Bạn còn nhớ tôi vừa hỏi về sản phẩm nào không?', [

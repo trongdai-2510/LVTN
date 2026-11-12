@@ -9,6 +9,7 @@ import { answerFromEvidence } from './mediaAssistantAnswer';
 import { buildMediaAssistantContext } from './mediaAssistantContext';
 import { normalizeMediaDecision } from './mediaIntakeDecision';
 import { MediaIntakeRepository } from './mediaIntakeRepository';
+import { mediaSocialReply } from './mediaSocialReply';
 import { LocalMediaAnalysis, type MediaConversationTurn } from './localMediaAnalysis';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -23,6 +24,17 @@ function requireUuid(value: string, field: string): string {
     });
   }
   return value;
+}
+
+function projectFallback(question: string): string {
+  const normalized = question.replace(/[đĐ]/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (/anh|hinh|file|pdf|tai lieu/.test(normalized)) {
+    return 'Mình chưa đủ thông tin về file này. Bạn gửi ảnh/PDF kèm mã hoặc tên sản phẩm; mình sẽ đối chiếu và đưa đích gán ra để bạn duyệt.';
+  }
+  if (/ma|model|san pham/.test(normalized)) {
+    return 'Mình chưa xác định được sản phẩm bạn nhắc tới. Bạn gửi mã model hoặc tên sản phẩm đầy đủ để mình tra trong project nhé.';
+  }
+  return 'Mình chưa rõ bạn muốn tra sản phẩm hay xử lý ảnh/PDF. Bạn nói một việc cụ thể, mình sẽ làm cùng bạn ngay trong khung chat.';
 }
 
 @Injectable()
@@ -174,6 +186,8 @@ export class MediaIntakeService {
     if (!trimmed || trimmed.length > 500) throw new AppError({
       code: ErrorCodes.VALIDATION_ERROR, message: 'Câu hỏi phải có từ 1 đến 500 ký tự.', statusCode: HttpStatus.BAD_REQUEST
     });
+    const socialReply = mediaSocialReply(trimmed, history);
+    if (socialReply) return { answer: socialReply, products: [], model: 'project-data' };
     const normalized = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
     const codePattern = /\b(?=[A-Za-z0-9.-]*\d)[A-Za-z][A-Za-z0-9.-]{3,}\b/;
     const userQuestions = [...history].reverse().filter((turn) => turn.role === 'user');
@@ -225,8 +239,8 @@ export class MediaIntakeService {
       const examples = catalog.examplesMissingDocuments.filter((item) => item.name.length <= 80 && /^[A-Za-zÀ-ỹ]/u.test(item.name.trim()) && !/\([^)]*$/.test(item.name)).slice(0, 3);
       products.push(...examples);
       answer = `Hiện có ${catalog.missingDocuments} sản phẩm đang hoạt động chưa có tài liệu kỹ thuật.${examples.length ? ` Ví dụ: ${examples.map((item) => item.name).join(', ')}.` : ''} Bạn gửi PDF để mình đọc mã và gợi ý sản phẩm, rồi duyệt trước khi gán.`;
-    } else if (/\b(chao|bat dau|lam gi dau tien)\b/.test(normalized)) {
-      answer = `Chào bạn! Trong project hiện có ${catalog.missingThumbnails} sản phẩm thiếu ảnh đại diện và ${catalog.missingDocuments} sản phẩm thiếu tài liệu kỹ thuật. Bạn có thể gửi ảnh/PDF ở đây để mình đối chiếu, hoặc hỏi một mã sản phẩm cụ thể trước.`;
+    } else if (/bat dau|lam gi dau tien|lam gi truoc|khong biet lam gi/.test(normalized)) {
+      answer = 'Bạn thử gửi một ảnh/PDF kèm mã hoặc tên sản phẩm ngay trong khung chat. Mình sẽ đối chiếu dữ liệu project, hiện đích gán và chỉ gắn file sau khi bạn bấm Đồng ý.';
     } else if (/thu muc|nhieu anh|hang loat/.test(normalized) && /anh|file|pdf/.test(normalized)) {
       answer = 'Bạn bấm “Chọn thư mục ảnh/PDF” dưới ô hỏi, chọn thư mục rồi chờ robot đối chiếu với sản phẩm trong project. Sau đó mở các gợi ý cần xem, xác nhận file đúng và bấm áp dụng khi đã kiểm tra xong.';
     } else if (/\bmo\b|khong doc|khong thay|\bloi\b/.test(normalized) && /anh|file|pdf|ma/.test(normalized)) {
@@ -248,7 +262,7 @@ export class MediaIntakeService {
         try {
           answer = await this.localAnalysis.answerProjectQuestion(trimmed, facts, history.slice(-6));
         } catch {
-          answer = 'Mình chưa đủ dữ liệu để trả lời chính xác câu này. Bạn gửi mã/tên sản phẩm, hoặc ảnh/PDF cần xử lý để mình đối chiếu với dữ liệu project nhé.';
+          answer = projectFallback(trimmed);
         }
       }
     }

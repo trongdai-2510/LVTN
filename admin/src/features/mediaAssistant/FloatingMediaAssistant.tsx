@@ -10,7 +10,7 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { AssistantMascot, type MascotState } from './AssistantMascot';
 import { MediaItemCard } from './MediaItemCard';
 import { mediaBatchLabel } from './mediaBatchLabel';
-import { isAssignmentRequest, meansAllFiles, mentionedFile, requestedProduct, targetFromCandidates, targetFromSearch, taskIsCurrent, type MediaTask, type ProductMatch } from './mediaTask';
+import { isAssignmentRequest, meansAllFiles, mentionedFile, normalizeTaskText, requestedProduct, targetFromCandidates, targetFromSearch, taskIsCurrent, type MediaTask, type ProductMatch } from './mediaTask';
 import { MEDIA_ASSISTANT_OPEN_EVENT, MEDIA_BATCH_SELECTED_EVENT, MEDIA_BATCH_SELECTION_KEY, MEDIA_BATCH_UPDATED_EVENT,
   type AssistantAnswer, type LocalAiStatus, type MediaAttachment, type MediaBatch, type MediaBatchDetail } from './mediaAssistantTypes';
 import { uploadMediaFiles } from './uploadMediaFiles';
@@ -173,6 +173,14 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   async function ask(text: string, scope = questionScope) {
     const prompt = text.trim();
     if (!prompt || busy) return;
+    if (/^(?:ok|oke|duoc|da|vang|uh|um)$/.test(normalizeTaskText(prompt)) && (pendingItemIds.length || proposedTasks.length)) {
+      append('user', prompt, { scope: 'batch' });
+      setQuestion('');
+      append('assistant', proposedTasks.length
+        ? 'Mình đã chuẩn bị đích gán ở trên. Nếu đúng, bạn bấm “Đồng ý gán file”; mình sẽ thực hiện ngay.'
+        : 'Mình đang đợi mã model hoặc tên sản phẩm cho file vừa gửi. Bạn gửi mã/tên đó, mình sẽ chuẩn bị việc gán.', { scope: 'batch' });
+      return;
+    }
     const taskReply = pendingItemIds.length > 0 && !/[?？]/.test(prompt) && !/^(vì sao|vi sao|còn|con|bao nhiêu|bao nhieu)/i.test(prompt);
     if (isAssignmentRequest(prompt) || taskReply) {
       append('user', prompt, { scope: 'batch' });

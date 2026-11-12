@@ -136,6 +136,24 @@ test('an old file batch does not take over a new product question', async ({ pag
   expect(batchQuestions).toBe(0);
 });
 
+test('Songbot treats hi and hihi as a continuing conversation', async ({ page, request }) => {
+  await seedAdmin(page, request);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  const input = assistant.getByLabel('Hỏi trợ lý sản phẩm');
+  await input.fill('hi');
+  await input.press('Enter');
+  await expect(assistant.getByText(/Chào bạn! Mình là Songbot/)).toBeVisible();
+  await input.fill('hihi');
+  await input.press('Enter');
+  await expect(assistant.getByText(/Hihi, mình nghe đây/)).toBeVisible();
+  await expect(assistant.getByText(/đang phân tích yêu cầu của bạn/)).toHaveCount(0);
+  await input.fill('Mình chưa biết bắt đầu từ đâu');
+  await input.press('Enter');
+  await expect(assistant.getByText(/chỉ gắn file sau khi bạn bấm Đồng ý/)).toBeVisible();
+});
+
 test('a content code conflict clears the suggested attachment until admin chooses a product', async ({ page, request }) => {
   await seedAdmin(page, request);
   const batchId = '00000000-0000-4000-8000-000000000141';
@@ -466,6 +484,9 @@ for (const instructionFirst of [false, true]) {
     await assistant.locator('input[type="file"]').first().setInputFiles({ name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
     if (!instructionFirst) {
       await expect(assistant.getByText(/File này thuộc sản phẩm nào/)).toBeVisible();
+      await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('ok');
+      await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');
+      await expect(assistant.getByText(/đang đợi mã model hoặc tên sản phẩm/)).toBeVisible();
       await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('ABC-100');
       await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');
     }
