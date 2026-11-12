@@ -10,6 +10,7 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { AssistantMascot, type MascotState } from './AssistantMascot';
 import { MediaItemCard } from './MediaItemCard';
 import { mediaBatchLabel } from './mediaBatchLabel';
+import { isAssignmentRequest, meansAllFiles, mentionedFile, requestedProduct, targetFromCandidates, targetFromSearch, taskIsCurrent, type MediaTask, type ProductMatch } from './mediaTask';
 import { MEDIA_ASSISTANT_OPEN_EVENT, MEDIA_BATCH_SELECTED_EVENT, MEDIA_BATCH_SELECTION_KEY, MEDIA_BATCH_UPDATED_EVENT,
   type AssistantAnswer, type LocalAiStatus, type MediaAttachment, type MediaBatch, type MediaBatchDetail } from './mediaAssistantTypes';
 import { uploadMediaFiles } from './uploadMediaFiles';
@@ -42,6 +43,10 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [reviewItemId, setReviewItemId] = useState('');
   const [question, setQuestion] = useState('');
+  const [pendingItemIds, setPendingItemIds] = useState<string[]>([]);
+  const [pendingInstruction, setPendingInstruction] = useState('');
+  const [proposedTasks, setProposedTasks] = useState<MediaTask[]>([]);
+  const [proposalBatchId, setProposalBatchId] = useState('');
   const [questionScope, setQuestionScope] = useState<'project' | 'batch'>('project');
   const [robotState, setRobotState] = useState<MascotState>('idle');
   const [launcherActive, setLauncherActive] = useState(false);
@@ -125,6 +130,9 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         setReviewItemId('');
         setQuestionScope('project');
         setMessages([]);
+        setPendingItemIds([]);
+        setPendingInstruction('');
+        setProposedTasks([]);
         return;
       }
       void apiClient.get<MediaBatchDetail>(`${batchEndpoint}/${id}`).then((selected) => {
@@ -132,6 +140,9 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         setReviewItemId('');
         setQuestionScope(selected.items.length ? 'batch' : 'project');
         setMessages([]);
+        setPendingItemIds([]);
+        setPendingInstruction('');
+        setProposedTasks([]);
       }).catch(() => undefined);
     }
     function onUpdate(event: Event) {
@@ -162,6 +173,28 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   async function ask(text: string, scope = questionScope) {
     const prompt = text.trim();
     if (!prompt || busy) return;
+    const taskReply = pendingItemIds.length > 0 && !/[?？]/.test(prompt) && !/^(vì sao|vi sao|còn|con|bao nhiêu|bao nhieu)/i.test(prompt);
+    if (isAssignmentRequest(prompt) || taskReply) {
+      append('user', prompt, { scope: 'batch' });
+      setQuestion('');
+      if (!detail?.items.length) {
+        setPendingInstruction(prompt);
+        append('assistant', 'Mình đã ghi nhớ sản phẩm bạn dặn. Bạn gửi ảnh/PDF vào đây, mình sẽ đối chiếu và đưa việc gán ra để bạn đồng ý.', { scope: 'batch' });
+        return;
+      }
+      setBusy(true);
+      setError('');
+      setRobotState('searching');
+      try {
+        const selectable = detail.items.filter((item) => pendingItemIds.includes(item.id) && !['applied', 'skipped'].includes(item.status));
+        await prepareTaskPlan(detail, selectable.length ? selectable.map((item) => item.id) : detail.items.filter((item) => !['applied', 'skipped'].includes(item.status)).map((item) => item.id), prompt);
+        setRobotState('speaking');
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Chưa tìm được sản phẩm đích.');
+        setRobotState('error');
+      } finally { setBusy(false); }
+      return;
+    }
     const history = messages.filter((message) => message.scope === scope)
       .slice(-6).map(({ role, text }) => ({ role, text: text.slice(0, 1000) }));
     append('user', prompt, { scope });
@@ -185,15 +218,100 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     } finally { setBusy(false); }
   }
 
+  async function prepareTaskPlan(batch: MediaBatchDetail, ids: string[], instruction: string) {
+    const items = batch.items.filter((item) => ids.includes(item.id) && !['applied', 'skipped'].includes(item.status));
+    if (!items.length) {
+      append('assistant', 'Lượt này chưa có file nào cần gán. Bạn gửi ảnh hoặc PDF vào khung chat nhé.', { scope: 'batch' });
+      return;
+    }
+    const namedFile = mentionedFile(items, instruction);
+    if (instruction && items.length > 1 && !meansAllFiles(instruction) && !namedFile) {
+      append('assistant', `Mình đang có ${items.length} file. Bạn nói rõ tên file cần gán, hoặc nói “gán tất cả file cho [mã/tên sản phẩm]” nhé.`, { scope: 'batch', references: items.slice(0, 3).map((item) => item.id) });
+      return;
+    }
+    const chosen = namedFile ? [namedFile] : items;
+    const hint = requestedProduct(instruction);
+    let products: ProductMatch[] = [];
+    if (hint && chosen.some((item) => !targetFromCandidates(item, hint))) {
+      const params = new URLSearchParams({ q: hint, page: '1', page_size: '20', deleted_scope: 'active', status: 'active' });
+      const result = await apiClient.get<{ items: ProductMatch[] }>(`${endpoints.songThanh.productGroups}?${params}`);
+      products = result.items ?? [];
+    }
+    const tasks = chosen.map((item) => targetFromCandidates(item, hint) ?? targetFromSearch(item, hint, products)).filter((task): task is MediaTask => Boolean(task));
+    const missing = chosen.filter((item) => !tasks.some((task) => task.itemId === item.id));
+    const remaining = items.filter((item) => !chosen.some((entry) => entry.id === item.id));
+    setPendingItemIds([...remaining, ...missing].map((item) => item.id));
+    if (tasks.length) {
+      const plan = proposalBatchId === batch.batch.id
+        ? [...proposedTasks.filter((task) => !chosen.some((item) => item.id === task.itemId)), ...tasks] : tasks;
+      setProposalBatchId(batch.batch.id);
+      setProposedTasks(plan);
+      append('assistant', `Mình chuẩn bị gán ${plan.length} file. Xem từng đích ở dưới rồi bấm Đồng ý; lúc đó mình sẽ gắn file vào sản phẩm cho bạn.${missing.length ? ` Còn ${missing.length} file chưa xác định được sản phẩm.` : ''}`, { scope: 'batch' });
+    } else if (hint) {
+      append('assistant', `Mình chưa tìm được đúng một sản phẩm “${hint}” trong project cho ${chosen.length === 1 ? chosen[0].source_path : `${chosen.length} file`}. Bạn gửi mã model hoặc tên sản phẩm chính xác hơn nhé.`, { scope: 'batch', references: chosen.slice(0, 3).map((item) => item.id) });
+    } else {
+      const observed = chosen.length === 1 ? chosen[0].local_analysis?.observed_codes ?? [] : [];
+      const conflict = observed.length > 0 && chosen[0].candidates.length > 0;
+      append('assistant', chosen.length === 1
+        ? `Mình đã nhận ${chosen[0].source_path}.${conflict ? ` AI đọc thấy mã ${observed.join(', ')}, chưa khớp gợi ý từ tên file.` : ''} File này thuộc sản phẩm nào? Bạn trả lời bằng mã model hoặc tên sản phẩm; mình sẽ chuẩn bị việc gán cho bạn đồng ý.`
+        : `Mình đã nhận ${chosen.length} file nhưng chưa tìm được đích gán chắc chắn. Bạn cho mình mã/tên sản phẩm và nói rõ file nào, hoặc “tất cả file”, nhé.`,
+      { scope: 'batch', references: chosen.slice(0, 3).map((item) => item.id) });
+    }
+  }
+
+  async function approveTaskPlan() {
+    if (!detail || busy || proposalBatchId !== detail.batch.id || !proposedTasks.length) return;
+    const tasks = proposedTasks.filter((task) => taskIsCurrent(task, detail));
+    if (tasks.length !== proposedTasks.length) {
+      setProposedTasks([]);
+      setError('File đã thay đổi sau khi mình chuẩn bị. Hãy yêu cầu Songbot kiểm tra lại.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setRobotState('working');
+    try {
+      let latest = await apiClient.get<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}`);
+      if (tasks.some((task) => !taskIsCurrent(task, latest))) throw new Error('File đã thay đổi. Hãy xem lại trước khi gán.');
+      if (latest.items.some((item) => item.status === 'confirmed' && !tasks.some((task) => task.itemId === item.id))) {
+        throw new Error('Lượt này còn file đã xác nhận trước đó. Hãy áp dụng hoặc sửa các file đó trước khi đồng ý việc mới.');
+      }
+      for (const [index, task] of tasks.entries()) {
+        setProgress(`Đang xác nhận ${index + 1}/${tasks.length}: ${task.fileName}`);
+        latest = await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/items/${task.itemId}/confirm`,
+          { decision: { mode: 'attach', attachments: [task.attachment] } });
+        setDetail(latest);
+      }
+      setProgress('Đang gắn file vào sản phẩm.');
+      latest = await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/apply`);
+      setDetail(latest);
+      window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
+      const applied = tasks.filter((task) => latest.items.find((item) => item.id === task.itemId)?.status === 'applied');
+      setProposedTasks([]);
+      setPendingItemIds((current) => current.filter((id) => !applied.some((task) => task.itemId === id)));
+      append('assistant', applied.length === tasks.length
+        ? `Xong rồi. Mình đã gán ${applied.length} file vào sản phẩm như bạn đồng ý.`
+        : `Đã gán ${applied.length}/${tasks.length} file. ${tasks.length - applied.length} file chưa gán được; mình giữ lại để bạn xem lỗi và thử tiếp.`,
+      { scope: 'batch', references: tasks.map((task) => task.itemId) });
+      setRobotState(applied.length === tasks.length ? 'happy' : 'error');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Chưa gán được file.');
+      setRobotState('error');
+    } finally { setBusy(false); setProgress(''); }
+  }
+
   async function intake(files: File[]) {
     if (!files.length || !canUpload || busy || loading) return;
-    append('user', `Mình gửi ${files.length} ảnh/PDF để tìm sản phẩm.`);
+    const instruction = question.trim() || pendingInstruction;
+    append('user', instruction ? `${instruction}\n${files.length} file đính kèm` : `Mình gửi ${files.length} ảnh/PDF để tìm sản phẩm.`);
+    if (instruction) setQuestion('');
+    setProposedTasks([]);
     setBusy(true);
     setError('');
     setRobotState('thinking');
     try {
       const importBatchId = importIdFromPage();
-      const currentBatch = detail && ['open', 'partially_applied'].includes(detail.batch.status) &&
+      const currentBatch = detail && !detail.items.some((item) => item.status === 'confirmed') && ['open', 'partially_applied'].includes(detail.batch.status) &&
         (!importBatchId || detail.batch.import_batch_id === importBatchId) ? detail : null;
       const result = await uploadMediaFiles({ files, currentBatch, importBatchId,
         onProgress: (text) => {
@@ -210,6 +328,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         onDetail: setDetail
       });
       setDetail(result.detail);
+      setPendingInstruction('');
       setReviewItemId('');
       setQuestionScope('batch');
       void apiClient.get<{ items: MediaBatch[] }>(batchEndpoint).then((list) => setBatches(list.items ?? [])).catch(() => undefined);
@@ -217,6 +336,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       window.sessionStorage.setItem(MEDIA_BATCH_SELECTION_KEY, result.detail.batch.id);
       window.dispatchEvent(new CustomEvent(MEDIA_BATCH_SELECTED_EVENT, { detail: result.detail.batch.id }));
       if (result.detail.batch.import_batch_id) {
+        setPendingItemIds([]);
         append('assistant', `Đã nhận ${result.added} file cho lô Excel này. Hãy áp dụng lô Excel trước; sau đó quay lại lượt ảnh/PDF để robot đối chiếu với sản phẩm vừa nhập.${result.failures.length ? ` Có lỗi: ${result.failures.slice(0, 2).join('; ')}` : ''}`, { scope: 'batch' });
       } else {
         const unclear = result.detail.items.filter((item) => ['pending', 'unmatched', 'failed'].includes(item.status) || item.candidates.length > 1).length;
@@ -228,14 +348,14 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           result.aiStatus && !result.aiStatus.available ? 'AI chưa đọc nội dung file vì dịch vụ cục bộ chưa chạy; gợi ý hiện tại chỉ dựa vào tên file hoặc thư mục.' : '',
           result.aiStatus?.available && unread ? `Còn ${unread} file chưa được robot đọc nội dung; bấm “Robot đọc file tiếp” để kiểm tra.` : '',
           unclear ? `Còn ${unclear} file cần xem kỹ.` : '',
-          result.addedItemIds.length > 3 ? 'Mình hiển thị 3 file đầu; mở bản duyệt để xem tất cả.'
-            : result.addedItemIds.length ? 'Chọn file bên dưới để xem lý do và duyệt.' : 'Mở bản duyệt để kiểm tra từng file.',
           result.failures.length ? `Có lỗi: ${result.failures.slice(0, 2).join('; ')}` : ''
         ].filter(Boolean).join(' ');
-        append('assistant', summary, { scope: 'batch', references: result.addedItemIds.slice(0, 3), illustration: result.failures.length ? 'error' : 'happy' });
+        append('assistant', summary, { scope: 'batch', illustration: result.failures.length ? 'error' : 'happy' });
+        await prepareTaskPlan(result.detail, result.addedItemIds, instruction);
       }
       setRobotState(result.failures.length ? 'error' : 'happy');
     } catch (cause) {
+      if (instruction) setQuestion(instruction);
       setError(cause instanceof Error ? cause.message : 'Không nhận được file.');
       setRobotState('error');
     } finally { setBusy(false); setProgress(''); }
@@ -274,6 +394,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     setRobotState('thinking');
     try {
       setDetail(await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/items/${itemId}/analyze-local`));
+      setProposedTasks([]);
       window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
       setRobotState('happy');
     } catch (cause) {
@@ -295,6 +416,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     setError('');
     try {
       setDetail(await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/items/${itemId}/confirm`, { decision }));
+      setProposedTasks([]);
       window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
       append('assistant', decision.mode === 'skip' ? 'Mình đã bỏ qua file này.' : 'Mình đã lưu quyết định. Bấm áp dụng để gắn file vào sản phẩm.', { scope: 'batch', references: [itemId] });
       setRobotState('happy');
@@ -313,6 +435,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     try {
       const result = await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/apply`);
       setDetail(result);
+      setProposedTasks([]);
       window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
       append('assistant', `Đã gán ${result.applied ?? 0} file vào sản phẩm.${result.errors?.length ? ` ${result.errors.length} file cần xem lại.` : ''}`, { scope: 'batch' });
       setRobotState(result.errors?.length ? 'error' : 'happy');
@@ -330,6 +453,10 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   const canApplyConfirmed = detail?.items.every((item) => item.status !== 'confirmed' ||
     (item.mime_type.startsWith('image/') ? permissions.includes(PERMISSIONS.productGroupUpdate)
       : permissions.includes(PERMISSIONS.technicalDocumentCreate))) ?? false;
+  const proposedCurrent = proposalBatchId === detail?.batch.id ? proposedTasks.filter((task) => taskIsCurrent(task, detail)) : [];
+  const otherConfirmed = detail?.items.filter((item) => item.status === 'confirmed' && !proposedCurrent.some((task) => task.itemId === item.id)).length ?? 0;
+  const canApproveProposed = otherConfirmed === 0 && proposedCurrent.length === proposedTasks.length && proposedCurrent.every((task) =>
+    permissions.includes(task.attachment.kind === 'image' ? PERMISSIONS.productGroupUpdate : PERMISSIONS.technicalDocumentCreate));
   const unresolved = detail?.items.filter((item) => ['pending', 'suggested', 'unmatched', 'failed'].includes(item.status)) ?? [];
   const unread = unresolved.filter((item) => !item.local_analysis && item.mime_type !== 'image/svg+xml');
   const usableBatches = batches.filter((batch) => (batch.item_count ?? 0) > 0);
@@ -429,6 +556,21 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           </div> : null}
           {message.products?.length ? <div className={styles.products}>{message.products.map((product) => <Link key={product.id} href={`/product-groups/${product.id}`} onClick={close}>{product.name}</Link>)}</div> : null}
         </div>)}
+        {proposedCurrent.length > 0 && !reviewItem && <section className={styles.taskPlan} aria-label="Việc Songbot chuẩn bị">
+          <div className={styles.taskPlanHeader}><strong>Songbot chuẩn bị gán</strong><span>{proposedCurrent.length} file</span></div>
+          <div className={styles.taskPlanItems}>{proposedCurrent.map((task) => <div key={task.itemId} className={styles.taskPlanItem}>
+            <button type="button" onClick={() => setReviewItemId(task.itemId)} disabled={busy}>
+              <strong>{task.fileName}</strong><span>→ {task.targetName}</span>
+            </button>
+            <small>{task.reason}</small>
+            {task.warning && <p className={styles.taskWarning}>{task.warning}</p>}
+          </div>)}</div>
+          {otherConfirmed > 0 && <p className={styles.taskWarning}>Lượt này còn {otherConfirmed} file đã xác nhận trước đó. Hãy xử lý các file đó trước khi đồng ý việc mới.</p>}
+          <div className={styles.taskPlanActions}>
+            <button type="button" onClick={() => { setPendingItemIds(proposedCurrent.map((task) => task.itemId)); setProposedTasks([]); append('assistant', 'Bạn gửi mã hoặc tên sản phẩm đúng, mình sẽ chuẩn bị lại việc gán.', { scope: 'batch' }); }} disabled={busy} className={styles.taskCancel}>Đổi sản phẩm</button>
+            <button type="button" onClick={() => void approveTaskPlan()} disabled={busy || !canApproveProposed} className={styles.taskApprove}>Đồng ý gán {proposedCurrent.length} file</button>
+          </div>
+        </section>}
         {busy && <div role="status" className={styles.activity}>
           <span className={styles.activityRobot}><AssistantMascot state={robotState} size={64} /></span>
           <span className={styles.activityCopy}><strong>{activityTitle}</strong><small>{progress || 'Mình đang tra dữ liệu trong project.'}</small></span>
@@ -463,7 +605,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
             onFocus={() => { if (!busy) setRobotState('listening'); }}
             onBlur={() => setRobotState((current) => current === 'listening' ? 'idle' : current)}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void ask(question); } }}
-            disabled={busy || loading} placeholder="Hỏi Songbot về sản phẩm hoặc file…" />
+            disabled={busy || loading} placeholder="Ví dụ: Gán ảnh này cho sản phẩm ABC-100…" />
           <div className={styles.composerActions}>
             <button type="submit" aria-label="Gửi" disabled={busy || loading || !question.trim()} className={styles.send}>
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5m0 0L6 11m6-6 6 6" /></svg>

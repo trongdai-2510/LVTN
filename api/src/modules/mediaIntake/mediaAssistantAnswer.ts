@@ -96,7 +96,7 @@ export function answerFromEvidence(question: string, context: MediaAssistantCont
   const asksReview = /kiem tra|truoc khi|ap dung|xac nhan/.test(q)
     && /file|anh|pdf|ap dung|xac nhan/.test(q);
   if (asksAutoAttach) {
-    return { answer: 'Không. AI chỉ đọc file và gợi ý sản phẩm kèm bằng chứng. Admin phải xem file, chọn sản phẩm, xác nhận rồi bấm áp dụng; mã khớp cũng không làm file tự được gán.',
+    return { answer: 'Bạn có thể gửi file kèm lời dặn gán cho mã hoặc tên sản phẩm. Songbot đối chiếu với dữ liệu project, hiển thị file và sản phẩm đích để bạn bấm Đồng ý; sau đó Songbot gắn file. Khi chưa tìm được đúng một sản phẩm, mình sẽ hỏi thêm.',
       referenced_item_ids: [], model: 'project-evidence' };
   }
   if (asksSkipped) {

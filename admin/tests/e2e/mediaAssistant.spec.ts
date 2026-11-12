@@ -272,8 +272,8 @@ test('admin reviews a suggested image before applying the batch', async ({ page,
   expect(await page.evaluate(() => (window as Window & { mediaRobotStates?: Array<string | null> }).mediaRobotStates)).toEqual(
     expect.arrayContaining(['working', 'searching', 'thinking', 'happy'])
   );
-  await expect(page.getByRole('dialog', { name: 'Trợ lý sản phẩm' }).getByText('Sản phẩm A · ABC-100')).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Trợ lý sản phẩm' }).getByText('ABC-100 từ nội dung file AI đọc')).toBeVisible();
+  await expect(assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' })).toContainText('Sản phẩm A');
+  await expect(assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' })).toContainText('ABC-100 từ nội dung');
   await assistant.getByRole('button', { name: 'Sản phẩm', exact: true }).click();
   await page.getByLabel('Hỏi trợ lý sản phẩm').fill('A6CLR là sản phẩm gì?');
   await page.getByRole('button', { name: 'Gửi', exact: true }).click();
@@ -376,4 +376,126 @@ test('a failed upload does not leave another empty work session', async ({ page,
   await expect(page.getByText(/Không thêm được file nào/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Chưa có file nào để duyệt' })).toBeVisible();
   expect(createCount).toBe(0);
+});
+
+async function mockConversationAssignment(page: Page) {
+  const batchId = '00000000-0000-4000-8000-000000000201';
+  const groupId = '00000000-0000-4000-8000-000000000203';
+  const batch = { id: batchId, batch_name: 'Ảnh/PDF', import_batch_id: null, status: 'open', created_at: new Date().toISOString() };
+  const items: Array<Record<string, unknown>> = [];
+  let created = false;
+  let applied = 0;
+  let decision: unknown = null;
+  const decisions: unknown[] = [];
+  let uploadCount = 0;
+  const respond = (data: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data }) });
+  await page.route('**/song-thanh/files/upload', (route) => {
+    uploadCount += 1;
+    return route.fulfill(respond({ file: { id: `00000000-0000-4000-8000-${String(204 + uploadCount).padStart(12, '0')}` } }));
+  });
+  await page.route('**/song-thanh/product-groups?**', (route) => route.fulfill(respond({ items: [{ id: groupId, name: 'Sản phẩm A',
+    search_match: { field: 'model_code', value: 'ABC-100' } }] })));
+  await page.route('**/song-thanh/media-batches**', (route) => {
+    const suffix = new URL(route.request().url()).pathname.replace('/song-thanh/media-batches', '');
+    const method = route.request().method();
+    if (method === 'GET' && suffix === '/local-ai/status') return route.fulfill(respond({ available: false, busy: false, model: 'local', locality: 'localhost', message: '' }));
+    if (method === 'GET' && !suffix) return route.fulfill(respond({ items: created ? [{ ...batch, item_count: items.length }] : [] }));
+    if (method === 'POST' && !suffix) { created = true; return route.fulfill(respond({ batch, items })); }
+    if (method === 'POST' && suffix === `/${batchId}/items`) {
+      const body = route.request().postDataJSON() as { file_id: string; source_path: string };
+      items.push({ id: `00000000-0000-4000-8000-${String(210 + items.length).padStart(12, '0')}`, file_id: body.file_id,
+        source_path: body.source_path, original_filename: body.source_path,
+        mime_type: 'image/jpeg', status: 'pending', candidates: [], local_analysis: null, decision: null, error_message: null });
+      return route.fulfill(respond({ item: items.at(-1) }));
+    }
+    if (method === 'POST' && suffix === `/${batchId}/analyze`) {
+      items.forEach((item) => { item.status = 'unmatched'; });
+      return route.fulfill(respond({ batch, items }));
+    }
+    if (method === 'GET' && suffix === `/${batchId}`) return route.fulfill(respond({ batch, items }));
+    if (method === 'POST' && suffix.match(new RegExp(`^/${batchId}/items/[^/]+/confirm$`))) {
+      decision = (route.request().postDataJSON() as { decision: unknown }).decision;
+      const item = items.find((entry) => entry.id === suffix.split('/')[3]);
+      if (!item) return route.fulfill({ status: 404, body: 'Unknown item' });
+      item.status = 'confirmed';
+      item.decision = decision;
+      decisions.push(decision);
+      return route.fulfill(respond({ batch, items }));
+    }
+    if (method === 'POST' && suffix === `/${batchId}/apply`) {
+      applied += 1;
+      const appliedCount = items.filter((item) => item.status === 'confirmed').length;
+      items.forEach((item) => { if (item.status === 'confirmed') item.status = 'applied'; });
+      batch.status = 'applied';
+      return route.fulfill(respond({ batch, items, applied: appliedCount, errors: [] }));
+    }
+    return route.fulfill({ status: 404, body: 'Unexpected media request' });
+  });
+  return { groupId, getApplied: () => applied, getDecision: () => decision, getDecisions: () => decisions };
+}
+
+test('Songbot prepares and assigns every file only when admin explicitly says all files', async ({ page, request }) => {
+  await seedAdmin(page, request);
+  const mock = await mockConversationAssignment(page);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Gắn tất cả file cho sản phẩm ABC-100');
+  await assistant.locator('input[type="file"]').first().setInputFiles([
+    { name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+    { name: 'side.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }
+  ]);
+  const plan = assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' });
+  await expect(plan).toContainText('front.jpg');
+  await expect(plan).toContainText('side.jpg');
+  expect(mock.getApplied()).toBe(0);
+  await plan.getByRole('button', { name: 'Đồng ý gán 2 file' }).click();
+  await expect(assistant.getByText('Xong rồi. Mình đã gán 2 file vào sản phẩm như bạn đồng ý.')).toBeVisible();
+  expect(mock.getDecisions()).toHaveLength(2);
+  expect(mock.getApplied()).toBe(1);
+});
+
+for (const instructionFirst of [false, true]) {
+  test(`Songbot assigns an uploaded image after consent (${instructionFirst ? 'instruction with file' : 'product reply'})`, async ({ page, request }, testInfo) => {
+    await seedAdmin(page, request);
+    const mock = await mockConversationAssignment(page);
+    await page.goto('/admin/dashboard');
+    await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+    const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+    if (instructionFirst) await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Gắn ảnh này cho sản phẩm ABC-100');
+    await assistant.locator('input[type="file"]').first().setInputFiles({ name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+    if (!instructionFirst) {
+      await expect(assistant.getByText(/File này thuộc sản phẩm nào/)).toBeVisible();
+      await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('ABC-100');
+      await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');
+    }
+    const plan = assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' });
+    await expect(plan).toContainText('front.jpg');
+    await expect(plan).toContainText('Sản phẩm A');
+    if (instructionFirst) await assistant.screenshot({ path: testInfo.outputPath('songbot-assignment-preview.png'), animations: 'disabled' });
+    expect(mock.getApplied()).toBe(0);
+    await plan.getByRole('button', { name: 'Đồng ý gán 1 file' }).click();
+    await expect(assistant.getByText('Xong rồi. Mình đã gán 1 file vào sản phẩm như bạn đồng ý.')).toBeVisible();
+    expect(mock.getApplied()).toBe(1);
+    expect(mock.getDecision()).toEqual({ mode: 'attach', attachments: [{ kind: 'image', product_group_id: mock.groupId,
+      product_variant_id: null, set_thumbnail: false }] });
+    await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  });
+}
+
+test('Songbot remembers an assignment request sent before the file', async ({ page, request }) => {
+  await seedAdmin(page, request);
+  const mock = await mockConversationAssignment(page);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Gắn ảnh này cho sản phẩm ABC-100');
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');
+  await expect(assistant.getByText(/Mình đã ghi nhớ sản phẩm bạn dặn/)).toBeVisible();
+  await assistant.locator('input[type="file"]').first().setInputFiles({ name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  const plan = assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' });
+  await expect(plan).toContainText('Sản phẩm A');
+  expect(mock.getApplied()).toBe(0);
+  await plan.getByRole('button', { name: 'Đồng ý gán 1 file' }).click();
+  await expect(assistant.getByText('Xong rồi. Mình đã gán 1 file vào sản phẩm như bạn đồng ý.')).toBeVisible();
 });

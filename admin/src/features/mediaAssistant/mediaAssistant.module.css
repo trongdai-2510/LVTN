@@ -115,6 +115,22 @@
 .referenceItem small { margin-top: 3px; color: #61788b; font-size: 12px; }
 .products { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
 .products a { color: #145f9f; font-size: 12px; font-weight: 700; }
+.taskPlan { margin: 4px 0 20px; overflow: hidden; border: 1px solid #a9cee2; border-radius: 14px; background: #f8fcfe; box-shadow: 0 3px 12px rgba(15, 73, 108, .06); }
+.taskPlanHeader { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid #dcebf2; color: #153c56; font-size: 13px; }
+.taskPlanHeader span { color: #57798e; font-size: 11px; }
+.taskPlanItems { max-height: 210px; overflow-y: auto; }
+.taskPlanItem { padding: 10px 14px; border-bottom: 1px solid #e5eef3; }
+.taskPlanItem button { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 7px; width: 100%; padding: 0; border: 0; background: none; color: #174b6e; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.taskPlanItem button:hover { text-decoration: underline; }
+.taskPlanItem strong { overflow-wrap: anywhere; }
+.taskPlanItem span { color: #17384e; font-weight: 650; }
+.taskPlanItem small { display: block; margin-top: 4px; color: #688094; font-size: 11px; line-height: 1.45; }
+.taskWarning { margin: 7px 14px; color: #965d1a; font-size: 11px; line-height: 1.5; }
+.taskPlanActions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; }
+.taskPlanActions button { min-height: 37px; padding: 6px 11px; border-radius: 8px; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.taskPlanActions button:disabled { opacity: .55; cursor: default; }
+.taskCancel { border: 1px solid #d1e2ea; background: #fff; color: #476c83; }
+.taskApprove { border: 1px solid #145f9f; background: #145f9f; color: white; }
 .reviewMode { padding: 16px 0 24px; font-size: 13px; }
 .reviewBack { min-height: 32px; padding: 2px 4px; border: 0; border-radius: 6px; background: transparent; color: #145f9f; font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
 .reviewBack:hover { background: #eef6fb; }

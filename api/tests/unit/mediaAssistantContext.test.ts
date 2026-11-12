@@ -123,7 +123,7 @@ test('assistant compares both files and distinguishes suggestions from attachmen
   assert.match(shared?.answer ?? '', /sheet\.pdf/);
   assert.match(shared?.answer ?? '', /chưa chứng minh.*trùng nội dung/);
   assert.deepEqual(shared?.referenced_item_ids, ['image', 'pdf']);
-  assert.match(answerFromEvidence('AI có thể tự gán các file này luôn không?', context)?.answer ?? '', /Admin phải xem file/);
+  assert.match(answerFromEvidence('AI có thể tự gán các file này luôn không?', context)?.answer ?? '', /bấm Đồng ý/);
   assert.match(answerFromEvidence('Đã gán file nào chưa?', context)?.answer ?? '', /0 file đã gán/);
 });
 
