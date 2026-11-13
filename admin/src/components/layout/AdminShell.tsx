@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuthState } from '@/features/auth/useAuthState';
+import { FloatingMediaAssistant } from '@/features/mediaAssistant/FloatingMediaAssistant';
 import { Breadcrumbs } from './Breadcrumbs';
 import { MobileNav } from './MobileNav';
 import { Sidebar } from './Sidebar';
@@ -36,6 +37,7 @@ export function AdminShell({
           </div>
         </main>
       </div>
+      <FloatingMediaAssistant permissions={state.permissions} />
     </>
   );
 }

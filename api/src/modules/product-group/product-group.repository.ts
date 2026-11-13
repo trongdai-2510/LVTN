@@ -27,6 +27,7 @@ import {
   PRODUCT_IMAGE_GALLERY_ENTITY_TYPE,
   PRODUCT_IMAGE_GALLERY_FIELD_NAME,
   PRODUCT_IMAGE_TABLE,
+  PRODUCT_IMAGE_GALLERY_MAX_IMAGES,
   PRODUCT_SPEC_TABLE,
   PRODUCT_VARIANT_TABLE,
   PROJECT_PRODUCT_GROUP_TABLE,
@@ -1212,6 +1213,81 @@ export class ProductGroupRepository {
 
       return items;
     }, []);
+  }
+
+  async appendProductImage(input: {
+    productGroupId: string;
+    productVariantId: string | null;
+    fileId: string;
+    altText: string | null;
+    reopenReview: boolean;
+    transaction?: Knex.Transaction;
+  }): Promise<{ id: string; added: boolean }> {
+    const append = async (trx: Knex.Transaction): Promise<{ id: string; added: boolean }> => {
+      if (input.productVariantId) {
+        const variant = await trx(PRODUCT_VARIANT_TABLE)
+          .where({ id: input.productVariantId }).forUpdate()
+          .first(['id', 'product_group_id', 'status', 'deleted_at']);
+        if (!variant || variant.deleted_at || variant.status !== 'active' || variant.product_group_id !== input.productGroupId) {
+          throw new AppError({ code: ErrorCodes.NOT_FOUND, message: 'Product variant was not found for this product group.', statusCode: HttpStatus.NOT_FOUND });
+        }
+      }
+
+      const group = await lockUsableProductGroupForChildMutation(trx, input.productGroupId);
+      const file = await trx(FILE_METADATA_TABLE)
+        .where({ id: input.fileId }).whereNull('deleted_at').forUpdate()
+        .first(['id', 'mime_type']);
+      if (!file || !String(file.mime_type).startsWith('image/')) {
+        throw new AppError({ code: ErrorCodes.NOT_FOUND, message: 'Active image file was not found.', statusCode: HttpStatus.NOT_FOUND });
+      }
+      const existing = await trx(PRODUCT_IMAGE_TABLE)
+        .where({ product_group_id: input.productGroupId, file_id: input.fileId })
+        .whereNull('deleted_at').first('id', 'product_variant_id');
+      if (existing) {
+        if (existing.product_variant_id !== input.productVariantId) {
+          throw new AppError({ code: 'PRODUCT_IMAGE_VARIANT_CONFLICT', message: 'Ảnh đã nằm trong gallery với biến thể khác. Hãy kiểm tra và chỉnh trực tiếp nếu cần.', statusCode: HttpStatus.CONFLICT });
+        }
+        return { id: existing.id as string, added: false };
+      }
+
+      const count = await trx(PRODUCT_IMAGE_TABLE)
+        .where({ product_group_id: input.productGroupId }).whereNull('deleted_at')
+        .count('id as total').first();
+      const activeCount = Number(count?.total ?? 0);
+      if (activeCount >= PRODUCT_IMAGE_GALLERY_MAX_IMAGES) {
+        throw new AppError({ code: 'PRODUCT_IMAGE_GALLERY_FULL', message: 'Gallery đã đạt giới hạn ảnh.', statusCode: HttpStatus.CONFLICT });
+      }
+      const maxOrder = await trx(PRODUCT_IMAGE_TABLE)
+        .where({ product_group_id: input.productGroupId }).whereNull('deleted_at')
+        .max('sort_order as value').first();
+      const sortOrder = Math.min(Number(maxOrder?.value ?? -1) + 1, 32767);
+      const archived = await trx(PRODUCT_IMAGE_TABLE)
+        .where({ product_group_id: input.productGroupId, file_id: input.fileId })
+        .whereNotNull('deleted_at').orderBy('created_at', 'desc').first('id');
+      let imageId: string;
+      if (archived) {
+        imageId = archived.id as string;
+        await trx(PRODUCT_IMAGE_TABLE).where({ id: imageId }).update({
+          deleted_at: null,
+          product_variant_id: input.productVariantId,
+          alt_text: input.altText,
+          sort_order: sortOrder
+        });
+      } else {
+        const [created] = await trx(PRODUCT_IMAGE_TABLE).insert({
+          product_group_id: input.productGroupId,
+          product_variant_id: input.productVariantId,
+          file_id: input.fileId,
+          alt_text: input.altText,
+          sort_order: sortOrder
+        }).returning('id');
+        imageId = created.id as string;
+      }
+      await this.syncGalleryFileUsage(trx, imageId, null, input.fileId);
+      await this.reopenGroupReview(trx, group, input.reopenReview);
+      return { id: imageId, added: true };
+    };
+    return input.transaction ? append(input.transaction) : this.knexService.db.transaction(append);
   }
 
   /**

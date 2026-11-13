@@ -42,6 +42,7 @@ export const endpoints = {
     adminUsers: '/song-thanh/admin-users',
     adminRoles: '/song-thanh/admin-roles',
     importBatches: '/song-thanh/import-batches',
+    mediaBatches: '/song-thanh/media-batches',
     importBatchUpload: '/song-thanh/import-batches/upload',
     importConflicts: '/song-thanh/import-conflicts',
     auditLogs: '/song-thanh/audit-logs'

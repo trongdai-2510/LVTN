@@ -1,0 +1,51 @@
+.mascot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.poster,
+.sprite,
+.live {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.poster {
+  object-fit: contain;
+}
+.mascot[data-sprite-ready] .poster,
+.mascot[data-ready] .poster { opacity: 0; }
+
+.sprite {
+  opacity: 0;
+  background-repeat: no-repeat;
+  background-size: 2500% 100%;
+  background-position: 0 0;
+  pointer-events: none;
+  animation: mascotFrames 2.4s steps(24, end) infinite;
+  transition: opacity .2s cubic-bezier(.16, 1, .3, 1);
+}
+
+.mascot[data-sprite-ready] .sprite { opacity: 1; }
+.live {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s cubic-bezier(.16, 1, .3, 1);
+}
+
+.mascot[data-ready] .sprite { opacity: 0; }
+.mascot[data-ready] .live { opacity: 1; }
+
+@keyframes mascotFrames { to { background-position: 100% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .poster { opacity: 1 !important; }
+  .sprite { display: none; }
+  .live { display: none; }
+}

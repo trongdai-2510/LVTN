@@ -17,6 +17,7 @@ import {
   Route,
   Settings,
   Shield,
+  Sparkles,
   Tag,
   Tags,
   UploadCloud,
@@ -217,6 +218,12 @@ export const sidebarGroups: SidebarGroup[] = [
         href: '/import',
         permission: PERMISSIONS.importRead,
         icon: UploadCloud
+      },
+      {
+        label: 'Gán ảnh & tài liệu hàng loạt',
+        href: '/media',
+        permission: PERMISSIONS.productGroupRead,
+        icon: Sparkles
       }
     ]
   },

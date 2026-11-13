@@ -206,8 +206,8 @@ export class TechnicalDocumentRepository {
     };
   }
 
-  async create(input: Required<Pick<TechnicalDocumentMutationInput, 'product_group_id' | 'document_name' | 'document_type' | 'file_id'>> & TechnicalDocumentMutationInput): Promise<TechnicalDocumentRecord> {
-    return this.knexService.db.transaction(async (trx) => {
+  async create(input: Required<Pick<TechnicalDocumentMutationInput, 'product_group_id' | 'document_name' | 'document_type' | 'file_id'>> & TechnicalDocumentMutationInput, transaction?: Knex.Transaction): Promise<TechnicalDocumentRecord> {
+    const create = async (trx: Knex.Transaction): Promise<TechnicalDocumentRecord> => {
       await this.lockDocumentProductReferences(
         trx,
         input.product_group_id,
@@ -228,7 +228,8 @@ export class TechnicalDocumentRepository {
         .returning('*');
       await this.syncFileUsage(trx, row.id, null, row.file_id);
       return row;
-    });
+    };
+    return transaction ? create(transaction) : this.knexService.db.transaction(create);
   }
 
   async update(

@@ -131,6 +131,19 @@ export class FileService {
     };
   }
 
+  async readMediaForLocalAnalysis(fileId: string): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+    const readable = await this.resolveReadableFile(fileId, 'File media không tồn tại.', { allowImportWorkbookStorage: false });
+    const { file } = readable;
+    if (!(file.mime_type.startsWith('image/') || file.mime_type === 'application/pdf') || file.file_size > 25 * 1024 * 1024) {
+      throw new AppError({ code: 'LOCAL_AI_FILE_UNSUPPORTED', message: 'AI cục bộ chỉ nhận ảnh hoặc PDF tối đa 25 MB.', statusCode: HttpStatus.BAD_REQUEST });
+    }
+    const buffer = 'buffer' in readable ? readable.buffer : await readFile(readable.resolvedPath);
+    if (buffer.length > 25 * 1024 * 1024) {
+      throw new AppError({ code: 'LOCAL_AI_FILE_TOO_LARGE', message: 'File media vượt quá 25 MB.', statusCode: HttpStatus.BAD_REQUEST });
+    }
+    return { buffer, mimeType: file.mime_type, filename: file.original_filename };
+  }
+
   async sendFilePreview(fileId: string, response: Response): Promise<void> {
     const readableFile = await this.resolveReadableFile(
       fileId,

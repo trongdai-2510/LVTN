@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   Fragment,
   type ReactNode,
@@ -914,6 +915,11 @@ export function ImportDetailPage({ id }: { id: string }) {
             data-import-header-actions="true"
           >
             <Badge tone={statusTone(batch.status)}>{formatValue(batch.status)}</Badge>
+            {authState.permissions.includes(PERMISSIONS.productGroupRead) && authState.permissions.includes(PERMISSIONS.fileCreate) ? (
+              <Link href={`/media?import_batch_id=${encodeURIComponent(id)}`} className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted">
+                Bổ sung ảnh/PDF
+              </Link>
+            ) : null}
             {showReviewTransitionAction ? (
               <Button
                 type="button"
