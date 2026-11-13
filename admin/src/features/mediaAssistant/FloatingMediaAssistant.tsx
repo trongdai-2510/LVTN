@@ -661,7 +661,10 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           const item = itemsById.get(task.itemId);
           return <div key={task.itemId} className={styles.taskPlanItem}>
             <button type="button" onClick={() => setReviewItemId(task.itemId)} disabled={busy} aria-label={`Xem ${task.fileName} và sản phẩm ${task.targetName}`}>
-              {item && <span className={styles.taskFilePreview}><AdminFileThumbnail file={{ id: item.file_id, original_filename: item.original_filename, mime_type: item.mime_type }} alt="" className="h-full w-full object-contain" /></span>}
+              {item && <span className={`${styles.taskFilePreview} ${item.mime_type === 'application/pdf' ? styles.taskPdfPreview : ''}`}>
+                {item.mime_type === 'application/pdf' ? 'PDF'
+                  : <AdminFileThumbnail file={{ id: item.file_id, original_filename: item.original_filename, mime_type: item.mime_type }} alt="" className="h-full w-full object-contain" />}
+              </span>}
               <span className={styles.taskPair}><strong>{task.fileName.split('/').at(-1)}</strong><span>Gán vào {task.targetName}</span></span>
               <span className={styles.taskInspect} aria-hidden="true">Xem</span>
             </button>

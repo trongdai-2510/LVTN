@@ -59,7 +59,8 @@ export function targetFromCandidates(item: MediaItem, hint: string): MediaTask |
   const contentMatches = candidate.evidence.some((entry) => entry.source === 'content' && observed.some((code) => normalizeTaskText(code) === normalizeTaskText(entry.value)));
   if (!requested && observed.length && !contentMatches) return null;
   const warning = observed.length && !contentMatches ? `AI đọc thấy mã ${observed.join(', ')} trong file, chưa xác minh được mã của sản phẩm này.` : undefined;
-  const evidence = candidate.evidence.map((entry) => `${entry.value} từ ${entry.source === 'content' ? 'nội dung' : entry.source === 'folder' ? 'thư mục' : 'tên file'}`).join(', ');
+  const evidence = [...new Set(candidate.evidence.map((entry) =>
+    `${entry.value} từ ${entry.source === 'content' ? 'nội dung' : entry.source === 'folder' ? 'thư mục' : 'tên file'}`))].join(' · ');
   return makeTask(item, candidate.groupId, candidate.variantId, candidate.groupName, evidence || 'Theo sản phẩm bạn chỉ định', warning);
 }
 

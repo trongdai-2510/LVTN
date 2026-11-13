@@ -143,6 +143,7 @@
 .taskPlanItem button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0; border: 0; background: none; color: #174b6e; font: inherit; text-align: left; cursor: pointer; }
 .taskPlanItem button:hover .taskInspect { text-decoration: underline; }
 .taskFilePreview { display: grid; flex: none; place-items: center; width: 38px; height: 38px; overflow: hidden; border: 1px solid #d8e5ed; border-radius: 7px; background: #fff; }
+.taskPdfPreview { border-color: #c9dce8; background: #e9f3f8; color: #2b6989; font-size: 10px; font-weight: 800; letter-spacing: .03em; }
 .taskPair { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .taskPair strong { overflow: hidden; color: #1a3043; font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .taskPair span { overflow: hidden; color: #527086; font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
