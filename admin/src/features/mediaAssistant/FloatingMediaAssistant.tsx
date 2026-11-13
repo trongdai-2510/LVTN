@@ -10,7 +10,7 @@ import { PERMISSIONS } from '@/lib/permissions';
 import { AssistantMascot, type MascotState } from './AssistantMascot';
 import { MediaItemCard } from './MediaItemCard';
 import { mediaBatchLabel } from './mediaBatchLabel';
-import { isAssignmentRequest, meansAllFiles, mentionedFile, normalizeTaskText, requestedProduct, targetFromCandidates, targetFromSearch, taskIsCurrent, type MediaTask, type ProductMatch } from './mediaTask';
+import { isAssignmentRequest, likelyTaskSpeech, meansAllFiles, mentionedFile, normalizeTaskText, taskProductHint, targetFromCandidates, targetFromSearch, taskIsCurrent, type MediaTask, type MediaTaskIntent, type ProductMatch } from './mediaTask';
 import { MEDIA_ASSISTANT_OPEN_EVENT, MEDIA_BATCH_SELECTED_EVENT, MEDIA_BATCH_SELECTION_KEY, MEDIA_BATCH_UPDATED_EVENT,
   type AssistantAnswer, type LocalAiStatus, type MediaAttachment, type MediaBatch, type MediaBatchDetail } from './mediaAssistantTypes';
 import { uploadMediaFiles } from './uploadMediaFiles';
@@ -170,6 +170,15 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     catch { setStatus({ available: false, busy: false, model: 'qwen3-vl:2b-instruct', locality: 'localhost', message: 'Không kết nối được AI cục bộ.' }); }
   }
 
+  async function interpretTask(prompt: string, available = status?.available): Promise<MediaTaskIntent | null> {
+    if (!available || !likelyTaskSpeech(prompt)) return null;
+    try {
+      return await apiClient.post<MediaTaskIntent>(`${batchEndpoint}/assistant/ask`, { question: prompt, mode: 'interpret_task' });
+    } catch {
+      return null;
+    }
+  }
+
   async function ask(text: string, scope = questionScope) {
     const prompt = text.trim();
     if (!prompt || busy) return;
@@ -182,20 +191,26 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       return;
     }
     const taskReply = pendingItemIds.length > 0 && !/[?？]/.test(prompt) && !/^(vì sao|vi sao|còn|con|bao nhiêu|bao nhieu)/i.test(prompt);
-    if (isAssignmentRequest(prompt) || taskReply) {
+    setBusy(true);
+    setError('');
+    setRobotState('thinking');
+    const interpretation = await interpretTask(prompt);
+    const shouldTask = interpretation?.intent === 'assign'
+      || (interpretation?.intent !== 'query' && (isAssignmentRequest(prompt) || taskReply));
+    if (shouldTask) {
       append('user', prompt, { scope: 'batch' });
       setQuestion('');
       if (!detail?.items.length) {
         setPendingInstruction(prompt);
         append('assistant', 'Mình đã ghi nhớ sản phẩm bạn dặn. Bạn gửi ảnh/PDF vào đây, mình sẽ đối chiếu và đưa việc gán ra để bạn đồng ý.', { scope: 'batch' });
+        setBusy(false);
+        setRobotState('speaking');
         return;
       }
-      setBusy(true);
-      setError('');
       setRobotState('searching');
       try {
         const selectable = detail.items.filter((item) => pendingItemIds.includes(item.id) && !['applied', 'skipped'].includes(item.status));
-        await prepareTaskPlan(detail, selectable.length ? selectable.map((item) => item.id) : detail.items.filter((item) => !['applied', 'skipped'].includes(item.status)).map((item) => item.id), prompt);
+        await prepareTaskPlan(detail, selectable.length ? selectable.map((item) => item.id) : detail.items.filter((item) => !['applied', 'skipped'].includes(item.status)).map((item) => item.id), prompt, interpretation);
         setRobotState('speaking');
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Chưa tìm được sản phẩm đích.');
@@ -207,9 +222,6 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       .slice(-6).map(({ role, text }) => ({ role, text: text.slice(0, 1000) }));
     append('user', prompt, { scope });
     setQuestion('');
-    setBusy(true);
-    setError('');
-    setRobotState('thinking');
     try {
       if (scope === 'batch' && detail?.items.length) {
         const focus = [...messages].reverse().find((message) => message.scope === 'batch' && message.role === 'assistant')?.references?.slice(0, 3) ?? [];
@@ -226,19 +238,24 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     } finally { setBusy(false); }
   }
 
-  async function prepareTaskPlan(batch: MediaBatchDetail, ids: string[], instruction: string) {
+  async function prepareTaskPlan(batch: MediaBatchDetail, ids: string[], instruction: string,
+    givenIntent: MediaTaskIntent | null = null, aiAvailable = status?.available) {
     const items = batch.items.filter((item) => ids.includes(item.id) && !['applied', 'skipped'].includes(item.status));
     if (!items.length) {
       append('assistant', 'Lượt này chưa có file nào cần gán. Bạn gửi ảnh hoặc PDF vào khung chat nhé.', { scope: 'batch' });
       return;
     }
-    const namedFile = mentionedFile(items, instruction);
-    if (instruction && items.length > 1 && !meansAllFiles(instruction) && !namedFile) {
+    const intent = givenIntent ?? (instruction ? await interpretTask(instruction, aiAvailable) : null);
+    const allFiles = intent?.all_files || meansAllFiles(instruction);
+    const namedFile = intent?.needs_clarification && !intent.file_name ? null
+      : intent?.file_name ? items.find((item) => (item.source_path.split('/').at(-1) ?? '').toLowerCase() === intent.file_name.toLowerCase()) ?? null
+        : mentionedFile(items, instruction);
+    if (instruction && items.length > 1 && !allFiles && !namedFile) {
       append('assistant', `Mình đang có ${items.length} file. Bạn nói rõ tên file cần gán, hoặc nói “gán tất cả file cho [mã/tên sản phẩm]” nhé.`, { scope: 'batch', references: items.slice(0, 3).map((item) => item.id) });
       return;
     }
     const chosen = namedFile ? [namedFile] : items;
-    const hint = requestedProduct(instruction);
+    const hint = taskProductHint(intent, instruction);
     let products: ProductMatch[] = [];
     if (hint && chosen.some((item) => !targetFromCandidates(item, hint))) {
       const params = new URLSearchParams({ q: hint, page: '1', page_size: '20', deleted_scope: 'active', status: 'active' });
@@ -359,7 +376,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           result.failures.length ? `Có lỗi: ${result.failures.slice(0, 2).join('; ')}` : ''
         ].filter(Boolean).join(' ');
         append('assistant', summary, { scope: 'batch', illustration: result.failures.length ? 'error' : 'happy' });
-        await prepareTaskPlan(result.detail, result.addedItemIds, instruction);
+        await prepareTaskPlan(result.detail, result.addedItemIds, instruction, null, result.aiStatus?.available ?? false);
       }
       setRobotState(result.failures.length ? 'error' : 'happy');
     } catch (cause) {

@@ -55,7 +55,9 @@ export class MediaIntakeController {
   @HttpCode(HttpStatus.OK)
   @RequirePermissions('product_group.read', 'product_variant.read', 'file.read')
   askProject(@Body() body: AskMediaBatchDto) {
-    return this.service.askProject(body.question, body.history);
+    return body.mode === 'interpret_task'
+      ? this.service.interpretTask(body.question)
+      : this.service.askProject(body.question, body.history);
   }
 
   @Post(':id/items/:itemId/analyze-local')

@@ -181,6 +181,14 @@ export class MediaIntakeService {
     return this.localAnalysis.answerQuestion(trimmed, context, history.slice(-6));
   }
 
+  async interpretTask(question: string) {
+    const trimmed = question?.trim();
+    if (!trimmed || trimmed.length > 500) throw new AppError({
+      code: ErrorCodes.VALIDATION_ERROR, message: 'Câu hỏi phải có từ 1 đến 500 ký tự.', statusCode: HttpStatus.BAD_REQUEST
+    });
+    return this.localAnalysis.interpretTask(trimmed);
+  }
+
   async askProject(question: string, history: MediaConversationTurn[] = []) {
     const trimmed = question?.trim();
     if (!trimmed || trimmed.length > 500) throw new AppError({

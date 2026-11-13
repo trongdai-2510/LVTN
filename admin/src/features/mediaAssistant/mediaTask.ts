@@ -2,6 +2,7 @@ import type { MediaAttachment, MediaBatchDetail, MediaItem, ProductChoice } from
 
 export type MediaTask = { itemId: string; fileName: string; targetName: string; attachment: MediaAttachment; reason: string; warning?: string };
 export type ProductMatch = ProductChoice & { search_match?: { field: string; value: string } | null };
+export type MediaTaskIntent = { intent: 'assign' | 'query' | 'unclear'; target_text: string; file_name: string; all_files: boolean; needs_clarification: boolean };
 
 export function normalizeTaskText(value: string): string {
   return value.replace(/[đĐ]/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -16,8 +17,19 @@ export function requestedProduct(text: string): string {
 
 export function isAssignmentRequest(text: string): boolean {
   const normalized = normalizeTaskText(text);
-  return /\b(gan|them|dua|ap dung)\b/.test(normalized)
+  if (/[?？]/.test(text) || /\b(truoc khi|sau khi) gan\b/.test(normalized)
+    || /^(cho toi xem|xem|tim|lam sao|san pham nao)\b/.test(normalized)) return false;
+  return /\b(gan|them|dua|ap dung|dinh kem|bo sung)\b/.test(normalized)
     && (/\b(anh|file|pdf|tai lieu|san pham)\b/.test(normalized) || /\.(?:jpe?g|png|webp|svg|pdf)\b/i.test(text));
+}
+
+export function likelyTaskSpeech(text: string): boolean {
+  return /\b(gan|dinh kem|them|dua|bo sung|thuoc|cua ma|vao san pham)\b/.test(normalizeTaskText(text));
+}
+
+export function taskProductHint(intent: MediaTaskIntent | null, instruction: string): string {
+  return (intent ? intent.intent === 'assign' ? intent.target_text : '' : requestedProduct(instruction))
+    .replace(/^(?:sản phẩm|san pham|mã|ma|model|sp)\s+/iu, '').trim();
 }
 
 export function meansAllFiles(text: string): boolean {

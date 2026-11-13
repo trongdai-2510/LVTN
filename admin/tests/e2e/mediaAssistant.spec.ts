@@ -396,7 +396,7 @@ test('a failed upload does not leave another empty work session', async ({ page,
   expect(createCount).toBe(0);
 });
 
-async function mockConversationAssignment(page: Page) {
+async function mockConversationAssignment(page: Page, withTaskAi = false) {
   const batchId = '00000000-0000-4000-8000-000000000201';
   const groupId = '00000000-0000-4000-8000-000000000203';
   const batch = { id: batchId, batch_name: 'Ảnh/PDF', import_batch_id: null, status: 'open', created_at: new Date().toISOString() };
@@ -406,6 +406,7 @@ async function mockConversationAssignment(page: Page) {
   let decision: unknown = null;
   const decisions: unknown[] = [];
   let uploadCount = 0;
+  const taskPrompts: string[] = [];
   const respond = (data: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data }) });
   await page.route('**/song-thanh/files/upload', (route) => {
     uploadCount += 1;
@@ -416,7 +417,16 @@ async function mockConversationAssignment(page: Page) {
   await page.route('**/song-thanh/media-batches**', (route) => {
     const suffix = new URL(route.request().url()).pathname.replace('/song-thanh/media-batches', '');
     const method = route.request().method();
-    if (method === 'GET' && suffix === '/local-ai/status') return route.fulfill(respond({ available: false, busy: false, model: 'local', locality: 'localhost', message: '' }));
+    if (method === 'GET' && suffix === '/local-ai/status') return route.fulfill(respond({ available: withTaskAi, busy: false, model: 'local', locality: 'localhost', message: '' }));
+    if (method === 'POST' && suffix === '/assistant/ask' && withTaskAi) {
+      const body = route.request().postDataJSON() as { question: string; mode?: string };
+      if (body.mode === 'interpret_task') {
+        taskPrompts.push(body.question);
+        return route.fulfill(respond({ intent: body.question.startsWith('Cho tôi xem') ? 'query' : 'assign',
+          target_text: body.question.includes('ABC-100') ? 'ABC-100' : '', file_name: '', all_files: false, needs_clarification: false }));
+      }
+      return route.fulfill(respond({ answer: 'Có sản phẩm thiếu ảnh trong project.', products: [], model: 'project-data' }));
+    }
     if (method === 'GET' && !suffix) return route.fulfill(respond({ items: created ? [{ ...batch, item_count: items.length }] : [] }));
     if (method === 'POST' && !suffix) { created = true; return route.fulfill(respond({ batch, items })); }
     if (method === 'POST' && suffix === `/${batchId}/items`) {
@@ -428,6 +438,12 @@ async function mockConversationAssignment(page: Page) {
     }
     if (method === 'POST' && suffix === `/${batchId}/analyze`) {
       items.forEach((item) => { item.status = 'unmatched'; });
+      return route.fulfill(respond({ batch, items }));
+    }
+    if (method === 'POST' && suffix.match(new RegExp(`^/${batchId}/items/[^/]+/analyze-local$`)) && withTaskAi) {
+      const item = items.find((entry) => entry.id === suffix.split('/')[3]);
+      if (!item) return route.fulfill({ status: 404, body: 'Unknown item' });
+      item.local_analysis = { model: 'local', observed_codes: [], visible_text: [], description: '', uncertainty: '', analyzed_pages: 0 };
       return route.fulfill(respond({ batch, items }));
     }
     if (method === 'GET' && suffix === `/${batchId}`) return route.fulfill(respond({ batch, items }));
@@ -449,8 +465,53 @@ async function mockConversationAssignment(page: Page) {
     }
     return route.fulfill({ status: 404, body: 'Unexpected media request' });
   });
-  return { groupId, getApplied: () => applied, getDecision: () => decision, getDecisions: () => decisions };
+  return { groupId, getApplied: () => applied, getDecision: () => decision, getDecisions: () => decisions, taskPrompts };
 }
+
+test('Songbot understands a natural attachment request and waits for consent', async ({ page, request }) => {
+  await seedAdmin(page, request);
+  const mock = await mockConversationAssignment(page, true);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  await assistant.locator('input[type="file"]').first().setInputFiles({ name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await expect(assistant.getByText(/File này thuộc sản phẩm nào/)).toBeVisible();
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Đính kèm ảnh này vào mã ABC-100');
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');
+  const plan = assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' });
+  await expect(plan).toContainText('Sản phẩm A');
+  expect(mock.taskPrompts).toContain('Đính kèm ảnh này vào mã ABC-100');
+  expect(mock.getApplied()).toBe(0);
+  await plan.getByRole('button', { name: 'Đồng ý gán 1 file' }).click();
+  await expect(assistant.getByText(/Xong rồi. Mình đã gán 1 file/)).toBeVisible();
+  expect(mock.getApplied()).toBe(1);
+});
+
+test('Songbot uses the file instruction in the same upload turn', async ({ page, request }) => {
+  await seedAdmin(page, request);
+  const mock = await mockConversationAssignment(page, true);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Đính kèm ảnh này vào mã ABC-100');
+  await assistant.locator('input[type="file"]').first().setInputFiles({ name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) });
+  await expect(assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' })).toContainText('Sản phẩm A');
+  expect(mock.taskPrompts).toContain('Đính kèm ảnh này vào mã ABC-100');
+  expect(mock.getApplied()).toBe(0);
+});
+
+test('Songbot answers a question about missing images without treating it as an assignment', async ({ page, request }) => {
+  await seedAdmin(page, request);
+  const mock = await mockConversationAssignment(page, true);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Cho tôi xem sản phẩm nào thiếu ảnh trước khi gán');
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').press('Enter');
+  await expect(assistant.getByText('Có sản phẩm thiếu ảnh trong project.')).toBeVisible();
+  await expect(assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' })).toHaveCount(0);
+  expect(mock.taskPrompts).toEqual(['Cho tôi xem sản phẩm nào thiếu ảnh trước khi gán']);
+});
 
 test('Songbot prepares and assigns every file only when admin explicitly says all files', async ({ page, request }) => {
   await seedAdmin(page, request);

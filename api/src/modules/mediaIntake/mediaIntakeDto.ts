@@ -42,6 +42,10 @@ export class AskMediaBatchDto {
   question!: string;
 
   @IsOptional()
+  @IsIn(['interpret_task'])
+  mode?: 'interpret_task';
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(3)
   @IsUUID('all', { each: true })

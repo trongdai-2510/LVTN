@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isAssignmentRequest, meansAllFiles, requestedProduct, targetFromCandidates, targetFromSearch } from '../../src/features/mediaAssistant/mediaTask.ts';
+import { isAssignmentRequest, likelyTaskSpeech, meansAllFiles, requestedProduct, taskProductHint, targetFromCandidates, targetFromSearch } from '../../src/features/mediaAssistant/mediaTask.ts';
 
 const item = {
   id: 'file-1', source_path: 'ABC-100/front.jpg', mime_type: 'image/jpeg', status: 'suggested',
@@ -17,6 +17,11 @@ test('extracts a product instruction that accompanies a file', () => {
   assert.equal(requestedProduct('Đưa PDF này vào sản phẩm ABC-100'), 'ABC-100');
   assert.equal(meansAllFiles('Gắn tất cả file cho ABC-100'), true);
   assert.equal(meansAllFiles('Gắn file này cho ABC-100'), false);
+  assert.equal(isAssignmentRequest('Cho tôi xem sản phẩm nào thiếu ảnh trước khi gán'), false);
+  assert.equal(isAssignmentRequest('Đính kèm ảnh này vào mã ABC-100'), true);
+  assert.equal(isAssignmentRequest('Làm sao gắn ảnh cho sản phẩm?'), false);
+  assert.equal(likelyTaskSpeech('Đính kèm ảnh này vào mã ABC-100'), true);
+  assert.equal(taskProductHint({ intent: 'assign', target_text: 'model ABC-100', file_name: '', all_files: false, needs_clarification: false }, ''), 'ABC-100');
 });
 
 test('uses a unique project match and never infers an unresolved target', () => {

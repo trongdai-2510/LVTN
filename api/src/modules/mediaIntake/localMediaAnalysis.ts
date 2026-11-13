@@ -8,6 +8,7 @@ const sharp: typeof import('sharp').default = require('sharp');
 import { AppError } from '../../common/errors/app-error';
 import { FileService } from '../file/file.service';
 import type { MediaAssistantContext } from './mediaAssistantContext';
+import { normalizeMediaTaskIntent, type MediaTaskIntent } from './mediaTaskIntent';
 
 const OLLAMA_URL = 'http://127.0.0.1:11434';
 const MODEL = 'qwen3-vl:2b-instruct';
@@ -220,6 +221,40 @@ export class LocalMediaAnalysis {
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw unavailable('Phân tích cục bộ thất bại. Vui lòng kiểm tra file và Ollama.');
+    } finally {
+      this.working = false;
+    }
+  }
+
+  async interpretTask(question: string): Promise<MediaTaskIntent> {
+    if (this.working) throw unavailable('AI cục bộ đang xử lý file khác. Vui lòng thử lại sau.');
+    this.working = true;
+    try {
+      const state = await this.status();
+      if (!state.available) throw unavailable(state.message);
+      const system = [
+        'Phân tích ý định câu người dùng trong quản trị sản phẩm. Chỉ trả JSON với intent: assign | query | unclear, target_text, file_name, all_files, needs_clarification.',
+        'assign nếu người dùng yêu cầu gắn hoặc nói file thuộc mã/sản phẩm nào. query nếu họ chỉ hỏi, tìm hoặc xem dữ liệu. Không biến câu hỏi “xem ... trước khi gán” thành lệnh gán.',
+        'target_text là nguyên văn mã/tên sản phẩm được nêu sau cho/vào/của mã, hoặc chuỗi rỗng. file_name chỉ là tên file có đuôi ảnh/PDF viết nguyên văn trong câu; không tự tạo tên file. all_files chỉ đúng khi người dùng nói tất cả, toàn bộ hoặc mọi file.',
+        'Nếu câu nói mơ hồ kiểu “cái bên cạnh”, đặt needs_clarification=true. Không khẳng định sản phẩm tồn tại; hệ thống sẽ kiểm tra riêng.',
+        'Ví dụ: Gắn ảnh này cho model ABC-100 => {"intent":"assign","target_text":"ABC-100","file_name":"","all_files":false,"needs_clarification":false}.',
+        'Ví dụ: Đưa toàn bộ PDF vào sản phẩm Đèn A => {"intent":"assign","target_text":"Đèn A","file_name":"","all_files":true,"needs_clarification":false}.',
+        'Ví dụ: Ảnh A6CLR còn thiếu không? => {"intent":"query","target_text":"A6CLR","file_name":"","all_files":false,"needs_clarification":false}.'
+      ].join('\n');
+      const response = await fetch(`${OLLAMA_URL}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({ model: MODEL, stream: false, format: 'json',
+          options: { temperature: 0, num_ctx: 2048, num_predict: 180 },
+          messages: [{ role: 'system', content: system }, { role: 'user', content: question }] })
+      });
+      if (!response.ok) throw unavailable('AI cục bộ chưa hiểu được câu này.');
+      const payload = await response.json() as { message?: { content?: string } };
+      const content = payload.message?.content;
+      if (!content || content.length > 4000) throw unavailable('Phản hồi ý định từ AI không hợp lệ.');
+      return normalizeMediaTaskIntent(JSON.parse(content) as unknown, question);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw unavailable('AI cục bộ chưa phân tích được ý định lúc này.');
     } finally {
       this.working = false;
     }
