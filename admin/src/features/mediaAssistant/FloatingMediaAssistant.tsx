@@ -43,6 +43,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   const [status, setStatus] = useState<LocalAiStatus | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [reviewItemId, setReviewItemId] = useState('');
+  const [worklistOpen, setWorklistOpen] = useState(false);
   const [question, setQuestion] = useState('');
   const [pendingItemIds, setPendingItemIds] = useState<string[]>([]);
   const [pendingInstruction, setPendingInstruction] = useState('');
@@ -129,6 +130,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       if (!id) {
         setDetail(null);
         setReviewItemId('');
+        setWorklistOpen(false);
         setQuestionScope('project');
         setMessages([]);
         setPendingItemIds([]);
@@ -139,6 +141,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       void apiClient.get<MediaBatchDetail>(`${batchEndpoint}/${id}`).then((selected) => {
         setDetail(selected);
         setReviewItemId('');
+        setWorklistOpen(false);
         setQuestionScope(selected.items.length ? 'batch' : 'project');
         setMessages([]);
         setPendingItemIds([]);
@@ -240,10 +243,14 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   }
 
   async function prepareTaskPlan(batch: MediaBatchDetail, ids: string[], instruction: string,
-    givenIntent: MediaTaskIntent | null = null, aiAvailable = status?.available) {
+    givenIntent: MediaTaskIntent | null = null, aiAvailable = status?.available,
+    uploadReply?: { summary: string; illustration: 'happy' | 'error' }) {
+    const reply = (text: string, references?: string[]) => append('assistant',
+      uploadReply ? `${uploadReply.summary} ${text}`.trim() : text,
+      { scope: 'batch', references, illustration: uploadReply?.illustration });
     const items = batch.items.filter((item) => ids.includes(item.id) && !['applied', 'skipped'].includes(item.status));
     if (!items.length) {
-      append('assistant', 'Lượt này chưa có file nào cần gán. Bạn gửi ảnh hoặc PDF vào khung chat nhé.', { scope: 'batch' });
+      reply('Lượt này chưa có file nào cần gán. Bạn gửi ảnh hoặc PDF vào khung chat nhé.');
       return;
     }
     const intent = givenIntent ?? (instruction ? await interpretTask(instruction, aiAvailable) : null);
@@ -252,7 +259,8 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       : intent?.file_name ? items.find((item) => (item.source_path.split('/').at(-1) ?? '').toLowerCase() === intent.file_name.toLowerCase()) ?? null
         : mentionedFile(items, instruction);
     if (instruction && items.length > 1 && !allFiles && !namedFile) {
-      append('assistant', `Mình đang có ${items.length} file. Bạn nói rõ tên file cần gán, hoặc nói “gán tất cả file cho [mã/tên sản phẩm]” nhé.`, { scope: 'batch', references: items.slice(0, 3).map((item) => item.id) });
+      setWorklistOpen(true);
+      reply(`Mình đang có ${items.length} file. Bạn nói rõ tên file cần gán, hoặc nói “gán tất cả file cho [mã/tên sản phẩm]” nhé.`);
       return;
     }
     const chosen = namedFile ? [namedFile] : items;
@@ -268,20 +276,23 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     const remaining = items.filter((item) => !chosen.some((entry) => entry.id === item.id));
     setPendingItemIds([...remaining, ...missing].map((item) => item.id));
     if (tasks.length) {
+      setWorklistOpen(false);
       const plan = proposalBatchId === batch.batch.id
         ? [...proposedTasks.filter((task) => !chosen.some((item) => item.id === task.itemId)), ...tasks] : tasks;
       setProposalBatchId(batch.batch.id);
       setProposedTasks(plan);
-      append('assistant', `Mình chuẩn bị gán ${plan.length} file. Xem từng đích ở dưới rồi bấm Đồng ý; lúc đó mình sẽ gắn file vào sản phẩm cho bạn.${missing.length ? ` Còn ${missing.length} file chưa xác định được sản phẩm.` : ''}`, { scope: 'batch' });
+      reply(`Mình chuẩn bị gán ${plan.length} file. Xem từng đích ở dưới rồi bấm Đồng ý; lúc đó mình sẽ gắn file vào sản phẩm cho bạn.${missing.length ? ` Còn ${missing.length} file chưa xác định được sản phẩm.` : ''}`);
     } else if (hint) {
-      append('assistant', `Mình chưa tìm được đúng một sản phẩm “${hint}” trong project cho ${chosen.length === 1 ? chosen[0].source_path : `${chosen.length} file`}. Bạn gửi mã model hoặc tên sản phẩm chính xác hơn nhé.`, { scope: 'batch', references: chosen.slice(0, 3).map((item) => item.id) });
+      if (chosen.length > 1) setWorklistOpen(true);
+      reply(`Mình chưa tìm được đúng một sản phẩm “${hint}” trong project cho ${chosen.length === 1 ? chosen[0].source_path : `${chosen.length} file`}. Bạn gửi mã model hoặc tên sản phẩm chính xác hơn nhé.`, chosen.length === 1 ? [chosen[0].id] : undefined);
     } else {
       const observed = chosen.length === 1 ? chosen[0].local_analysis?.observed_codes ?? [] : [];
       const conflict = observed.length > 0 && chosen[0].candidates.length > 0;
-      append('assistant', chosen.length === 1
-        ? `Mình đã nhận ${chosen[0].source_path}.${conflict ? ` AI đọc thấy mã ${observed.join(', ')}, chưa khớp gợi ý từ tên file.` : ''} File này thuộc sản phẩm nào? Bạn trả lời bằng mã model hoặc tên sản phẩm; mình sẽ chuẩn bị việc gán cho bạn đồng ý.`
-        : `Mình đã nhận ${chosen.length} file nhưng chưa tìm được đích gán chắc chắn. Bạn cho mình mã/tên sản phẩm và nói rõ file nào, hoặc “tất cả file”, nhé.`,
-      { scope: 'batch', references: chosen.slice(0, 3).map((item) => item.id) });
+      if (chosen.length > 1) setWorklistOpen(true);
+      reply(chosen.length === 1
+        ? `${conflict ? `AI đọc thấy mã ${observed.join(', ')}, chưa khớp gợi ý từ tên file. ` : ''}File này thuộc sản phẩm nào? Bạn trả lời bằng mã model hoặc tên sản phẩm; mình sẽ chuẩn bị việc gán cho bạn đồng ý.`
+        : 'Chọn file trong danh sách trên để kiểm tra, hoặc gửi tên file kèm mã sản phẩm. Nếu tất cả cùng một sản phẩm, hãy nói “gán tất cả file cho [mã sản phẩm]”.',
+      chosen.length === 1 ? [chosen[0].id] : undefined);
     }
   }
 
@@ -321,6 +332,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       { scope: 'batch', references: tasks.map((task) => task.itemId) });
       setRobotState(applied.length === tasks.length ? 'happy' : 'error');
     } catch (cause) {
+      setProposedTasks([]);
       setError(cause instanceof Error ? cause.message : 'Chưa gán được file.');
       setRobotState('error');
     } finally { setBusy(false); setProgress(''); }
@@ -356,6 +368,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       setDetail(result.detail);
       setPendingInstruction('');
       setReviewItemId('');
+      setWorklistOpen(result.added > 1);
       setQuestionScope('batch');
       void apiClient.get<{ items: MediaBatch[] }>(batchEndpoint).then((list) => setBatches(list.items ?? [])).catch(() => undefined);
       if (result.aiStatus) setStatus(result.aiStatus);
@@ -365,19 +378,17 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         setPendingItemIds([]);
         append('assistant', `Đã nhận ${result.added} file cho lô Excel này. Hãy áp dụng lô Excel trước; sau đó quay lại lượt ảnh/PDF để robot đối chiếu với sản phẩm vừa nhập.${result.failures.length ? ` Có lỗi: ${result.failures.slice(0, 2).join('; ')}` : ''}`, { scope: 'batch' });
       } else {
-        const unclear = result.detail.items.filter((item) => ['pending', 'unmatched', 'failed'].includes(item.status) || item.candidates.length > 1).length;
         const unread = result.detail.items.filter((item) => ['pending', 'suggested', 'unmatched'].includes(item.status)
           && !item.local_analysis && item.mime_type !== 'image/svg+xml').length;
         const summary = [
           `Đã nhận ${result.added} file${result.matched ? `, tìm được gợi ý cho ${result.matched} file` : ''}.`,
           result.aiRead ? `Mình đã đọc nội dung ${result.aiRead} file để kiểm tra mã.` : '',
-          result.aiStatus && !result.aiStatus.available ? 'AI chưa đọc nội dung file vì dịch vụ cục bộ chưa chạy; gợi ý hiện tại chỉ dựa vào tên file hoặc thư mục.' : '',
-          result.aiStatus?.available && unread ? `Còn ${unread} file chưa được robot đọc nội dung; bấm “Robot đọc file tiếp” để kiểm tra.` : '',
-          unclear ? `Còn ${unclear} file cần xem kỹ.` : '',
+          result.aiStatus && !result.aiStatus.available ? 'AI chưa đọc nội dung; mình mới kiểm tra tên file và thư mục.' : '',
+          result.aiStatus?.available && unread ? `Còn ${unread} file chưa đọc nội dung; bạn có thể yêu cầu Songbot đọc tiếp.` : '',
           result.failures.length ? `Có lỗi: ${result.failures.slice(0, 2).join('; ')}` : ''
         ].filter(Boolean).join(' ');
-        append('assistant', summary, { scope: 'batch', illustration: result.failures.length ? 'error' : 'happy' });
-        await prepareTaskPlan(result.detail, result.addedItemIds, instruction, null, result.aiStatus?.available ?? false);
+        await prepareTaskPlan(result.detail, result.addedItemIds, instruction, null, result.aiStatus?.available ?? false,
+          { summary, illustration: result.failures.length ? 'error' : 'happy' });
       }
       setRobotState(result.failures.length ? 'error' : 'happy');
     } catch (cause) {
@@ -393,19 +404,23 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
       ['pending', 'suggested', 'unmatched'].includes(item.status) && !item.local_analysis && item.mime_type !== 'image/svg+xml'
     ).slice(0, 5);
     if (!eligible.length) return;
+    const invalidatedPlan = proposedTasks.length > 0;
+    setProposedTasks([]);
     setBusy(true);
     setError('');
     setRobotState('thinking');
     let completed = 0;
+    const failed: string[] = [];
     for (const [index, item] of eligible.entries()) {
       setProgress(`Đang đọc ${index + 1}/${eligible.length}: ${item.source_path}`);
       try {
         setDetail(await apiClient.post<MediaBatchDetail>(`${batchEndpoint}/${detail.batch.id}/items/${item.id}/analyze-local`));
         completed += 1;
-      } catch { /* The remaining files can be retried from the same conversation. */ }
+      } catch { failed.push(item.source_path.split('/').at(-1) ?? item.source_path); }
     }
     window.dispatchEvent(new CustomEvent(MEDIA_BATCH_UPDATED_EVENT, { detail: detail.batch.id }));
-    append('assistant', `AI đã đọc ${completed}/${eligible.length} file. Hãy xem phần gợi ý trước khi xác nhận.`, { scope: 'batch' });
+    if (detail.items.length > 1) setWorklistOpen(true);
+    append('assistant', `AI đã đọc ${completed}/${eligible.length} file.${failed.length ? ` Chưa đọc được ${failed.slice(0, 3).join(', ')}; bạn có thể mở từng file để thử lại.` : ' Hãy xem kết quả trước khi xác nhận.'}${invalidatedPlan ? ' Đề xuất gán cũ đã được bỏ vì bằng chứng có thể đã thay đổi.' : ''}`, { scope: 'batch' });
     setProgress('');
     setBusy(false);
     setRobotState(completed ? 'happy' : 'error');
@@ -487,6 +502,10 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   const unresolved = detail?.items.filter((item) => ['pending', 'suggested', 'unmatched', 'failed'].includes(item.status)) ?? [];
   const unread = unresolved.filter((item) => !item.local_analysis && item.mime_type !== 'image/svg+xml');
   const itemsById = new Map(detail?.items.map((item) => [item.id, item]) ?? []);
+  const orderedItems = detail ? [...detail.items].sort((a, b) => {
+    const rank = { failed: 0, unmatched: 1, pending: 2, suggested: 3, confirmed: 4, applied: 5, skipped: 6 };
+    return rank[a.status] - rank[b.status];
+  }) : [];
   const usableBatches = batches.filter((batch) => (batch.item_count ?? 0) > 0);
   const onImportDetail = /\/import\/[0-9a-f-]{36}\/?$/i.test(pathname ?? '');
   const welcomeTitle = detail?.items.length
@@ -527,7 +546,32 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
             {appliedCount > 0 && <span>{appliedCount} đã gán</span>}
           </div>
         </div>
-        <button type="button" onClick={() => setReviewItemId((unresolved[0] ?? detail.items[0]).id)}>Xem file</button>
+        <button type="button" onClick={() => detail.items.length === 1
+          ? setReviewItemId(detail.items[0].id) : setWorklistOpen((current) => !current)}
+          aria-expanded={detail.items.length > 1 ? worklistOpen : undefined}
+          aria-controls={detail.items.length > 1 ? 'songbot-worklist' : undefined}>
+          {detail.items.length === 1 ? 'Xem file' : worklistOpen ? 'Thu gọn' : 'Danh sách file'}
+        </button>
+      </div>}
+
+      {detail && detail.items.length > 1 && worklistOpen && !reviewItem && <section id="songbot-worklist" className={styles.worklist} aria-label="Danh sách file trong công việc hiện tại">
+        <div className={styles.worklistHeading}><strong>Chọn file để kiểm tra</strong><span>{detail.items.length} file</span></div>
+        <div className={styles.worklistItems}>{orderedItems.map((item) => {
+          const label = item.status === 'applied' ? 'Đã gán' : item.status === 'confirmed' ? 'Chờ áp dụng'
+            : item.status === 'skipped' ? 'Đã bỏ qua' : item.status === 'failed' ? 'Cần xem lỗi'
+              : item.status === 'suggested' ? 'Có gợi ý' : item.status === 'unmatched' ? 'Cần chọn sản phẩm' : 'Chưa đối chiếu';
+          const candidate = item.candidates.length === 1 ? item.candidates[0] : null;
+          return <button key={item.id} type="button" onClick={() => { setWorklistOpen(false); setReviewItemId(item.id); }} className={styles.worklistItem}>
+            <span className={styles.worklistFile}>{item.source_path.split('/').at(-1)}</span>
+            <span className={styles.worklistDetail}>{candidate ? `${candidate.groupName}${candidate.variantName && candidate.variantName !== candidate.groupName ? ` · ${candidate.variantName}` : ''}` : item.mime_type.startsWith('image/') ? 'Ảnh sản phẩm' : 'Tài liệu PDF'}</span>
+            <span className={styles.worklistStatus} data-status={item.status}>{label}</span>
+          </button>;
+        })}</div>
+      </section>}
+
+      {!reviewItem && confirmedCount > 0 && proposedCurrent.length === 0 && <div className={styles.pendingApply}>
+        <span><strong>{confirmedCount} file đã xác nhận</strong><small>Chưa gắn vào sản phẩm</small></span>
+        <button type="button" disabled={busy || !canApplyConfirmed} onClick={() => void applyBatch()}>Áp dụng {confirmedCount} file</button>
       </div>}
 
       <div ref={bodyRef} className={styles.body} onDragOver={(event) => event.preventDefault()}

@@ -1,6 +1,6 @@
 import type { MediaAttachment, MediaBatchDetail, MediaItem, ProductChoice } from './mediaAssistantTypes';
 
-export type MediaTask = { itemId: string; fileName: string; targetName: string; attachment: MediaAttachment; reason: string; warning?: string };
+export type MediaTask = { itemId: string; fileName: string; targetName: string; attachment: MediaAttachment; reason: string; evidenceStamp: string; warning?: string };
 export type ProductMatch = ProductChoice & { search_match?: { field: string; value: string } | null };
 export type MediaTaskIntent = { intent: 'assign' | 'query' | 'unclear'; target_text: string; file_name: string; all_files: boolean; needs_clarification: boolean };
 
@@ -80,9 +80,17 @@ function makeTask(item: MediaItem, groupId: string, variantId: string | null, ta
   const attachment: MediaAttachment = item.mime_type.startsWith('image/')
     ? { kind: 'image', product_group_id: groupId, product_variant_id: variantId, set_thumbnail: false }
     : { kind: 'document', product_group_id: groupId, product_variant_id: variantId, document_type: 'other' };
-  return { itemId: item.id, fileName: item.source_path, targetName, attachment, reason, warning };
+  return { itemId: item.id, fileName: item.source_path, targetName, attachment, reason, evidenceStamp: evidenceStamp(item), warning };
+}
+
+function evidenceStamp(item: MediaItem): string {
+  return JSON.stringify({ status: item.status,
+    candidates: item.candidates.map((candidate) => [candidate.groupId, candidate.variantId,
+      candidate.evidence.map((entry) => [entry.source, entry.field, entry.value])]),
+    analysis: item.local_analysis ? [item.local_analysis.model, item.local_analysis.observed_codes,
+      item.local_analysis.visible_text, item.local_analysis.uncertainty] : null });
 }
 
 export function taskIsCurrent(task: MediaTask, detail: MediaBatchDetail | null): boolean {
-  return Boolean(detail?.items.some((item) => item.id === task.itemId && !['applied', 'skipped'].includes(item.status)));
+  return Boolean(detail?.items.some((item) => item.id === task.itemId && evidenceStamp(item) === task.evidenceStamp));
 }

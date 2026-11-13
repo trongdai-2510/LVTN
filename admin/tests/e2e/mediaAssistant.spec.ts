@@ -544,6 +544,60 @@ test('Songbot prepares and assigns every file only when admin explicitly says al
   expect(mock.getApplied()).toBe(1);
 });
 
+test('Songbot keeps the multi-file worklist and pending apply action in the chat', async ({ page, request }, testInfo) => {
+  await seedAdmin(page, request);
+  const mock = await mockConversationAssignment(page);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  await assistant.locator('input[type="file"]').first().setInputFiles([
+    { name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+    { name: 'side.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }
+  ]);
+  const list = assistant.getByRole('region', { name: 'Danh sách file trong công việc hiện tại' });
+  await expect(list).toBeVisible();
+  await expect(list).toContainText('front.jpg');
+  await expect(list).toContainText('side.jpg');
+  await expect(list).toContainText('Cần chọn sản phẩm');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assistant.screenshot({ path: testInfo.outputPath('songbot-worklist-mobile.png'), animations: 'disabled' });
+  await list.getByRole('button', { name: /side.jpg/ }).click();
+  const review = assistant.getByRole('region', { name: 'Kiểm tra file trong trợ lý' });
+  await review.getByLabel('Tìm sản phẩm khác').fill('ABC-100');
+  await review.getByRole('button', { name: 'Tìm', exact: true }).click();
+  await review.getByRole('button', { name: /Sản phẩm A/ }).click();
+  await review.getByRole('button', { name: 'Xác nhận gán file' }).click();
+  await review.getByRole('button', { name: 'Trở lại công việc' }).click();
+  await expect(assistant.getByRole('button', { name: 'Áp dụng 1 file', exact: true })).toBeVisible();
+  expect(mock.getApplied()).toBe(0);
+  await assistant.getByRole('button', { name: 'Áp dụng 1 file', exact: true }).click();
+  await expect(assistant.getByText(/Đã gán 1 file vào sản phẩm/)).toBeVisible();
+  expect(mock.getApplied()).toBe(1);
+  await assistant.getByRole('button', { name: 'Danh sách file' }).click();
+  await expect(list.getByRole('button', { name: /side.jpg/ })).toContainText('Đã gán');
+  await expect(list.getByRole('button', { name: /front.jpg/ })).toContainText('Cần chọn sản phẩm');
+});
+
+test('Songbot removes a proposal before reading more files', async ({ page, request }) => {
+  await seedAdmin(page, request);
+  await mockConversationAssignment(page, true);
+  await page.goto('/admin/dashboard');
+  await page.getByRole('button', { name: 'Mở trợ lý sản phẩm' }).click();
+  const assistant = page.getByRole('dialog', { name: 'Trợ lý sản phẩm' });
+  await assistant.getByLabel('Hỏi trợ lý sản phẩm').fill('Gắn tất cả file cho sản phẩm ABC-100');
+  await assistant.locator('input[type="file"]').first().setInputFiles([
+    { name: 'front.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+    { name: 'side.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+    { name: 'label.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }
+  ]);
+  const plan = assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' });
+  await expect(plan).toContainText('label.jpg');
+  await assistant.getByRole('button', { name: 'Robot đọc 1 file tiếp' }).click();
+  await expect(plan).toHaveCount(0);
+  await expect(assistant.getByText(/Đề xuất gán cũ đã được bỏ/)).toBeVisible();
+  await expect(assistant.getByRole('region', { name: 'Danh sách file trong công việc hiện tại' })).toBeVisible();
+});
+
 for (const instructionFirst of [false, true]) {
   test(`Songbot assigns an uploaded image after consent (${instructionFirst ? 'instruction with file' : 'product reply'})`, async ({ page, request }, testInfo) => {
     await seedAdmin(page, request);

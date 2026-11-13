@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isAssignmentRequest, likelyTaskSpeech, meansAllFiles, requestedProduct, taskProductHint, targetFromCandidates, targetFromSearch } from '../../src/features/mediaAssistant/mediaTask.ts';
+import { isAssignmentRequest, likelyTaskSpeech, meansAllFiles, requestedProduct, taskIsCurrent, taskProductHint, targetFromCandidates, targetFromSearch } from '../../src/features/mediaAssistant/mediaTask.ts';
 
 const item = {
   id: 'file-1', source_path: 'ABC-100/front.jpg', mime_type: 'image/jpeg', status: 'suggested',
@@ -42,4 +42,13 @@ test('a conflicting code blocks an unsolicited assignment proposal', () => {
   const conflicting = { ...item, local_analysis: { observed_codes: ['XYZ-200'] } };
   assert.equal(targetFromCandidates(conflicting, ''), null);
   assert.match(targetFromCandidates(conflicting, 'ABC-100')?.warning ?? '', /XYZ-200/);
+});
+
+test('a proposal expires when AI reads new evidence for the same file', () => {
+  const task = targetFromCandidates(item, 'ABC-100');
+  assert.ok(task);
+  assert.equal(taskIsCurrent(task, { items: [item] }), true);
+  assert.equal(taskIsCurrent(task, { items: [{ ...item, local_analysis: { observed_codes: ['XYZ-200'] } }] }), false);
+  assert.equal(taskIsCurrent(task, { items: [{ ...item, local_analysis: { observed_codes: [], visible_text: [] } }] }), false);
+  assert.equal(taskIsCurrent(task, { items: [{ ...item, status: 'applied' }] }), false);
 });

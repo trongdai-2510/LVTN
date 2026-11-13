@@ -90,6 +90,24 @@
 .batchStats span + span::before { content: '·'; margin-right: 9px; color: #9bb0bf; }
 .batch button { display: grid; flex: none; place-items: center; min-height: 40px; padding: 0 12px; border: 1px solid #b9d2e2; border-radius: 8px; background: #fff; color: #145f9f; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .batch button:hover { border-color: #7fb0d0; background: #edf6fb; }
+.worklist { flex: none; min-height: 0; max-height: min(245px, 34dvh); overflow: hidden; border-bottom: 1px solid #dce7ed; background: #fbfdfe; }
+.worklistHeading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 20px 7px; color: #23445b; font-size: 12px; }
+.worklistHeading span { color: #667f91; font-size: 11px; }
+.worklistItems { max-height: 202px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.worklistItem { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; width: 100%; min-height: 54px; padding: 7px 20px; border: 0; border-top: 1px solid #edf1f4; background: transparent; color: #1c3345; font: inherit; text-align: left; cursor: pointer; }
+.worklistItem:hover, .worklistItem:focus-visible { background: #edf6fa; }
+.worklistFile { grid-column: 1; overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.worklistDetail { grid-column: 1; overflow: hidden; color: #6b8090; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.worklistStatus { grid-column: 2; grid-row: 1 / span 2; padding: 4px 7px; border-radius: 6px; background: #eaf1f5; color: #4b6d82; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.worklistStatus[data-status='applied'] { background: #e6f5ed; color: #236a4d; }
+.worklistStatus[data-status='failed'], .worklistStatus[data-status='unmatched'] { background: #f9f0e4; color: #855b25; }
+.pendingApply { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 10px; min-height: 62px; padding: 9px 20px; border-bottom: 1px solid #c8dce8; background: #eef7fa; }
+.pendingApply span { min-width: 0; }
+.pendingApply strong, .pendingApply small { display: block; }
+.pendingApply strong { color: #214359; font-size: 12px; }
+.pendingApply small { margin-top: 2px; color: #607b8d; font-size: 11px; }
+.pendingApply button { flex: none; min-height: 40px; padding: 7px 12px; border: 0; border-radius: 8px; background: #145f9f; color: #fff; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pendingApply button:disabled { opacity: .5; cursor: not-allowed; }
 .dropHint { position: sticky; z-index: 3; top: 8px; display: grid; place-items: center; min-height: 78px; margin: 8px 0; border: 2px dashed #6d9fc0; border-radius: 12px; background: #eaf5fb; color: #145f9f; font-size: 13px; font-weight: 700; }
 
 .suggestions { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; margin: 20px 0 0 78px; }
@@ -204,6 +222,8 @@
   .panel, .panel[data-mode='welcome'], .panel[data-mode='welcome'][data-has-batch='true'], .panel[data-expanded='true'], .panel[data-review='true'] { top: 0; right: auto; bottom: 0; left: 0; width: 100vw; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
   .body { padding: 0 16px 18px; }
   .batch { padding-inline: 16px; }
+  .worklistHeading, .worklistItem { padding-inline: 16px; }
+  .pendingApply { padding-inline: 16px; }
   .batchStats { gap: 2px 7px; }
   .batchStats span + span::before { margin-right: 6px; }
   .taskPlanHeader { padding-inline: 16px; }
