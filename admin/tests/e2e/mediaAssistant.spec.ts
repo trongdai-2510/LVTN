@@ -313,10 +313,16 @@ test('admin reviews a suggested image before applying the batch', async ({ page,
   await review.getByRole('button', { name: 'Xác nhận gán file' }).click();
   await expect(assistant.getByRole('button', { name: 'Áp dụng 1 file đã xác nhận' })).toBeVisible();
   await assistant.screenshot({ path: testInfo.outputPath('assistant-confirmed-mobile.png'), animations: 'disabled' });
+  await review.getByRole('button', { name: 'Sửa lựa chọn cho file này' }).click();
+  await expect(review.getByRole('button', { name: 'Xác nhận gán file' })).toBeVisible();
+  await review.getByRole('button', { name: 'Xác nhận gán file' }).click();
+  await expect(review.getByRole('button', { name: 'Sửa lựa chọn cho file này' })).toBeVisible();
   await assistant.getByRole('button', { name: 'Áp dụng 1 file đã xác nhận' }).click();
   await expect(review.getByText('Ảnh sản phẩm · Đã gán')).toBeVisible();
+  await expect(review.getByText('Đã gán file vào sản phẩm')).toBeVisible();
+  await assistant.screenshot({ path: testInfo.outputPath('assistant-applied-mobile.png'), animations: 'disabled' });
   await expect(page).toHaveURL(/\/admin\/dashboard$/);
-  await review.getByRole('button', { name: 'Trở lại trò chuyện' }).click();
+  await review.getByRole('button', { name: 'Trở lại công việc' }).click();
   await expect(assistant.getByText('Đã gán 1 file vào sản phẩm.')).toBeVisible();
   await page.getByLabel('Hỏi trợ lý sản phẩm').fill('Vì sao file này được gợi ý?');
   await page.getByRole('button', { name: 'Gửi', exact: true }).click();
@@ -513,7 +519,7 @@ test('Songbot answers a question about missing images without treating it as an 
   expect(mock.taskPrompts).toEqual(['Cho tôi xem sản phẩm nào thiếu ảnh trước khi gán']);
 });
 
-test('Songbot prepares and assigns every file only when admin explicitly says all files', async ({ page, request }) => {
+test('Songbot prepares and assigns every file only when admin explicitly says all files', async ({ page, request }, testInfo) => {
   await seedAdmin(page, request);
   const mock = await mockConversationAssignment(page);
   await page.goto('/admin/dashboard');
@@ -527,6 +533,10 @@ test('Songbot prepares and assigns every file only when admin explicitly says al
   const plan = assistant.getByRole('region', { name: 'Việc Songbot chuẩn bị' });
   await expect(plan).toContainText('front.jpg');
   await expect(plan).toContainText('side.jpg');
+  await page.setViewportSize({ width: 320, height: 720 });
+  await expect(plan.getByRole('button', { name: 'Đồng ý gán 2 file' })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await assistant.screenshot({ path: testInfo.outputPath('assistant-two-files-mobile.png'), animations: 'disabled' });
   expect(mock.getApplied()).toBe(0);
   await plan.getByRole('button', { name: 'Đồng ý gán 2 file' }).click();
   await expect(assistant.getByText('Xong rồi. Mình đã gán 2 file vào sản phẩm như bạn đồng ý.')).toBeVisible();

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { endpoints } from '@/lib/api-endpoints';
 import { PERMISSIONS } from '@/lib/permissions';
+import { AdminFileThumbnail } from '@/features/website-content/AdminFileThumbnail';
 import { AssistantMascot, type MascotState } from './AssistantMascot';
 import { MediaItemCard } from './MediaItemCard';
 import { mediaBatchLabel } from './mediaBatchLabel';
@@ -473,6 +474,7 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
   if (!allowed) return null;
   const reviewItem = detail?.items.find((item) => item.id === reviewItemId);
   const confirmedCount = detail?.items.filter((item) => item.status === 'confirmed').length ?? 0;
+  const appliedCount = detail?.items.filter((item) => item.status === 'applied').length ?? 0;
   const reviewCanConfirm = reviewItem?.mime_type.startsWith('image/')
     ? permissions.includes(PERMISSIONS.productGroupUpdate) : permissions.includes(PERMISSIONS.technicalDocumentCreate);
   const canApplyConfirmed = detail?.items.every((item) => item.status !== 'confirmed' ||
@@ -484,8 +486,8 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
     permissions.includes(task.attachment.kind === 'image' ? PERMISSIONS.productGroupUpdate : PERMISSIONS.technicalDocumentCreate));
   const unresolved = detail?.items.filter((item) => ['pending', 'suggested', 'unmatched', 'failed'].includes(item.status)) ?? [];
   const unread = unresolved.filter((item) => !item.local_analysis && item.mime_type !== 'image/svg+xml');
+  const itemsById = new Map(detail?.items.map((item) => [item.id, item]) ?? []);
   const usableBatches = batches.filter((batch) => (batch.item_count ?? 0) > 0);
-  const latestAssistantId = [...messages].reverse().find((message) => message.role === 'assistant')?.id;
   const onImportDetail = /\/import\/[0-9a-f-]{36}\/?$/i.test(pathname ?? '');
   const welcomeTitle = detail?.items.length
     ? unresolved.length ? `Mình thấy ${unresolved.length} file cần bạn xem.` : 'Lượt file này đã xử lý xong.'
@@ -514,9 +516,17 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         <button ref={closeRef} type="button" onClick={close} aria-label="Đóng trợ lý" className={styles.close}>×</button>
       </header>
 
-      {detail && detail.items.length > 0 && !reviewItem && <div className={styles.batch}>
-        <div><span className={styles.batchLabel}>Lượt file đang xem</span><strong title={mediaBatchLabel(detail.batch)}>{mediaBatchLabel(detail.batch)}</strong>
-          <span>{detail.items.length} file · {unresolved.length} cần xem</span></div>
+      {detail && detail.items.length > 0 && !reviewItem && <div className={styles.batch} aria-label="Tiến độ lượt file">
+        <div className={styles.batchMain}>
+          <span className={styles.batchLabel}>CÔNG VIỆC HIỆN TẠI</span>
+          <strong title={mediaBatchLabel(detail.batch)}>{mediaBatchLabel(detail.batch)}</strong>
+          <div className={styles.batchStats}>
+            <span>{detail.items.length} file đã nhận</span>
+            {unresolved.length > 0 && <span>{unresolved.length} cần xem</span>}
+            {confirmedCount > 0 && <span>{confirmedCount} chờ gán</span>}
+            {appliedCount > 0 && <span>{appliedCount} đã gán</span>}
+          </div>
+        </div>
         <button type="button" onClick={() => setReviewItemId((unresolved[0] ?? detail.items[0]).id)}>Xem file</button>
       </div>}
 
@@ -525,23 +535,29 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
         onDrop={(event) => { event.preventDefault(); setDragging(false); if (canUpload) void intake(Array.from(event.dataTransfer.files)); }}>
         {reviewItem && <section className={styles.reviewMode} aria-label="Kiểm tra file trong trợ lý">
-          <button ref={reviewBackRef} type="button" className={styles.reviewBack} onClick={() => setReviewItemId('')}>Trở lại trò chuyện</button>
-          <div className={styles.reviewIntro}>
-            <AssistantMascot state={robotState} size={56} paused />
-            <div><strong>{reviewItem.candidates.length === 1 ? 'Mình có một gợi ý cho file này' : reviewItem.candidates.length > 1 ? 'Mình thấy vài sản phẩm có thể khớp' : 'Mình chưa tìm được sản phẩm phù hợp'}</strong><p>So lại file và sản phẩm. Bạn quyết định trước khi mình gắn.</p></div>
+          <div className={styles.reviewToolbar}>
+            <button ref={reviewBackRef} type="button" className={styles.reviewBack} onClick={() => setReviewItemId('')}>← Trở lại công việc</button>
+            <span>File {(detail?.items.findIndex((item) => item.id === reviewItem.id) ?? 0) + 1}/{detail?.items.length ?? 1}</span>
           </div>
+          <div className={styles.reviewIntro}>
+            <span className={styles.reviewKicker}>{reviewItem.status === 'applied' ? 'ĐÃ HOÀN TẤT' : reviewItem.status === 'confirmed' ? 'CHỜ ÁP DỤNG' : 'KIỂM TRA TRƯỚC KHI GÁN'}</span>
+            <h3>{reviewItem.source_path.split('/').at(-1)}</h3>
+            <p>{reviewItem.status === 'applied' ? 'File đã được gắn vào sản phẩm. Xem kết quả bên dưới.'
+              : reviewItem.status === 'confirmed' ? 'Đích gán đã được lưu. Bấm Áp dụng để hoàn tất, hoặc sửa lựa chọn ở dưới.'
+                : reviewItem.candidates.length === 1 ? 'Songbot đã tìm một sản phẩm có thể khớp. So mã trong file với gợi ý bên dưới.'
+                  : reviewItem.candidates.length > 1 ? 'Có nhiều sản phẩm có thể khớp. Chọn đúng đích gán sau khi xem file.' : 'Chưa có sản phẩm phù hợp. Bạn có thể để Songbot đọc file hoặc tìm bằng mã sản phẩm.'}</p>
+          </div>
+          {detail && detail.items.length > 1 && <div className={styles.reviewNext}>
+            <label htmlFor="assistant-review-next">Chuyển file đang kiểm tra</label>
+            <select id="assistant-review-next" value={reviewItem.id} onChange={(event) => setReviewItemId(event.target.value)}>
+              {detail.items.map((item) => <option key={item.id} value={item.id}>{item.source_path} · {item.status === 'applied' ? 'Đã gán' : item.status === 'confirmed' ? 'Chờ gán' : 'Cần xem'}</option>)}
+            </select>
+          </div>}
           {busy && <p role="status" className={styles.reviewProgress}>{progress || 'Mình đang xử lý file.'}</p>}
           {error && <p role="alert" className={styles.error}>{error}</p>}
           <MediaItemCard key={reviewItem.id} item={reviewItem} embedded canConfirm={Boolean(reviewCanConfirm)}
             canAnalyzeLocally={Boolean(status?.available) && ['pending', 'suggested', 'unmatched'].includes(reviewItem.status) && !reviewItem.local_analysis && reviewItem.mime_type !== 'image/svg+xml'}
             busy={busy} onConfirm={confirmItem} onAnalyzeLocally={analyzeOne} />
-          {detail && detail.items.length > 1 && <div className={styles.reviewNext}>
-            <label htmlFor="assistant-review-next">Chuyển sang file khác trong lượt này</label>
-            <select id="assistant-review-next" value="" onChange={(event) => { if (event.target.value) setReviewItemId(event.target.value); }}>
-              <option value="">Chọn file…</option>
-              {detail.items.filter((item) => item.id !== reviewItem.id).map((item) => <option key={item.id} value={item.id}>{item.source_path} · {item.status === 'applied' ? 'Đã gán' : item.status === 'confirmed' ? 'Đã xác nhận' : 'Cần xem'}</option>)}
-            </select>
-          </div>}
         </section>}
         {!reviewItem && <>
         {dragging && <div className={styles.dropHint}>Thả ảnh hoặc PDF để mình bắt đầu</div>}
@@ -560,13 +576,10 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         </div>}
 
         {messages.map((message) => <div key={message.id} className={`${styles.message} ${message.role === 'user' ? styles.userMessage : styles.assistantMessage} ${message.illustration ? styles.resultMessage : ''}`}>
-          {message.illustration ? <div className={styles.resultIntro}>
-            <span className={styles.resultRobot}><AssistantMascot state={message.id === latestAssistantId ? robotState : message.illustration} size={52} paused={busy || message.id !== latestAssistantId} /></span>
-            <strong>{message.illustration === 'happy' ? 'Mình đã chuẩn bị gợi ý' : 'Mình đã nhận file, có chỗ cần xem lại'}</strong>
-          </div> : message.role === 'assistant' ? <div className={styles.messageByline}>
-            <AssistantMascot state="idle" size={42} paused />
+          {message.role === 'assistant' && <div className={styles.messageByline}>
+            <span className={styles.messageMark} aria-hidden="true" />
             <span className={styles.messageAuthor}>Songbot</span>
-          </div> : null}
+          </div>}
           <p>{message.text}</p>
           {message.references?.length ? <div className={styles.referenceList}>
             {message.references.map((id) => {
@@ -581,24 +594,9 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
           </div> : null}
           {message.products?.length ? <div className={styles.products}>{message.products.map((product) => <Link key={product.id} href={`/product-groups/${product.id}`} onClick={close}>{product.name}</Link>)}</div> : null}
         </div>)}
-        {proposedCurrent.length > 0 && !reviewItem && <section className={styles.taskPlan} aria-label="Việc Songbot chuẩn bị">
-          <div className={styles.taskPlanHeader}><strong>Songbot chuẩn bị gán</strong><span>{proposedCurrent.length} file</span></div>
-          <div className={styles.taskPlanItems}>{proposedCurrent.map((task) => <div key={task.itemId} className={styles.taskPlanItem}>
-            <button type="button" onClick={() => setReviewItemId(task.itemId)} disabled={busy}>
-              <strong>{task.fileName}</strong><span>→ {task.targetName}</span>
-            </button>
-            <small>{task.reason}</small>
-            {task.warning && <p className={styles.taskWarning}>{task.warning}</p>}
-          </div>)}</div>
-          {otherConfirmed > 0 && <p className={styles.taskWarning}>Lượt này còn {otherConfirmed} file đã xác nhận trước đó. Hãy xử lý các file đó trước khi đồng ý việc mới.</p>}
-          <div className={styles.taskPlanActions}>
-            <button type="button" onClick={() => { setPendingItemIds(proposedCurrent.map((task) => task.itemId)); setProposedTasks([]); append('assistant', 'Bạn gửi mã hoặc tên sản phẩm đúng, mình sẽ chuẩn bị lại việc gán.', { scope: 'batch' }); }} disabled={busy} className={styles.taskCancel}>Đổi sản phẩm</button>
-            <button type="button" onClick={() => void approveTaskPlan()} disabled={busy || !canApproveProposed} className={styles.taskApprove}>Đồng ý gán {proposedCurrent.length} file</button>
-          </div>
-        </section>}
         {busy && <div role="status" className={styles.activity}>
-          <span className={styles.activityRobot}><AssistantMascot state={robotState} size={64} /></span>
-          <span className={styles.activityCopy}><strong>{activityTitle}</strong><small>{progress || 'Mình đang tra dữ liệu trong project.'}</small></span>
+          <span className={styles.activityRobot}><AssistantMascot state={robotState} size={56} /></span>
+          <span className={styles.activityCopy}><strong>{activityTitle}</strong><small>{progress || 'Mình đang tra dữ liệu trong project.'}</small><span className={styles.activityTrack} aria-hidden="true"><i /></span></span>
           <span className={styles.activityDots} aria-hidden="true"><i /><i /><i /></span>
         </div>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -610,8 +608,32 @@ export function FloatingMediaAssistant({ permissions }: { permissions: string[] 
         </>}
       </div>
 
+      {proposedCurrent.length > 0 && !reviewItem && <section className={styles.taskPlan} aria-label="Việc Songbot chuẩn bị">
+        <div className={styles.taskPlanHeader}>
+          <div><span className={styles.taskPlanKicker}>CHỜ BẠN XÁC NHẬN</span><strong>Songbot đã tìm được đích gán</strong></div>
+          <span className={styles.taskPlanCount}>{proposedCurrent.length} file</span>
+        </div>
+        <div className={styles.taskPlanItems}>{proposedCurrent.map((task) => {
+          const item = itemsById.get(task.itemId);
+          return <div key={task.itemId} className={styles.taskPlanItem}>
+            <button type="button" onClick={() => setReviewItemId(task.itemId)} disabled={busy} aria-label={`Xem ${task.fileName} và sản phẩm ${task.targetName}`}>
+              {item && <span className={styles.taskFilePreview}><AdminFileThumbnail file={{ id: item.file_id, original_filename: item.original_filename, mime_type: item.mime_type }} alt="" className="h-full w-full object-contain" /></span>}
+              <span className={styles.taskPair}><strong>{task.fileName.split('/').at(-1)}</strong><span>Gán vào {task.targetName}</span></span>
+              <span className={styles.taskInspect} aria-hidden="true">Xem</span>
+            </button>
+            <small>{task.reason}</small>
+            {task.warning && <p className={styles.taskWarning}>{task.warning}</p>}
+          </div>;
+        })}</div>
+        {otherConfirmed > 0 && <p className={styles.taskWarning}>Lượt này còn {otherConfirmed} file đã xác nhận trước đó. Hãy xử lý các file đó trước khi đồng ý việc mới.</p>}
+        <div className={styles.taskPlanActions}>
+          <button type="button" onClick={() => { setPendingItemIds(proposedCurrent.map((task) => task.itemId)); setProposedTasks([]); append('assistant', 'Bạn gửi mã hoặc tên sản phẩm đúng, mình sẽ chuẩn bị lại việc gán.', { scope: 'batch' }); }} disabled={busy} className={styles.taskCancel}>Đổi sản phẩm</button>
+          <button type="button" onClick={() => void approveTaskPlan()} disabled={busy || !canApproveProposed} className={styles.taskApprove}>Đồng ý gán {proposedCurrent.length} file</button>
+        </div>
+      </section>}
+
       {reviewItem && confirmedCount > 0 && <div className={styles.reviewApply}>
-        <p>{confirmedCount} file đã xác nhận, đang chờ gắn vào sản phẩm.</p>
+        <p><strong>Đã xác nhận {confirmedCount} file.</strong> Bước cuối: gắn vào sản phẩm.</p>
         <button type="button" disabled={busy || !canApplyConfirmed} onClick={() => void applyBatch()}>Áp dụng {confirmedCount} file đã xác nhận</button>
       </div>}
       {!reviewItem && <form onSubmit={(event) => { event.preventDefault(); void ask(question); }} className={styles.composer}>
