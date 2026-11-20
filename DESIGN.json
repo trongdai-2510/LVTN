@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-14T01:09:56Z",
+  "title": "Song Thanh — Quy tắc giao diện",
+  "extensions": {
+    "colorMeta": {
+      "public-primary": {
+        "role": "primary",
+        "displayName": "Xanh website",
+        "tonalRamp": ["#001736", "#002d70", "#004ab4", "#126bd0", "#4c91e1", "#8cbaf0", "#c4dcf9", "#edf5ff"]
+      },
+      "admin-primary": {
+        "role": "primary",
+        "displayName": "Xanh quản trị",
+        "tonalRamp": ["#102337", "#0d4b80", "#145f9f", "#367bb0", "#6a9bc4", "#a4c2db", "#d7e6f2", "#f2f7fb"]
+      },
+      "ink-navy": {
+        "role": "neutral",
+        "displayName": "Xanh mực",
+        "tonalRamp": ["#07111d", "#0b1c30", "#263748", "#4a5b6c", "#788795", "#aab5bf", "#d7dde3", "#f3f5f7"]
+      },
+      "public-text": {
+        "role": "neutral",
+        "displayName": "Chữ website",
+        "tonalRamp": ["#090e18", "#0f172a", "#30394b", "#566073", "#838d9c", "#b2bac5", "#d9dfe6", "#f4f6f8"]
+      },
+      "admin-text": {
+        "role": "neutral",
+        "displayName": "Chữ quản trị",
+        "tonalRamp": ["#0b1522", "#132238", "#35445a", "#5b6b7e", "#8996a4", "#b6c0ca", "#dce2e8", "#f5f7f9"]
+      },
+      "public-canvas": {
+        "role": "neutral",
+        "displayName": "Nền website",
+        "tonalRamp": ["#1b2938", "#394857", "#607080", "#8998a7", "#b3bfca", "#d8dfe6", "#edf1f5", "#f8fafc"]
+      },
+      "admin-canvas": {
+        "role": "neutral",
+        "displayName": "Nền quản trị",
+        "tonalRamp": ["#1d2934", "#3e4b56", "#63727e", "#8998a4", "#b2bec7", "#d2dbe2", "#e8edf1", "#f3f6f9"]
+      },
+      "white-surface": {
+        "role": "neutral",
+        "displayName": "Mặt nội dung",
+        "tonalRamp": ["#1b2733", "#394857", "#5f6f7e", "#8795a2", "#aeb9c3", "#d0d8df", "#edf1f4", "#ffffff"]
+      },
+      "public-border": {
+        "role": "neutral",
+        "displayName": "Viền website",
+        "tonalRamp": ["#243648", "#42586b", "#657e91", "#8fa5b6", "#b4c6d3", "#d9e2ec", "#ebf0f4", "#f8fafc"]
+      },
+      "admin-border": {
+        "role": "neutral",
+        "displayName": "Viền quản trị",
+        "tonalRamp": ["#263544", "#455767", "#6a7e8f", "#93a6b5", "#b8c7d1", "#dce3ea", "#edf1f4", "#f9fbfc"]
+      }
+    },
+    "typographyMeta": {
+      "public-display": { "displayName": "Tiêu đề website", "purpose": "Tiêu đề trang và khu vực; giảm xuống 28/34 px ở điện thoại." },
+      "public-body": { "displayName": "Nội dung website", "purpose": "Đọc mô tả sản phẩm và nội dung tiếng Việt." },
+      "admin-body": { "displayName": "Nội dung quản trị", "purpose": "Biểu mẫu, bảng và trạng thái nghiệp vụ." },
+      "label": { "displayName": "Nhãn", "purpose": "Nhãn và metadata ngắn; không dùng thay nội dung chính." }
+    },
+    "shadows": [
+      { "name": "public-card", "value": "0 1px 2px rgb(15 23 42 / 0.06)", "purpose": "Tách nhẹ thẻ khỏi nền khi viền không đủ." },
+      { "name": "admin-soft", "value": "0 12px 28px rgb(15 23 42 / 0.07)", "purpose": "Lớp nổi của admin như dialog và popover." }
+    ],
+    "motion": [
+      { "name": "control", "value": "150ms ease-out", "purpose": "Phản hồi hover, focus và nhấn nút." },
+      { "name": "card", "value": "200ms ease-out", "purpose": "Chỉ đổi viền, màu hoặc dịch chuyển nhẹ khi hover; tắt trong reduced motion." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Website primary button",
+      "kind": "button",
+      "refersTo": "public-button-primary",
+      "description": "Một hành động chính cho một khu vực ngoài website.",
+      "html": "<button class=\"ds-public-primary\">Liên hệ Song Thanh</button>",
+      "css": ".ds-public-primary{min-height:48px;padding:12px 24px;border:0;border-radius:8px;background:#004ab4;color:#fff;font:600 15px 'Be Vietnam Pro',sans-serif;transition:background-color 150ms ease-out}.ds-public-primary:hover{background:#003d93}.ds-public-primary:focus-visible{outline:2px solid #004ab4;outline-offset:3px}"
+    },
+    {
+      "name": "Admin primary button",
+      "kind": "button",
+      "refersTo": "admin-button-primary",
+      "description": "Lưu hoặc xác nhận hành động chính trong admin.",
+      "html": "<button class=\"ds-admin-primary\">Lưu thay đổi</button>",
+      "css": ".ds-admin-primary{min-height:44px;padding:10px 16px;border:0;border-radius:8px;background:#145f9f;color:#f8fbff;font:600 14px 'Be Vietnam Pro',sans-serif;transition:background-color 150ms ease-out}.ds-admin-primary:hover{background:#0d4b80}.ds-admin-primary:focus-visible{outline:2px solid #145f9f;outline-offset:2px}"
+    },
+    {
+      "name": "Admin secondary button",
+      "kind": "button",
+      "description": "Hủy hoặc mở thao tác phụ mà không cạnh tranh với nút chính.",
+      "html": "<button class=\"ds-admin-secondary\">Hủy</button>",
+      "css": ".ds-admin-secondary{min-height:44px;padding:10px 16px;border:1px solid #dce3ea;border-radius:8px;background:#fff;color:#132238;font:500 14px 'Be Vietnam Pro',sans-serif;transition:background-color 150ms ease-out,border-color 150ms ease-out}.ds-admin-secondary:hover{background:#f8fafc;border-color:#145f9f}.ds-admin-secondary:focus-visible{outline:2px solid #145f9f;outline-offset:2px}"
+    },
+    {
+      "name": "Admin input",
+      "kind": "input",
+      "refersTo": "admin-input",
+      "description": "Trường nhập có nhãn rõ và viền focus dễ nhận biết.",
+      "html": "<label class=\"ds-field\">Tên vai trò<input class=\"ds-admin-input\" value=\"Quản trị nội dung\" /></label>",
+      "css": ".ds-field{display:grid;gap:6px;color:#132238;font:600 14px 'Be Vietnam Pro',sans-serif}.ds-admin-input{min-height:44px;width:100%;padding:10px 12px;border:1px solid #dce3ea;border-radius:4px;background:#fff;color:#132238;font:400 15px 'Be Vietnam Pro',sans-serif}.ds-admin-input:focus-visible{outline:2px solid #145f9f;outline-offset:1px}"
+    },
+    {
+      "name": "Selected filter chip",
+      "kind": "chip",
+      "description": "Bộ lọc có trạng thái chọn bằng chữ, màu và viền.",
+      "html": "<button class=\"ds-filter\" aria-pressed=\"true\">Đang có (60)</button>",
+      "css": ".ds-filter{min-height:44px;padding:8px 12px;border:1px solid #a4c2db;border-radius:999px;background:#eef3f7;color:#145f9f;font:600 12px 'Be Vietnam Pro',sans-serif}.ds-filter:hover{background:#d7e6f2}.ds-filter:focus-visible{outline:2px solid #145f9f;outline-offset:2px}"
+    },
+    {
+      "name": "Brand directory card",
+      "kind": "card",
+      "description": "Một logo thật và một tên thương hiệu, không lặp nội dung trong hero.",
+      "html": "<a class=\"ds-brand-card\" href=\"#\"><span class=\"ds-brand-logo\">LOGO</span><strong>THƯƠNG HIỆU</strong></a>",
+      "css": ".ds-brand-card{display:grid;gap:16px;padding:20px;border:1px solid #d9e2ec;border-radius:10px;background:#fff;color:#0b1c30;font:700 18px Archivo,sans-serif;text-decoration:none;transition:border-color 200ms ease-out,transform 200ms ease-out}.ds-brand-logo{display:grid;min-height:100px;place-items:center;color:#475569;font:600 14px 'Be Vietnam Pro',sans-serif}.ds-brand-card:hover{border-color:#004ab4;transform:translateY(-2px)}.ds-brand-card:focus-visible{outline:2px solid #004ab4;outline-offset:3px}@media(prefers-reduced-motion:reduce){.ds-brand-card{transition:none}.ds-brand-card:hover{transform:none}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Song Thanh hiện đại, đáng tin",
+    "overview": "Giữ nhận diện xanh–trắng hiện có, nhưng làm gọn nội dung, cân lại khoảng trắng và để hình ảnh sản phẩm thật dẫn nhịp. Website cần cảm giác của một doanh nghiệp hiện đại, chuyên nghiệp và dễ tiếp cận; admin ưu tiên nhìn rõ trạng thái, quyền và hành động kế tiếp. Không dùng mô-típ nhà máy hay bảng điều khiển cơ khí làm phong cách giao diện.",
+    "keyCharacteristics": ["hiện đại", "đáng tin", "mạch lạc", "hình ảnh và dữ liệu thật trước trang trí", "trạng thái công khai và nội bộ không lẫn nhau"],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Mỗi khu vực chỉ có một hành động chính màu xanh; các hành động phụ dùng nền trắng hoặc chữ.", "section": "colors" },
+      { "name": "The Readable Vietnamese Rule", "body": "Không dùng uppercase, tracking rộng hoặc chữ 10–11 px cho thông tin cần ra quyết định; kiểm tra dấu tiếng Việt và ngắt dòng ở 390 px.", "section": "typography" },
+      { "name": "The Flat By Default Rule", "body": "Nếu một thẻ chỉ chứa một nhãn và một giá trị, ưu tiên hàng thông tin thay vì hộp nổi riêng.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do hiển thị dữ liệu, ảnh và trạng thái thật; phân biệt bản nháp, duyệt nội bộ và hiển thị website.",
+      "Do giữ thao tác quan trọng trong tầm nhìn và báo kết quả sau khi lưu.",
+      "Do kiểm tra các route chính ở 390, 1440 và 2560 px, cùng kiểm tra bàn phím và tên truy cập."
+    ],
+    "donts": [
+      "Don't dùng mô-típ ecommerce-heavy: giỏ hàng, checkout, giảm giá giả, khan hàng giả hoặc mật độ sàn thương mại.",
+      "Don't dùng generic AI-looking layouts, thẻ trang trí quá khổ hoặc gradient-heavy SaaS pages.",
+      "Don't viết khẳng định “official distributor”, quan hệ chiến lược hay dự án đã dùng sản phẩm khi không có nguồn dữ liệu xác minh.",
+      "Don't lặp helptext, dùng dải màu ở cạnh trái như trang trí mặc định, hoặc giấu thao tác trong menu không cần thiết.",
+      "Don't dùng hình khối, chữ siêu đậm, nền kim loại hay mô-típ nhà máy để biểu thị ngành hàng."
+    ]
+  }
+}

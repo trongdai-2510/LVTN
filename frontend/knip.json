@@ -1,0 +1,11 @@
+{
+  "entry": [
+    "src/app/**/{page,layout,loading,error,not-found,template,default,route,sitemap,robots,manifest,icon,apple-icon,opengraph-image,twitter-image}.{ts,tsx}",
+    "src/{middleware,proxy,instrumentation}.{ts,tsx}",
+    "tests/**/*.mjs",
+    "next.config.ts",
+    "tailwind.config.ts",
+    "postcss.config.js"
+  ],
+  "project": ["src/**/*.{ts,tsx}"]
+}

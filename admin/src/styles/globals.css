@@ -1,0 +1,252 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-admin-sans: var(--font-be-vietnam-pro), "Be Vietnam Pro";
+  --font-admin-display: var(--font-archivo), Archivo;
+  --font-admin-mono: "SFMono-Regular";
+  --background: #f3f6f9;
+  --surface: #f8fafc;
+  --panel: #fcfdff;
+  --border: #dce3ea;
+  --primary: #145f9f;
+  --primary-hover: #0d4b80;
+  --primary-foreground: #f8fbff;
+  --sidebar: #102337;
+  --sidebar-active: #1c456c;
+  --muted: #eef3f7;
+  --muted-foreground: #4f6070;
+  --text: #132238;
+  --success: #24704a;
+  --warning: #9a6514;
+  --danger: #ad332c;
+  --info: #2f66a1;
+  --sidebar-width: 240px;
+  --topbar-height: 64px;
+  --content-width: 1840px;
+  --control-height: 44px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+}
+
+.admin-login {
+  --login-brand: #004ab4;
+  --login-brand-surface: #eaf1fb;
+  --login-canvas: #f3f6fb;
+  --login-ink: #0b1c30;
+  --login-muted: #536477;
+  --login-border: #d5dfeb;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --control-height: 40px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  min-height: 100%;
+  scrollbar-gutter: stable;
+  background: var(--background);
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--background);
+  font-family: var(--font-admin-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  text-rendering: geometricPrecision;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-admin-mono), "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: #d0e1fb;
+}
+
+.admin-sidebar-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #34364f transparent;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: #34364f;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+.admin-table-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.admin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-card-header {
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  padding: 14px 20px;
+}
+
+.admin-card-body {
+  padding: 16px 20px;
+}
+
+.admin-form-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.page-studio-fields > .space-y-4 {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.page-studio-fields > .space-y-4 > * {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.page-studio-fields > .space-y-4 > *:last-child {
+  border-bottom: 0;
+}
+
+[data-editor-attention="true"] {
+  animation: editor-attention 1.2s ease-out 2;
+  outline: 3px solid rgb(20 95 159 / 0.35);
+  outline-offset: 4px;
+}
+
+@keyframes editor-attention {
+  0%,
+  100% {
+    outline-color: rgb(20 95 159 / 0.25);
+  }
+  45% {
+    outline-color: rgb(20 95 159 / 0.8);
+  }
+}
+
+.admin-two-column-form {
+  display: grid;
+  align-items: start;
+  gap: 1rem;
+}
+
+@media (min-width: 1280px) {
+  .admin-two-column-form {
+    grid-template-columns: minmax(0, 1.6fr) minmax(340px, 0.95fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* RichTextEditor table styling — Tiptap không có style mặc định */
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  table-layout: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+.ProseMirror table td,
+.ProseMirror table th {
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+  min-width: 80px;
+  padding: 8px 10px;
+  position: relative;
+  vertical-align: top;
+}
+.ProseMirror table th {
+  background: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+.ProseMirror table .selectedCell:after {
+  background: rgba(59, 91, 219, 0.12);
+  content: '';
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+.ProseMirror .column-resize-handle {
+  background: var(--primary);
+  bottom: -2px;
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 4px;
+}
+.ProseMirror.resize-cursor {
+  cursor: ew-resize;
+}
+
+@media (max-width: 480px) {
+  html:has(#floating-media-assistant),
+  body:has(#floating-media-assistant) {
+    overflow: hidden;
+    scrollbar-width: none;
+  }
+
+  html:has(#floating-media-assistant)::-webkit-scrollbar,
+  body:has(#floating-media-assistant)::-webkit-scrollbar {
+    display: none;
+  }
+}

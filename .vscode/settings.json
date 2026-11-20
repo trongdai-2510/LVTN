@@ -1,0 +1,32 @@
+{
+  "files.exclude": {
+    "**/.next": true,
+    "**/.next-*": true,
+    "**/.next*stale": true,
+    "**/dist": true,
+    "**/node_modules": true,
+    "**/playwright-report": true,
+    "**/test-results": true,
+    "**/*.tsbuildinfo": true,
+    "tmp": true,
+    "songthanh-media.tar": true
+  },
+  "search.exclude": {
+    "**/.next*/**": true,
+    "**/dist/**": true,
+    "**/node_modules/**": true,
+    "**/playwright-report/**": true,
+    "**/test-results/**": true,
+    "tmp/**": true,
+    "songthanh-media.tar": true
+  },
+  "files.watcherExclude": {
+    "**/.next*/**": true,
+    "**/dist/**": true,
+    "**/node_modules/**": true,
+    "**/playwright-report/**": true,
+    "**/test-results/**": true,
+    "tmp/**": true,
+    "songthanh-media.tar": true
+  }
+}

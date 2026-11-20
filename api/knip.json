@@ -1,0 +1,16 @@
+{
+  "entry": [
+    "src/main.ts",
+    "scripts/**/*.{ts,js,mjs}",
+    "tests/**/*.ts",
+    "knexfile.js",
+    "migrations/*.js",
+    "seeds/*.js"
+  ],
+  "project": ["src/**/*.ts"],
+  "ignoreDependencies": [
+    "@nestjs/platform-express",
+    "@nestjs/schematics",
+    "pg"
+  ]
+}
